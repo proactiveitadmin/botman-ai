@@ -2,10 +2,6 @@ name: "Full AI Code Review"
 
 on:
   workflow_dispatch: {}   # ręczne odpalenie z zakładki Actions
-  # jeśli chcesz też przy pushu na main:
-  # push:
-  #   branches:
-  #     - main
 
 jobs:
   full-review:
@@ -34,93 +30,105 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
+          python - << 'EOF'
           import os
-          import textwrap
           from openai import OpenAI
 
           client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
 
           # Filtry plików – dodaj/usuń rozszerzenia według potrzeb
-          ALLOWED_EXT = {".py", ".js", ".ts", ".tsx", ".jsx", ".cs", ".java", ".go", ".php", ".rb", ".rs", ".cpp", ".c", ".h"}
+          ALLOWED_EXT = {
+              ".py", ".js", ".ts", ".tsx", ".jsx",
+              ".cs", ".java", ".go", ".php", ".rb",
+              ".rs", ".cpp", ".c", ".h"
+          }
 
           def should_review(path: str) -> bool:
-            if any(part.startswith(".git") for part in path.split(os.sep)):
-              return False
-            if "node_modules" in path or "dist" in path or "build" in path:
-              return False
-            _, ext = os.path.splitext(path)
-            return ext in ALLOWED_EXT
+              parts = path.split(os.sep)
+              if any(part.startswith(".git") for part in parts):
+                  return False
+              if "node_modules" in parts or "dist" in parts or "build" in parts:
+                  return False
+              _, ext = os.path.splitext(path)
+              return ext in ALLOWED_EXT
 
           # Zbierz pliki do review
           files = []
           for root, dirs, filenames in os.walk("."):
-            for name in filenames:
-              path = os.path.join(root, name)
-              if should_review(path):
-                files.append(path)
+              for name in filenames:
+                  path = os.path.join(root, name)
+                  if should_review(path):
+                      files.append(path)
 
           # Prosty chunking: 1 „paczka” = do ~20k znaków
           chunks = []
           current = ""
-          for path in files:
-            try:
-              with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
-            except Exception:
-              continue
+          MAX_CHUNK_SIZE = 20000
 
-            snippet = f"\n\n===== FILE: {path} =====\n{content}\n"
-            if len(current) + len(snippet) > 20000:  # proste cięcie
-              chunks.append(current)
-              current = snippet
-            else:
-              current += snippet
+          for path in files:
+              try:
+                  with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                      content = f.read()
+              except Exception:
+                  continue
+
+              snippet = f"\n\n===== FILE: {path} =====\n{content}\n"
+              if len(current) + len(snippet) > MAX_CHUNK_SIZE:
+                  if current:
+                      chunks.append(current)
+                  current = snippet
+              else:
+                  current += snippet
 
           if current:
-            chunks.append(current)
+              chunks.append(current)
 
           report_parts = []
 
           system_prompt = """Jesteś doświadczonym reviewerem kodu.
-Przejrzyj przekazany kod źródłowy z całego repozytorium (lub jego części) i:
-- Wypisz główne problemy jakościowe (czytelność, powtarzalny kod, brak podziału na moduły).
-- Wskaż potencjalne bugi lub ryzykowne miejsca.
-- Oceń architekturę/strukturę projektu (wysoki poziom).
-- Zaproponuj konkretne, praktyczne usprawnienia.
-Pisz po polsku. Używaj list punktowanych, nagłówków, konkretnych przykładów.
-"""
+          Przejrzyj przekazany kod źródłowy z całego repozytorium (lub jego części) i:
+          - Wypisz główne problemy jakościowe (czytelność, powtarzalny kod, brak podziału na moduły).
+          - Wskaż potencjalne bugi lub ryzykowne miejsca.
+          - Oceń architekturę/strukturę projektu (wysoki poziom).
+          - Zaproponuj konkretne, praktyczne usprawnienia.
+          Pisz po polsku. Używaj list punktowanych, nagłówków, konkretnych przykładów.
+          """
+
+          total_chunks = len(chunks)
 
           for i, chunk in enumerate(chunks, start=1):
-            print(f"=== Wysyłam chunk {i}/{len(chunks)} do OpenAI ===")
+              print(f"=== Wysyłam chunk {i}/{total_chunks} do OpenAI ===")
 
-            user_prompt = f"""
-To jest część kodu repozytorium (chunk {i}/{len(chunks)}). Zrób szczegółowy code review tylko na podstawie tego fragmentu.
+              user_prompt = f"""
+          To jest część kodu repozytorium (chunk {i}/{total_chunks}). Zrób szczegółowy code review tylko na podstawie tego fragmentu.
 
-Kod:
-{chunk}
-"""
+          Kod:
+          {chunk}
+          """
 
-            response = client.chat.completions.create(
-              model="gpt-4.0-mini",
-              messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-              ],
-              temperature=0.2,
-              max_tokens=1500,
-            )
+              response = client.chat.completions.create(
+                  model="gpt-4.1-mini",
+                  messages=[
+                      {"role": "system", "content": system_prompt},
+                      {"role": "user", "content": user_prompt},
+                  ],
+                  temperature=0.2,
+                  max_tokens=1500,
+              )
 
-            review_text = response.choices[0].message.content
-            report_parts.append(f"# Chunk {i}/{len(chunks)}\n\n{review_text}\n")
+              review_text = response.choices[0].message.content
+              report_parts.append(f"# Chunk {i}/{total_chunks}\n\n{review_text}\n")
 
           full_report = "\n\n---\n\n".join(report_parts)
 
           os.makedirs("review-output", exist_ok=True)
           with open("review-output/full_code_review.md", "w", encoding="utf-8") as f:
-            f.write(full_report)
+              f.write(full_report)
 
-          print("\\n\\n===== SKRÓCONY WYCIĄG Z RAPORTU =====\\n")
-          print("\\n".join(full_report.splitlines()[:200]))  # trochę podglądu w logach
+          print("\n\n===== SKRÓCONY WYCIĄG Z RAPORTU =====\n")
+          for line in full_report.splitlines()[:200]:
+              print(line)
+          EOF
 
       - name: Upload review report
         uses: actions/upload-artifact@v4
