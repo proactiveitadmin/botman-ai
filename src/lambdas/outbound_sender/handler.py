@@ -1,8 +1,17 @@
 import json
 from ...adapters.twilio_client import TwilioClient
+from ...common.aws import sqs_client, resolve_queue_url
+from ...common.security import verify_twilio_signature
 from ...common.logging import logger
+from ...common.logging_utils import mask_phone, shorten_body
+from ...services.spam_service import SpamService
+from ...services.metrics_service import MetricsService
+
 
 twilio = TwilioClient()
+spam_service = SpamService()
+metrics = MetricsService()
+
 
 def lambda_handler(event, context):
     records = event.get("Records", [])
@@ -26,7 +35,20 @@ def lambda_handler(event, context):
 
         try:
             res = twilio.send_text(to=to, body=text)
-            logger.info({"sender": "sent", "to": to, "body": text, "result": res})
+            res_status = res.get("status", "UNKNOWN")
+            tenant_id = payload.get("tenant_id", "default")
+            
+            
+            metrics.incr("message_sent", channel="whatsapp", status=res.get("status", "UNKNOWN"))
+            
+            logger.info({
+                "handler": "outbound_sender",
+                "event": "sent",
+                "to": mask_phone(to),
+                "body": shorten_body(text),
+                "tenant_id": tenant_id,
+                "result": res_status  # np. tylko HTTP status, nie cały response body z PII
+            })
         except Exception as e:
             logger.error({"sender": "twilio_fail", "err": str(e), "to": to})
 

@@ -186,6 +186,18 @@ def aws_stack(monkeypatch):
             [{"AttributeName": "pk", "AttributeType": "S"}],
             [{"AttributeName": "pk", "KeyType": "HASH"}],
         )
+        ensure_table(
+            "IntentsStats",
+            [
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+            ],
+            [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+        )
+
 
         yield {
             "inbound": inbound["QueueUrl"],

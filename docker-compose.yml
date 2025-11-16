@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs,s3,dynamodb
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=eu-central-1
+    volumes:
+      - ./.localstack:/var/lib/localstack
+    networks:
+      - localstack-net
+
+networks:
+  localstack-net:
+    name: localstack-net

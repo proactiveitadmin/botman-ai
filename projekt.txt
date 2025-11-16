@@ -1,0 +1,2210 @@
+﻿
+
+===== C:\ProActive\gym-integrator\scripts\manual_test_twilio.py =====
+
+from twilio.rest import Client
+import os
+
+sid = os.getenv("TWILIO_ACCOUNT_SID")
+token = os.getenv("TWILIO_AUTH_TOKEN")
+from_nr = os.getenv("TWILIO_WHATSAPP_NUMBER")
+to_nr = "whatsapp:+48694757634"
+
+client = Client(sid, token)
+msg = client.messages.create(
+    from_=from_nr,
+    to=to_nr,
+    body="TEST bezpoĹ›rednio z Twilio"
+)
+print(msg.sid, msg.status)
+
+
+===== C:\ProActive\gym-integrator\src\app.py =====
+
+from dotenv import load_dotenv
+load_dotenv()
+print("Use SAM to run locally. See README.md")
+
+
+===== C:\ProActive\gym-integrator\src\adapters\jira_client.py =====
+
+import base64, requests, json
+from ..common.config import settings
+from ..common.logging import logger
+
+class JiraClient:
+    def __init__(self):
+        self.url = settings.jira_url.rstrip("/") if settings.jira_url else ""
+        self.project = settings.jira_project_key
+
+    def _auth_header(self):
+        if ":" in settings.jira_token:
+            token = base64.b64encode(settings.jira_token.encode()).decode()
+            return {"Authorization": f"Basic {token}"}
+        return {}
+
+    def create_ticket(self, summary: str, description: str, tenant_id: str):
+        if not self.url:
+            logger.info({"jira": "dev", "summary": summary})
+            return {"ok": True, "ticket": "JIRA-DEV"}
+        endpoint = f"{self.url}/rest/api/3/issue"
+        payload = {
+            "fields": {
+                "project": {"key": self.project},
+                "summary": f"[{tenant_id}] {summary}",
+                "description": description,
+                "issuetype": {"name": "Task"}
+            }
+        }
+        headers = {"Content-Type": "application/json", **self._auth_header()}
+        r = requests.post(endpoint, headers=headers, data=json.dumps(payload), timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        return {"ok": True, "ticket": data.get("key", "JIRA-UNK")}
+
+
+===== C:\ProActive\gym-integrator\src\adapters\openai_client.py =====
+
+"""
+Adapter do OpenAI Chat Completions uĹĽywany jako NLU.
+
+UdostÄ™pnia metody:
+- chat / chat_async: surowe wywoĹ‚anie modelu z mechanizmem retry,
+- classify / classify_async: wygodny wrapper do klasyfikacji intencji.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, Any, Optional
+import json
+import time
+import random
+import asyncio
+
+from openai import OpenAI
+from openai import APIError, APIConnectionError, APIStatusError, RateLimitError
+
+from ..common.config import settings
+
+SYSTEM_PROMPT = """JesteĹ› klasyfikatorem intencji dla siĹ‚owni/fitness klubu.
+Zwracaj JSON o kluczach: intent (reserve_class|faq|handover|clarify|ticket), confidence (0..1), slots (dict).
+faq slots: {"topic": one of [hours, price, location, contact]}
+reserve_class slots: {"class_id": optional, "member_id": optional}
+"""
+
+_VALID_INTENTS = {"reserve_class", "faq", "handover", "clarify", "ticket"}
+
+
+class OpenAIClient:
+    """
+    Klient OpenAI uĹĽywany przez warstwÄ™ NLU.
+
+    Dba o poprawnÄ… konfiguracjÄ™, retry oraz zwracanie bezpiecznych fallbackĂłw,
+    gdy API jest niedostÄ™pne lub Ĺşle skonfigurowane.
+    """
+
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None) -> None:
+        """
+        Inicjalizuje klienta na podstawie przekazanego API key lub globalnych ustawieĹ„.
+
+        Args:
+            api_key: opcjonalny klucz do OpenAI; jeĹĽeli brak, uĹĽywa settings.openai_api_key
+            model: nazwa modelu, np. "gpt-4o-mini"; jeĹĽeli brak, uĹĽywa settings.llm_model
+        """
+        self.api_key = api_key or getattr(settings, "openai_api_key", None)
+        self.enabled = bool(self.api_key)
+        self.model = model or getattr(settings, "llm_model", "gpt-4o-mini")
+        self.client = OpenAI(api_key=self.api_key) if self.enabled else None
+
+    def _chat_once(
+        self,
+        messages: list[dict],
+        model: Optional[str] = None,
+        max_tokens: int = 256,
+    ) -> str:
+        """
+        Jednokrotne (bez retry) wywoĹ‚anie Chat Completions.
+
+        W trybie bez API key (dev/offline) zwraca prosty, bezpieczny JSON,
+        ktĂłry informuje dalszÄ… logikÄ™, ĹĽe trzeba dopytaÄ‡ uĹĽytkownika.
+        """
+        if not self.enabled or not self.client:
+            # tryb â€žbez AIâ€ť â€” bezpieczny fallback
+            user_msg = next(
+                (m["content"] for m in reversed(messages) if m.get("role") == "user"),
+                "",
+            )
+            return json.dumps(
+                {
+                    "intent": "clarify",
+                    "confidence": 0.49,
+                    "slots": {"echo": user_msg[:80]},
+                }
+            )
+
+        mdl = model or self.model
+        resp = self.client.chat.completions.create(
+            model=mdl,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.0,
+            max_tokens=max_tokens,
+        )
+        return resp.choices[0].message.content or "{}"
+
+    def chat(
+        self,
+        messages: list[dict],
+        model: Optional[str] = None,
+        max_tokens: int = 256,
+    ) -> str:
+        """
+        WywoĹ‚anie modelu z mechanizmem retry i bezpiecznym fallbackiem.
+
+        Retry dotyczy:
+          - RateLimitError,
+          - APIStatusError dla 429/5xx,
+          - APIConnectionError (problemy sieciowe).
+
+        BĹ‚Ä™dy konfiguracyjne (np. brak uprawnieĹ„, zĹ‚y model) nie sÄ… retryowane,
+        tylko powodujÄ… szybki powrĂłt z fallbackiem.
+        """
+        last_api_error: Optional[APIError] = None
+
+        for attempt in range(5):
+            try:
+                return self._chat_once(messages, model=model, max_tokens=max_tokens)
+            except RateLimitError:
+                time.sleep(min(2**attempt, 8) + random.uniform(0, 0.3))
+            except APIStatusError as e:
+                # 429/5xx -> retry, inne statusy -> nie ma sensu retry
+                status = getattr(e, "status_code", 0)
+                if status in (429, 500, 502, 503):
+                    time.sleep(min(2**attempt, 8) + random.uniform(0, 0.3))
+                else:
+                    last_api_error = e
+                    break
+            except APIConnectionError:
+                # problemy sieciowe â€” prĂłbujemy jeszcze raz
+                time.sleep(1.0 + random.uniform(0, 0.3))
+            except APIError as e:
+                # â€žlogicznyâ€ť bĹ‚Ä…d API â€” raczej nie ustÄ…pi po retry
+                last_api_error = e
+                break
+
+        # ostateczny fallback (json, ĹĽeby parser po drugiej stronie nie padĹ‚)
+        note = "LLM unavailable (retries exhausted)"
+        if last_api_error is not None:
+            note = f"LLM error: {type(last_api_error).__name__}"
+
+        return json.dumps(
+            {
+                "intent": "clarify",
+                "confidence": 0.3,
+                "slots": {"note": note},
+            }
+        )
+
+    async def chat_async(
+        self,
+        messages: list[dict],
+        model: Optional[str] = None,
+        max_tokens: int = 256,
+    ) -> str:
+        """
+        Asynchroniczna wersja chat, wykonujÄ…ca wywoĹ‚anie w wÄ…tku roboczym,
+        aby nie blokowaÄ‡ event loopa.
+        """
+        return await asyncio.to_thread(self.chat, messages, model, max_tokens)
+
+    def classify(self, text: str, lang: str = "pl") -> Dict[str, Any]:
+        """
+        Wygodny wrapper do klasyfikacji intencji.
+
+        Buduje prompt system/user, wywoĹ‚uje LLM i normalizuje wynik do postaci:
+        {"intent": ..., "confidence": ..., "slots": {...}}.
+        """
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"LANG={lang}\nTEXT={text}"},
+        ]
+        content = self.chat(messages, model=self.model, max_tokens=256)
+        return self._parse_classification(content)
+
+    async def classify_async(self, text: str, lang: str = "pl") -> Dict[str, Any]:
+        """
+        Asynchroniczna wersja classify, przydatna w potencjalnie asynchronicznych workerach.
+        """
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"LANG={lang}\nTEXT={text}"},
+        ]
+        content = await self.chat_async(messages, model=self.model, max_tokens=256)
+        return self._parse_classification(content)
+
+    def _parse_classification(self, content: str) -> Dict[str, Any]:
+        """
+        Normalizuje odpowiedĹş modelu do sĹ‚ownika o polach:
+        - intent: jedna z wartoĹ›ci _VALID_INTENTS (lub 'clarify' w razie bĹ‚Ä™du),
+        - confidence: float 0..1,
+        - slots: sĹ‚ownik z dodatkowymi informacjami.
+        """
+        try:
+            data = json.loads(content or "{}")
+        except Exception:
+            return {"intent": "clarify", "confidence": 0.3, "slots": {}}
+
+        intent = str(data.get("intent", "clarify")).strip()
+        if intent not in _VALID_INTENTS:
+            intent = "clarify"
+
+        # confidence -> float 0..1
+        try:
+            conf = float(data.get("confidence", 0.5))
+        except Exception:
+            conf = 0.5
+        conf = max(0.0, min(1.0, conf))
+
+        slots = data.get("slots") or {}
+        if not isinstance(slots, dict):
+            slots = {}
+
+        return {"intent": intent, "confidence": conf, "slots": slots}
+
+
+===== C:\ProActive\gym-integrator\src\adapters\perfectgym_client.py =====
+
+import requests
+from ..common.config import settings
+from ..common.logging import logger
+
+class PerfectGymClient:
+    def __init__(self):
+        self.base = settings.pg_base_url.rstrip("/") if settings.pg_base_url else ""
+
+    def _headers(self):
+        return {
+            "X-Client-id": settings.pg_client_id or "",
+            "X-Client-Secret": settings.pg_client_secret or "",
+            "Content-Type": "application/json"
+        }
+
+    def get_member(self, member_id: str):
+        if not self.base:
+            return {"member_id": member_id, "status": "Current", "balance": 0}
+        url = f"{self.base}/Members({member_id})?$expand=Contracts($filter=Status eq 'Current'),memberbalance"
+        r = requests.get(url, headers=self._headers(), timeout=10)
+        r.raise_for_status()
+        return r.json()
+
+    def reserve_class(self, member_id: str, class_id: str, idempotency_key: str):
+        if not self.base:
+            return {"ok": True, "reservation_id": f"r-{class_id}"}
+        url = f"{self.base}/Classes({class_id})/Reserve"
+        payload = {"MemberId": member_id}
+        headers = self._headers()
+        headers["Idempotency-Key"] = idempotency_key
+        r = requests.post(url, json=payload, headers=headers, timeout=10)
+        r.raise_for_status()
+        return r.json()
+
+
+===== C:\ProActive\gym-integrator\src\adapters\twilio_client.py =====
+
+from twilio.rest import Client
+from ..common.config import settings
+from ..common.logging import logger
+
+class TwilioClient:
+    def __init__(self):
+        # Klient jest aktywny tylko jeĹ›li oba klucze sÄ… ustawione
+        self.enabled = bool(settings.twilio_account_sid and settings.twilio_auth_token)
+        self.client = Client(settings.twilio_account_sid, settings.twilio_auth_token) if self.enabled else None
+
+    def send_text(self, to: str, body: str):
+        """
+        WysyĹ‚a wiadomoĹ›Ä‡ WhatsApp przez Twilio.
+        Automatycznie uĹĽywa Messaging Service SID, jeĹ›li jest skonfigurowany.
+        """
+        if not self.enabled:
+            logger.info({"msg": "Twilio disabled (dev mode)", "to": to, "body": body})
+            return {"status": "DEV_OK"}
+
+        try:
+            send_args = {
+                "to": to,
+                "body": body,
+            }
+
+            # JeĹ›li Messaging Service SID jest ustawiony â€” uĹĽywamy go zamiast from_
+            if getattr(settings, "twilio_messaging_sid", None):
+                send_args["messaging_service_sid"] = settings.twilio_messaging_sid
+            else:
+                send_args["from_"] = settings.twilio_whatsapp_number
+
+            message = self.client.messages.create(**send_args)
+
+            logger.info({
+                "msg": "Twilio sent",
+                "sid": message.sid,
+                "from": settings.twilio_messaging_sid if "messaging_service_sid" in send_args else settings.twilio_whatsapp_number,
+                "to": to,
+                "used": "messaging_service_sid" if "messaging_service_sid" in send_args else "from_"
+            })
+            return {"status": "OK", "sid": message.sid}
+
+        except Exception as e:
+            logger.error({"msg": "Twilio send failed", "error": str(e), "to": to})
+            return {"status": "ERROR", "error": str(e)}
+
+
+===== C:\ProActive\gym-integrator\src\common\aws.py =====
+
+# src/common/aws.py
+import os
+import boto3
+from botocore.config import Config
+
+def _region():
+    return os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "eu-central-1"
+
+def _cfg():
+    return Config(
+        retries={"max_attempts": int(os.getenv("AWS_MAX_ATTEMPTS", "3")), "mode": "standard"}
+    )
+
+def resolve_queue_url(name_env_key: str) -> str:
+    name = os.getenv(name_env_key)
+    if not name:
+        raise RuntimeError(f"Missing {name_env_key} in ENV")
+    return name
+    
+def _endpoint_for(service: str) -> str | None:
+    # 1) endpoint per-usĹ‚uga (najwyĹĽszy priorytet)
+    per_service = os.getenv(f"{service.upper()}_ENDPOINT") or os.getenv("LOCALSTACK_ENDPOINT") # np. S3_ENDPOINT, SQS_ENDPOINT
+    if per_service:
+        return per_service
+
+    # 2) globalny override
+    global_ep = os.getenv("AWS_ENDPOINT_URL")
+    if global_ep:
+        return global_ep
+
+    # 3) heurystyka SAM/LocalStack (bez twardego localhosta):
+    # SAM/LocalStack zwykle wstrzykujÄ… LOCALSTACK_HOSTNAME do kontenera
+    host = os.getenv("LOCALSTACK_HOSTNAME")
+    if host:
+        return f"http://{host}:4566"
+
+    # 4) jeĹĽeli pracujesz rÄ™cznie lokalnie i chcesz fallback,
+    # zamiast hardcodu w kodzie â€“ ustaw to w Ĺ›rodowisku:
+    #   $Env:S3_ENDPOINT="http://localhost:4566"
+    # (brak zwrotki => boto3 uĹĽyje prawdziwego AWS)
+    return None
+
+def s3_client():
+    ep = _endpoint_for("s3")
+    kwargs = {"region_name": _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("s3", **kwargs)
+
+def sqs_client():
+    ep = _endpoint_for("sqs")
+    kwargs = {"region_name": _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("sqs", **kwargs)
+
+def ddb_resource():
+    ep = _endpoint_for("dynamodb")
+    kwargs = {"region_name": _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.resource("dynamodb", **kwargs)
+
+
+===== C:\ProActive\gym-integrator\src\common\config.py =====
+
+"""
+Konfiguracja aplikacji oparta o zmienne Ĺ›rodowiskowe.
+UdostÄ™pnia dataclass Settings jako pojedyncze ĹşrĂłdĹ‚o prawdy.
+"""
+
+import os
+from dataclasses import dataclass
+
+from dotenv import load_dotenv, find_dotenv
+
+# Ĺadujemy zmienne z .env (jeĹĽeli plik istnieje).
+load_dotenv(find_dotenv())
+
+
+@dataclass
+class Settings:
+    """
+    ZbiĂłr ustawieĹ„ konfiguracyjnych odczytywanych ze zmiennych Ĺ›rodowiskowych.
+
+    Pola sÄ… zgrupowane logicznie (Twilio, OpenAI, PerfectGym, Jira, KB, kolejki).
+    """
+
+    # tryb deweloperski
+    dev_mode: bool = os.getenv("DEV_MODE", "false").lower() == "true"
+    tenant_default_lang: str = os.getenv("TENANT_DEFAULT_LANG", "pl")
+
+    # Twilio
+    twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+    twilio_messaging_sid: str = os.getenv("TWILIO_MESSAGING_SID", "")
+    twilio_auth_token: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+    twilio_whatsapp_number: str = os.getenv("TWILIO_WHATSAPP_NUMBER", "")
+
+    # OpenAI / LLM
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
+
+    # PerfectGym
+    pg_base_url: str = os.getenv("PG_BASE_URL", "")
+    pg_client_id: str = os.getenv("PG_CLIENT_ID", "")
+    pg_client_secret: str = os.getenv("PG_CLIENT_SECRET", "")
+
+    # Jira
+    jira_url: str = os.getenv("JIRA_URL", "")
+    jira_token: str = os.getenv("JIRA_TOKEN", "")
+    jira_project_key: str = os.getenv("JIRA_PROJECT_KEY", "GI")
+
+    # KB (FAQ z S3)
+    kb_bucket: str = os.getenv("KB_BUCKET", "")
+
+    # Kolejki (opcjonalnie, ĹĽeby mieÄ‡ 1 ĹşrĂłdĹ‚o prawdy)
+    inbound_queue_url: str = os.getenv("InboundEventsQueueUrl", "")
+    outbound_queue_url: str = os.getenv("OutboundQueueUrl", "")
+
+
+# Globalna instancja ustawieĹ„ uĹĽywana w caĹ‚ej aplikacji.
+settings = Settings()
+
+
+===== C:\ProActive\gym-integrator\src\common\errors.py =====
+
+class UserFacingError(Exception):
+    pass
+
+class IntegrationError(Exception):
+    pass
+
+
+===== C:\ProActive\gym-integrator\src\common\logging.py =====
+
+from aws_lambda_powertools import Logger
+logger = Logger(service="gym-integrator")
+
+
+===== C:\ProActive\gym-integrator\src\common\logging_utils.py =====
+
+import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
+
+def mask_phone(phone: str | None) -> str | None:
+    if not phone:
+        return phone
+    # koĹ„cĂłwka + hash
+    suffix = phone[-4:]
+    digest = hashlib.sha256(phone.encode("utf-8")).hexdigest()[:8]
+    return f"...{suffix}#{digest}"
+
+def shorten_body(body: str | None, max_len: int = 40) -> str | None:
+    if body is None:
+        return None
+    return body if len(body) <= max_len else body[:max_len] + "..."
+
+
+===== C:\ProActive\gym-integrator\src\common\security.py =====
+
+import os, hmac, hashlib, base64
+from typing import Dict
+from .config import settings
+
+def verify_twilio_signature(url: str, params: Dict[str, str], signature: str) -> bool:
+    dev_mode = os.getenv("DEV_MODE", "false").lower() == "true" or settings.dev_mode
+    if dev_mode:
+        return True
+    if not settings.twilio_auth_token:
+        return False
+    s = url + "".join([k + params[k] for k in sorted(params.keys())])
+    mac = hmac.new(settings.twilio_auth_token.encode(), s.encode(), hashlib.sha1)
+    computed = base64.b64encode(mac.digest()).decode()
+    return hmac.compare_digest(computed, signature)
+
+
+===== C:\ProActive\gym-integrator\src\common\utils.py =====
+
+import json, uuid
+from typing import Any
+
+def to_json(o: Any) -> str:
+    return json.dumps(o, ensure_ascii=False, separators=(",", ":"))
+
+def new_id(prefix: str = "") -> str:
+    return f"{prefix}{uuid.uuid4().hex}"
+
+
+===== C:\ProActive\gym-integrator\src\domain\intents.py =====
+
+INTENTS = {
+    "reserve_class": {"requires_confirmation": True},
+    "faq": {"requires_confirmation": False},
+    "handover": {"requires_confirmation": False},
+    "clarify": {"requires_confirmation": False},
+    "ticket": {"requires_confirmation": True},
+}
+
+
+===== C:\ProActive\gym-integrator\src\domain\models.py =====
+
+from dataclasses import dataclass
+from typing import Optional, Dict
+
+@dataclass
+class Message:
+    tenant_id: str
+    from_phone: str
+    to_phone: str
+    body: str
+    channel: str = "whatsapp"
+    conversation_id: Optional[str] = None
+
+@dataclass
+class Action:
+    type: str
+    payload: Dict
+
+
+===== C:\ProActive\gym-integrator\src\domain\templates.py =====
+
+DEFAULT_FAQ = {
+    "hours": "Godziny otwarcia: pn-pt 6:00-22:00, sb-nd 8:00-20:00.",
+    "price": "Cennik: karnet miesiÄ™czny od 149 PLN, jednorazowe wejĹ›cie 30 PLN.",
+    "location": "Adres: ul. PrzykĹ‚adowa 1, 00-000 Miasto.",
+    "contact": "Kontakt: +48 123 123 123, email: klub@example.com",
+}
+def render_template(template_str: str, context: dict) -> str:
+    out = template_str
+    for k, v in (context or {}).items():
+        out = out.replace("{"+k+"}", str(v))
+    return out
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\campaigns_run\handler.py =====
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\campaign_runner\handler.py =====
+
+"""
+Lambda odpowiedzialna za uruchamianie kampanii marketingowych.
+
+DziaĹ‚a w trybie batch:
+- czyta aktywne kampanie z tabeli DDB,
+- wybiera odbiorcĂłw,
+- wrzuca wiadomoĹ›ci do kolejki outbound.
+"""
+
+import os
+import json
+
+from ...services.campaign_service import CampaignService
+from ...common.aws import sqs_client, ddb_resource, resolve_queue_url
+from ...services.consent_service import ConsentService
+
+OUTBOUND_QUEUE_URL = os.getenv("OutboundQueueUrl")
+CAMPAIGNS_TABLE = os.getenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
+
+svc = CampaignService()
+consents = ConsentService()
+
+def _resolve_outbound_queue_url() -> str:
+    """
+    Zwraca URL kolejki outbound.
+
+    Najpierw prĂłbuje uĹĽyÄ‡ zmiennej Ĺ›rodowiskowej OutboundQueueUrl,
+    a jeĹ›li jest pusta, korzysta z resolve_queue_url.
+    """
+    if OUTBOUND_QUEUE_URL:
+        return OUTBOUND_QUEUE_URL
+    return resolve_queue_url("OutboundQueueUrl")
+
+
+def lambda_handler(event, context):
+    """
+    GĹ‚Ăłwny handler kampanii:
+    - skanuje tabelÄ™ kampanii,
+    - dla kaĹĽdej aktywnej kampanii wysyĹ‚a wiadomoĹ›Ä‡ do kaĹĽdego odbiorcy.
+    """
+    table = ddb_resource().Table(CAMPAIGNS_TABLE)
+    resp = table.scan()
+    out_q_url = _resolve_outbound_queue_url()
+
+    for item in resp.get("Items", []):
+        if not item.get("active", False):
+            continue
+
+        for phone in svc.select_recipients(item):
+            if not consents.has_opt_in(tenant_id, phone):
+                continue
+            body = item.get("body", "Nowa oferta klubu!")
+            payload = {"to": phone, "body": body}
+            sqs_client().send_message(QueueUrl=out_q_url, MessageBody=json.dumps(payload))
+
+    return {"statusCode": 200}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\health\handler.py =====
+
+def lambda_handler(event, context):
+    return {"statusCode": 200, "body": "OK"}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\housekeeping\handler.py =====
+
+# src/lambdas/housekeeping/handler.py
+import os
+import time
+
+from ...common.logging import logger
+from ...common.aws import ddb_resource
+
+INTENTS_STATS_TABLE = os.getenv("DDB_TABLE_INTENTS_STATS", "IntentsStats")
+
+
+def lambda_handler(event, context):
+    """
+    Prosty housekeeping:
+    - czyĹ›ci bardzo stare rekordy z tabeli IntentsStats (rate limiter),
+    - docelowo: retention Messages/Conversations + GDPR delete.
+    """
+    now_ts = int(time.time())
+    max_age_seconds = int(os.getenv("SPAM_STATS_MAX_AGE_SECONDS", "86400"))  # domyĹ›lnie 1 dzieĹ„
+    threshold = now_ts - max_age_seconds
+
+    table = ddb_resource().Table(INTENTS_STATS_TABLE)
+
+    deleted = 0
+    scanned = 0
+
+    # Uwaga: bardzo prosty scan bez paginacji â€“ OK dla maĹ‚ych wolumenĂłw
+    resp = table.scan()
+    items = resp.get("Items", []) or []
+    scanned += len(items)
+
+    for item in items:
+        last_ts = int(item.get("last_ts", 0))
+        if last_ts < threshold:
+            table.delete_item(Key={"pk": item["pk"], "sk": item["sk"]})
+            deleted += 1
+
+    logger.info(
+        {
+            "housekeeping": "spam_cleanup",
+            "scanned": scanned,
+            "deleted": deleted,
+            "threshold_ts": threshold,
+        }
+    )
+
+    # TODO (Etap 2): retention Messages/Conversations + GDPR delete
+    return {"statusCode": 200}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\inbound_webhook\handler.py =====
+
+"""
+Lambda obsĹ‚ugujÄ…ca webhook Twilio (przychodzÄ…ce wiadomoĹ›ci WhatsApp).
+
+Zadania:
+- walidacja sygnatury Twilio,
+- sparsowanie parametrĂłw z body,
+- zamiana na zdarzenie wewnÄ™trzne i wysĹ‚anie do kolejki inbound.
+"""
+
+import os
+import json
+import urllib.parse
+
+from ...services.spam_service import SpamService
+from ...common.utils import new_id
+from ...common.aws import sqs_client, resolve_queue_url
+from ...common.security import verify_twilio_signature
+from ...common.logging import logger
+from ...common.logging_utils import mask_phone, shorten_body
+
+
+NGROK_HOST_HINTS = (".ngrok-free.app", ".ngrok.io")
+spam_service = SpamService()
+
+
+def _build_public_url(event, headers_in) -> str:
+    """
+    Buduje publiczny URL widziany przez Twilio, uĹĽywany do weryfikacji sygnatury.
+
+    UwzglÄ™dnia:
+    - nagĹ‚Ăłwki Host / X-Forwarded-Proto,
+    - zmiennÄ… TWILIO_PUBLIC_URL, jeĹ›li jest ustawiona,
+    - query string z eventu.
+    """
+    host = headers_in.get("Host", "localhost")
+    raw_path = (
+        (event.get("requestContext", {}) or {}).get("path")
+        or event.get("path")
+        or "/webhooks/twilio"
+    )
+    public_base = os.getenv("TWILIO_PUBLIC_URL")
+
+    if public_base:
+        base = public_base.split("?")[0]
+    else:
+        # JeĹĽeli tunel (ngrok), zakĹ‚adamy HTTPS
+        proto = (
+            "https"
+            if any(host.endswith(suf) for suf in NGROK_HOST_HINTS)
+            else headers_in.get("X-Forwarded-Proto", "http")
+        )
+        base = f"{proto}://{host}{raw_path}"
+
+    mv_qs = event.get("multiValueQueryStringParameters")
+    qs = event.get("queryStringParameters")
+    query = (
+        urllib.parse.urlencode(mv_qs, doseq=True)
+        if mv_qs
+        else (urllib.parse.urlencode(qs) if qs else "")
+    )
+    return f"{base}?{query}" if query else base
+
+
+def _parse_params(body_raw: str, content_type: str) -> dict:
+    """
+    Parsuje parametry z body na sĹ‚ownik.
+
+    ObsĹ‚ugiwane formaty:
+    - application/x-www-form-urlencoded (domyĹ›lny format Twilio),
+    - application/json.
+    """
+    ctype = (content_type or "").lower()
+
+    # DomyĹ›lnie traktujemy brak Content-Type jak form-encoded (uĹ‚atwia testy)
+    if "application/x-www-form-urlencoded" in ctype or not ctype:
+        pairs = urllib.parse.parse_qsl(body_raw, keep_blank_values=True)
+        return {k: v for k, v in pairs}
+
+    try:
+        return json.loads(body_raw) if body_raw else {}
+    except json.JSONDecodeError:
+        logger.warning({"webhook": "invalid_json"})
+        return {}
+
+
+def lambda_handler(event, context):
+    """
+    GĹ‚Ăłwny handler AWS Lambda dla webhooka Twilio.
+
+    Waliduje sygnaturÄ™ (chyba ĹĽe TWILIO_SKIP_SIGNATURE=true), a nastÄ™pnie:
+    - buduje obiekt zdarzenia wewnÄ™trznego,
+    - wysyĹ‚a go do kolejki InboundEventsQueueUrl.
+    """
+    try:
+        body_raw = event.get("body") or ""
+        if event.get("isBase64Encoded"):
+            import base64
+
+            body_raw = base64.b64decode(body_raw).decode("utf-8", errors="ignore")
+
+        if len(body_raw) > 8 * 1024:
+            return {"statusCode": 413, "body": "Payload too large"}
+
+        headers_in = event.get("headers") or {}
+        content_type = headers_in.get("Content-Type") or headers_in.get("content-type") or ""
+
+        params = _parse_params(body_raw, content_type)
+
+        # Weryfikacja sygnatury Twilio (jeĹ›li nie wyĹ‚Ä…czona flagÄ…)
+        if os.getenv("TWILIO_SKIP_SIGNATURE", "false").lower() != "true":
+            url = _build_public_url(event, headers_in)
+            signature = headers_in.get("X-Twilio-Signature", "")
+
+            if not verify_twilio_signature(url, params, signature):
+                logger.warning({"webhook": "invalid_signature"})
+                return {"statusCode": 403, "body": "Forbidden"}
+        else:
+            logger.info({"webhook": "signature_skipped_dev"})
+
+        tenant_id = "default"  # TODO: w przyszĹ‚oĹ›ci mapowanie po numerze / endpointcie
+        from_phone = params.get("From")
+
+        # --- SPAM / RATE LIMIT ---
+        if spam_service.is_blocked(tenant_id=tenant_id, phone=from_phone):
+            logger.warning(
+                {
+                    "webhook": "rate_limited",
+                    "from": mask_phone(from_phone),
+                    "tenant_id": tenant_id,
+                }
+            )
+            # Twilio akceptuje dowolne body, waĹĽny jest status HTTP
+            return {"statusCode": 429, "body": "Too Many Requests"}
+
+        msg = {
+            "event_id": new_id("evt-"),
+            "from": from_phone,
+            "to": params.get("To"),
+            "body": params.get("Body", ""),
+            "tenant_id": tenant_id,
+            "ts": (event.get("requestContext") or {}).get("requestTimeEpoch"),
+            "message_sid": params.get("MessageSid"),
+        }
+
+        queue_url = resolve_queue_url("InboundEventsQueueUrl")
+        sqs_client().send_message(QueueUrl=queue_url, MessageBody=json.dumps(msg))
+
+        logger.info({
+            "webhook": "ok",
+            "from": mask_phone(msg.get("from")),
+            "to": mask_phone(msg.get("to")),
+            "body": shorten_body(msg.get("body")),
+            "tenant_id": msg.get("tenant_id"),
+        })
+        
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "text/xml"},
+            "body": "<Response></Response>",
+        }
+
+    except Exception as e:
+        logger.exception({"error": str(e)})
+        return {"statusCode": 500, "body": f"Error: {e}"}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\message_router\handler.py =====
+
+"""
+Lambda message_router.
+
+Odbiera komunikaty z kolejki inbound, zamienia je na obiekty domenowe
+i przekazuje do RoutingService, a nastÄ™pnie wrzuca odpowiedzi do kolejki outbound.
+"""
+
+import json
+
+from ...domain.models import Message
+from ...services.routing_service import RoutingService
+from ...common.aws import sqs_client, resolve_queue_url
+from ...common.logging import logger
+from ...common.logging_utils import mask_phone, shorten_body
+
+
+def lambda_handler(event, context):
+    """
+    GĹ‚Ăłwny handler AWS Lambda dla message_routera.
+
+    Dla kaĹĽdej wiadomoĹ›ci z eventu:
+    - deserializuje payload,
+    - buduje obiekt Message,
+    - wywoĹ‚uje RoutingService.handle,
+    - dla akcji typu "reply" publikuje komunikat do kolejki outbound.
+    """
+    router = RoutingService()
+    out_queue = resolve_queue_url("OutboundQueueUrl")
+
+    records = event.get("Records", []) or []
+    logger.info({"sender": "message_router_start", "records": len(records)})
+
+    for r in records:
+        raw_body = r.get("body", "")
+        try:
+            msg_body = json.loads(raw_body) if isinstance(raw_body, str) else raw_body
+        except Exception as e:
+            logger.error({"sender": "message_router_bad_json", "err": str(e), "raw": raw_body})
+            continue
+        
+        logger.info({
+            "handler": "message_router",
+            "event": "received",
+            "from": mask_phone(msg_body.get("from")),
+            "to": mask_phone(msg_body.get("to")),
+            "body": shorten_body(msg_body.get("body")),
+            "tenant_id": msg_body.get("tenant_id"),
+        })
+
+        msg = Message(
+            tenant_id=msg_body.get("tenant_id", "default"),
+            from_phone=msg_body.get("from"),
+            to_phone=msg_body.get("to"),
+            body=msg_body.get("body", ""),
+            conversation_id=msg_body.get("event_id"),
+        )
+
+        actions = router.handle(msg) or []
+        for a in actions:
+            if a.type == "reply":
+                sqs_client().send_message(
+                    QueueUrl=out_queue,
+                    MessageBody=json.dumps(a.payload),
+                )
+
+    logger.info({"sender": "message_router_done"})
+    return {"statusCode": 200}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\outbound_sender\handler.py =====
+
+import json
+from ...adapters.twilio_client import TwilioClient
+from ...common.aws import sqs_client, resolve_queue_url
+from ...common.security import verify_twilio_signature
+from ...common.logging import logger
+from ...common.logging_utils import mask_phone, shorten_body
+from ...services.spam_service import SpamService
+
+
+twilio = TwilioClient()
+spam_service = SpamService()
+
+
+def lambda_handler(event, context):
+    records = event.get("Records", [])
+    if not records:
+        logger.info({"sender": "no_records"})
+        return {"statusCode": 200, "body": "no-records"}
+
+    for r in records:
+        raw = r.get("body", "")
+        try:
+            payload = json.loads(raw) if isinstance(raw, str) else raw
+        except Exception as e:
+            logger.error({"sender": "bad_json", "err": str(e), "raw": raw})
+            continue
+
+        to = payload.get("to")
+        text = payload.get("body")
+        if not to or not text:
+            logger.warning({"sender": "invalid_payload", "payload": payload})
+            continue
+
+        try:
+            res = twilio.send_text(to=to, body=text)
+            res_status = res.get("status", "UNKNOWN")
+            tenant_id = payload.get("tenant_id", "default")
+            
+            
+            metrics.incr("message_sent", channel="whatsapp", status=res.get("status", "UNKNOWN"))
+            
+            logger.info({
+                "handler": "outbound_sender",
+                "event": "sent",
+                "to": mask_phone(to),
+                "body": shorten_body(text),
+                "tenant_id": tenant_id,
+                "result": res_status  # np. tylko HTTP status, nie caĹ‚y response body z PII
+            })
+        except Exception as e:
+            logger.error({"sender": "twilio_fail", "err": str(e), "to": to})
+
+    return {"statusCode": 200}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\pg_reservations\handler.py =====
+
+# src/lambdas/pg_reservations/handler.py
+import json
+from ...adapters.perfectgym_client import PerfectGymClient
+
+pg = PerfectGymClient()
+
+def lambda_handler(event, context):
+    body = json.loads(event.get("body") or "{}")
+    member_id = body.get("member_id")
+    class_id = body.get("class_id")
+    idem = body.get("idempotency_key")
+
+    if not (member_id and class_id and idem):
+        return {"statusCode": 400, "body": "Missing required fields"}
+
+    res = pg.reserve_class(member_id=member_id, class_id=class_id, idempotency_key=idem)
+    return {"statusCode": 200, "body": json.dumps(res)}
+
+
+===== C:\ProActive\gym-integrator\src\lambdas\tickets\handler.py =====
+
+
+===== C:\ProActive\gym-integrator\src\scripts\localstack_init.py =====
+
+#!/usr/bin/env python3
+"""Create LocalStack resources: SQS queues + minimal DDB tables."""
+import os, boto3
+
+AWS_ENDPOINT = os.getenv("AWS_ENDPOINT_URL", "http://localhost:4566")
+REGION = os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+
+sqs = boto3.client("sqs", endpoint_url=AWS_ENDPOINT, region_name=REGION)
+ddb = boto3.client("dynamodb", endpoint_url=AWS_ENDPOINT, region_name=REGION)
+
+def ensure_queue(name):
+    try:
+        resp = sqs.get_queue_url(QueueName=name)
+        print(f"[init] queue exists: {name} -> {resp['QueueUrl']}")
+        return resp["QueueUrl"]
+    except:
+        resp = sqs.create_queue(QueueName=name)
+        print(f"[init] queue created: {name} -> {resp['QueueUrl']}")
+        return resp["QueueUrl"]
+
+def ensure_table(name, attrs, keys):
+    try:
+        ddb.describe_table(TableName=name)
+        print(f"[init] table exists: {name}")
+    except ddb.exceptions.ResourceNotFoundException:
+        ddb.create_table(
+            TableName=name,
+            BillingMode="PAY_PER_REQUEST",
+            AttributeDefinitions=attrs,
+            KeySchema=keys,
+        )
+        print(f"[init] table created: {name}")
+
+if __name__ == "__main__":
+    inbound = ensure_queue("inbound-events")
+    outbound = ensure_queue("outbound-messages")
+
+    ensure_table("Messages",
+        [{"AttributeName":"pk","AttributeType":"S"},{"AttributeName":"sk","AttributeType":"S"}],
+        [{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"sk","KeyType":"RANGE"}]
+    )
+    ensure_table("Conversations",
+        [{"AttributeName":"pk","AttributeType":"S"}],
+        [{"AttributeName":"pk","KeyType":"HASH"}]
+    )
+    ensure_table("Campaigns",
+        [{"AttributeName":"pk","AttributeType":"S"}],
+        [{"AttributeName":"pk","KeyType":"HASH"}]
+    )
+        ensure_table("IntentsStats",
+        [{"AttributeName":"pk","AttributeType":"S"},{"AttributeName":"sk","AttributeType":"S"}],
+        [{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"sk","KeyType":"RANGE"}]
+    )
+
+
+    print("\n[init] export these env vars in your shell:")
+    print(f"export AWS_ENDPOINT_URL={AWS_ENDPOINT}")
+    print(f"export AWS_DEFAULT_REGION={REGION}")
+    print(f"export InboundEventsQueueUrl={inbound}")
+    print(f"export OutboundQueueUrl={outbound}")
+
+
+===== C:\ProActive\gym-integrator\src\scripts\worker_message_router.py =====
+
+import os, json, time, boto3, botocore
+from src.lambdas.message_router.handler import lambda_handler
+
+ENDPOINT = os.getenv("AWS_ENDPOINT_URL", "http://localhost:4566")
+IN_Q = os.getenv("InboundEventsQueueUrl", f"{ENDPOINT}/000000000000/inbound-events")
+sqs = boto3.client("sqs", endpoint_url=ENDPOINT)
+
+print(f"[worker_message_router] polling {IN_Q} (endpoint={ENDPOINT})")
+while True:
+    try:
+        resp = sqs.receive_message(QueueUrl=IN_Q, MaxNumberOfMessages=5, WaitTimeSeconds=10)
+        msgs = resp.get("Messages", [])
+        if not msgs:
+            continue
+        print(f"[worker_message_router] got {len(msgs)} msg(s)")
+        event = {"Records": [{"body": m["Body"]} for m in msgs]}
+        lambda_handler(event, None)
+        for m in msgs:
+            sqs.delete_message(QueueUrl=IN_Q, ReceiptHandle=m["ReceiptHandle"])
+        print(f"[worker_message_router] processed {len(msgs)} msg(s) -> outbound")
+    except botocore.exceptions.EndpointConnectionError as e:
+        print(f"[worker_message_router] endpoint error: {e}; retry in 2s")
+        time.sleep(2)
+    except Exception as e:
+        print(f"[worker_message_router] error: {e}")
+        time.sleep(1)
+
+
+===== C:\ProActive\gym-integrator\src\scripts\worker_outbound_sender.py =====
+
+import os, json, time, boto3, botocore
+from src.lambdas.outbound_sender.handler import lambda_handler
+
+ENDPOINT = os.getenv("AWS_ENDPOINT_URL", "http://localhost:4566")
+OUT_Q = os.getenv("OutboundQueueUrl", f"{ENDPOINT}/000000000000/outbound-messages")
+sqs = boto3.client("sqs", endpoint_url=ENDPOINT)
+
+print(f"[worker_outbound_sender] polling {OUT_Q} (endpoint={ENDPOINT})")
+while True:
+    try:
+        resp = sqs.receive_message(QueueUrl=OUT_Q, MaxNumberOfMessages=5, WaitTimeSeconds=10)
+        msgs = resp.get("Messages", [])
+        if not msgs:
+            continue
+        print(f"[worker_outbound_sender] got {len(msgs)} msg(s)")
+        # sanity: pokaĹĽ zĹ‚y JSON
+        for m in msgs:
+            try:
+                json.loads(m["Body"])
+            except Exception:
+                print(f"[worker_outbound_sender] bad JSON: {m['Body']}")
+        event = {"Records": [{"body": m["Body"]} for m in msgs]}
+        lambda_handler(event, None)
+        for m in msgs:
+            sqs.delete_message(QueueUrl=OUT_Q, ReceiptHandle=m["ReceiptHandle"])
+        print(f"[worker_outbound_sender] sent {len(msgs)} msg(s)")
+    except botocore.exceptions.EndpointConnectionError as e:
+        print(f"[worker_outbound_sender] endpoint error: {e}; retry in 2s")
+        time.sleep(2)
+    except Exception as e:
+        print(f"[worker_outbound_sender] error: {e}")
+        time.sleep(1)
+
+
+===== C:\ProActive\gym-integrator\src\services\campaign_service.py =====
+
+from typing import List, Dict
+from ..common.logging import logger
+class CampaignService:
+    def select_recipients(self, campaign: Dict) -> List[str]:
+        recipients = campaign.get("recipients", [])
+        logger.info({"campaign": "recipients", "count": len(recipients)})
+        return recipients
+# TODO Etap 2: add advanced TargetingService
+
+
+===== C:\ProActive\gym-integrator\src\services\consent_service.py =====
+
+class ConsentService:
+    def has_opt_in(self, tenant_id: str, phone: str) -> bool:
+        # TODO: read Consents from DDB
+        return True
+
+
+===== C:\ProActive\gym-integrator\src\services\kb_service.py =====
+
+"""
+Serwis wiedzy/FAQ.
+
+Odpowiada za pobieranie odpowiedzi FAQ dla danego tenanta:
+- w pierwszej kolejnoĹ›ci prĂłbuje odczytaÄ‡ dane z S3 (jeĹ›li skonfigurowano bucket),
+- jeĹ›li nie ma pliku lub nie ma konfiguracji, korzysta z domyĹ›lnego DEFAULT_FAQ.
+"""
+
+import json
+from typing import Dict, Optional
+
+from botocore.exceptions import ClientError
+
+from ..common.logging import logger
+from ..domain.templates import DEFAULT_FAQ
+from ..common.aws import s3_client
+from ..common.config import settings
+
+
+class KBService:
+    """
+    Prosty serwis FAQ z opcjonalnym wsparciem S3.
+
+    Przechowuje cache w pamiÄ™ci (per proces Lambdy) dla zminimalizowania liczby odczytĂłw z S3.
+    """
+
+    def __init__(self) -> None:
+        """Inicjalizuje serwis, zapisujÄ…c konfiguracjÄ™ bucketa i pusty cache w pamiÄ™ci."""
+        self.bucket: str = settings.kb_bucket
+        # cache: {tenant_id: {topic: answer}}
+        self._cache: Dict[str, Dict[str, str]] = {}
+
+    def _load_tenant_faq(self, tenant_id: str) -> Optional[Dict[str, str]]:
+        """
+        Ĺaduje FAQ dla podanego tenanta z S3 (jeĹ›li skonfigurowano bucket).
+
+        Zwraca:
+            dict topic -> answer, jeĹ›li plik istnieje i poprawnie siÄ™ wczyta,
+            None w pozostaĹ‚ych przypadkach.
+        """
+        if not self.bucket:
+            return None
+
+        if tenant_id in self._cache:
+            return self._cache[tenant_id]
+
+        key = f"kb/{tenant_id}/faq.json"
+        try:
+            obj = s3_client().get_object(Bucket=self.bucket, Key=key)
+            data = json.loads(obj["Body"].read())
+            if isinstance(data, dict):
+                # zapamiÄ™tujemy w cache
+                self._cache[tenant_id] = data
+                logger.info({"kb": "loaded", "bucket": self.bucket, "key": key})
+                return data
+            logger.warning({"kb": "invalid_format", "bucket": self.bucket, "key": key})
+            return None
+        except ClientError:
+            logger.info({"kb": "miss", "bucket": self.bucket, "key": key})
+            return None
+
+    def answer(self, topic: str, tenant_id: str) -> Optional[str]:
+        """
+        Zwraca odpowiedĹş FAQ dla danego tematu i tenanta.
+
+        KolejnoĹ›Ä‡ ĹşrĂłdeĹ‚:
+          1. FAQ z S3 (jeĹ›li skonfigurowano i plik istnieje),
+          2. domyĹ›lne DEFAULT_FAQ,
+          3. None, jeĹ›li odpowiedĹş nie zostaĹ‚a znaleziona.
+        """
+        topic = (topic or "").strip().lower()
+        if not topic:
+            return None
+
+        # 1) S3 (jeĹ›li skonfigurowane)
+        tenant_faq = self._load_tenant_faq(tenant_id)
+        if tenant_faq and topic in tenant_faq:
+            return tenant_faq[topic]
+
+        # 2) fallback do domyĹ›lnej listy
+        return DEFAULT_FAQ.get(topic)
+
+
+===== C:\ProActive\gym-integrator\src\services\metrics_service.py =====
+
+from ..common.logging import logger
+class MetricsService:
+    def incr(self, name: str, **labels):
+        logger.info({"metric": name, **labels})
+
+
+===== C:\ProActive\gym-integrator\src\services\nlu_service.py =====
+
+from ..adapters.openai_client import OpenAIClient
+
+class NLUService:
+    def __init__(self):
+        self.client = OpenAIClient()
+
+    def classify_intent(self, text: str, lang: str):
+        return self.client.classify(text, lang)
+
+
+===== C:\ProActive\gym-integrator\src\services\routing_service.py =====
+
+"""
+GĹ‚Ăłwny serwis routujÄ…cy wiadomoĹ›ci uĹĽytkownikĂłw.
+
+Na podstawie wyniku NLU decyduje, czy:
+- odpowiedzieÄ‡ z FAQ,
+- zaproponowaÄ‡ rezerwacjÄ™ zajÄ™Ä‡,
+- przekazaÄ‡ sprawÄ™ do czĹ‚owieka (handover),
+- dopytaÄ‡ uĹĽytkownika (clarify).
+"""
+
+from typing import List
+
+from ..domain.models import Message, Action
+from ..services.nlu_service import NLUService
+from ..services.kb_service import KBService
+from ..services.template_service import TemplateService
+from ..adapters.perfectgym_client import PerfectGymClient
+from ..storage.ddb import ConversationsRepo
+from ..common.utils import new_id
+
+# Zestaw sĹ‚Ăłw oznaczajÄ…cych potwierdzenie rezerwacji.
+CONFIRM_WORDS = {"tak", "tak.", "potwierdzam", "ok"}
+
+# Zestaw sĹ‚Ăłw oznaczajÄ…cych odrzucenie rezerwacji.
+DECLINE_WORDS = {"nie", "nie.", "anuluj", "rezygnujÄ™", "rezygnuje"}
+
+CONFIRM_TEMPLATE = "Czy potwierdzasz rezerwacjÄ™ zajÄ™Ä‡ {class_id}? Odpowiedz: TAK lub NIE."
+
+class RoutingService:
+    """
+    Serwis Ĺ‚Ä…czÄ…cy NLU, KB i integracje zewnÄ™trzne tak, by obsĹ‚uĹĽyÄ‡ peĹ‚en flow rozmowy.
+    """
+    def __init__(self) -> None:
+        self.nlu = NLUService()
+        self.kb = KBService()
+        self.tpl = TemplateService()
+        self.pg = PerfectGymClient()
+        self.conv = ConversationsRepo()
+
+        # >>> TO MUSI TU BYÄ† <<<
+        from ..services.metrics_service import MetricsService
+        self.metrics = MetricsService()
+
+        # JeĹ›li uĹĽywasz MembersIndexRepo i JiraClient:
+        from ..adapters.jira_client import JiraClient
+        from ..storage.ddb import MembersIndexRepo
+        self.jira = JiraClient()
+        self.members_index = MembersIndexRepo()
+
+
+    def _pending_key(self, phone: str) -> str:
+        """
+        Buduje klucz pod ktĂłrym trzymamy w DDB oczekujÄ…cÄ… rezerwacjÄ™ dla danego numeru telefonu.
+        """
+        return f"pending#{phone}"
+
+    def handle(self, msg: Message) -> List[Action]:
+        """
+        Przetwarza pojedynczÄ… wiadomoĹ›Ä‡ biznesowÄ… i zwraca listÄ™ akcji do wykonania.
+
+        Zwraca zwykle jednÄ… akcjÄ™ typu "reply", ale architektura pozwala na wiele akcji w przyszĹ‚oĹ›ci.
+        """
+        text = (msg.body or "").strip().lower()
+
+        # --- 1. ObsĹ‚uga oczekujÄ…cej rezerwacji (TAK/NIE) ---
+        pending = self.conv.get(self._pending_key(msg.from_phone))
+        if pending:
+            if text in CONFIRM_WORDS:
+                class_id = pending.get("class_id")
+                member_id = pending.get("member_id")
+                idem = pending.get("idempotency_key")
+
+                res = self.pg.reserve_class(
+                    member_id=member_id,
+                    class_id=class_id,
+                    idempotency_key=idem,
+                )
+                self.conv.delete(self._pending_key(msg.from_phone))
+
+                if (res or {}).get("ok", True):
+                    return [
+                        Action(
+                            "reply",
+                            {
+                                "to": msg.from_phone,
+                                "body": f"Zarezerwowano zajÄ™cia (ID {class_id}). Do zobaczenia!",
+                            },
+                        )
+                    ]
+                return [
+                    Action(
+                        "reply",
+                        {
+                            "to": msg.from_phone,
+                            "body": "Nie udaĹ‚o siÄ™ zarezerwowaÄ‡. SprĂłbuj ponownie pĂłĹşniej.",
+                        },
+                    )
+                ]
+
+            if text in DECLINE_WORDS:
+                # uĹĽytkownik odrzuciĹ‚ rezerwacjÄ™
+                self.conv.delete(self._pending_key(msg.from_phone))
+                return [
+                    Action(
+                        "reply",
+                        {
+                            "to": msg.from_phone,
+                            "body": (
+                                "Anulowano rezerwacjÄ™. Daj znaÄ‡, jeĹĽeli bÄ™dziesz chciaĹ‚/chciaĹ‚a "
+                                "zarezerwowaÄ‡ inne zajÄ™cia."
+                            ),
+                        },
+                    )
+                ]
+            # JeĹĽeli jest pending, ale wiadomoĹ›Ä‡ nie jest ani TAK ani NIE â€“
+            # traktujemy jÄ… jako nowe zapytanie i NIE kasujemy pending.
+
+        # --- 2. Klasyfikacja intencji ---
+        nlu = self.nlu.classify_intent(msg.body, lang="pl")
+        intent = nlu.get("intent", "clarify")
+        slots = nlu.get("slots", {}) or {}
+
+        self.metrics.incr("intent_detected", intent=intent, tenant=msg.tenant_id)
+
+        # --- 3. FAQ ---
+        if intent == "faq":
+            topic = slots.get("topic", "hours")
+            answer = (
+                self.kb.answer(topic, tenant_id=msg.tenant_id)
+                or "Przepraszam, nie mam informacji."
+            )
+            return [Action("reply", {"to": msg.from_phone, "body": answer})]
+
+        # --- 4. Rezerwacja zajÄ™Ä‡ ---
+        if intent == "reserve_class":
+            class_id = slots.get("class_id", "101")
+            member_id = slots.get("member_id", "105")
+            idem = new_id("idem-")
+            self.conv.put(
+                {
+                    "pk": self._pending_key(msg.from_phone),
+                    "class_id": class_id,
+                    "member_id": member_id,
+                    "idempotency_key": idem,
+                }
+            )
+            body = self.tpl.render(CONFIRM_TEMPLATE, {"class_id": class_id})
+            return [Action("reply", {"to": msg.from_phone, "body": body})]
+
+
+        # --- 5. Handover do czĹ‚owieka ---
+        if intent == "handover":
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": "ĹÄ…czÄ™ CiÄ™ z pracownikiem klubu (wkrĂłtce staĹ‚e przeĹ‚Ä…czenie).",
+                    },
+                )
+            ]
+            
+        # --- 5. Ticket do systemu ticketowego(Jira) ---   
+        if intent == "ticket":
+            res = self.jira.create_ticket(
+                summary=slots.get("summary") or "ZgĹ‚oszenie klienta",
+                description=slots.get("description") or msg.body,
+                tenant_id=msg.tenant_id
+            )
+            if res.get("ok"):
+                body = f"UtworzyĹ‚em zgĹ‚oszenie. Numer: {res['ticket']}."
+            else:
+                body = "Nie udaĹ‚o siÄ™ utworzyÄ‡ zgĹ‚oszenia. SprĂłbuj pĂłĹşniej."
+            return [Action("reply", {"to": msg.from_phone, "body": body})]
+            
+        # --- 6. DomyĹ›lny clarify ---
+        return [
+            Action(
+                "reply",
+                {
+                    "to": msg.from_phone,
+                    "body": "Czy moĹĽesz doprecyzowaÄ‡, w czym pomĂłc?",
+                },
+            )
+        ]
+
+
+===== C:\ProActive\gym-integrator\src\services\spam_service.py =====
+
+# src/services/spam_service.py
+import os
+import time
+import datetime
+from typing import Optional
+
+from ..common.aws import ddb_resource
+from ..common.logging import logger
+
+
+TABLE_NAME = os.getenv("DDB_TABLE_INTENTS_STATS", "IntentsStats")
+
+
+class SpamService:
+    """
+    Bardzo prosty rate limiter per tenant+numer telefonu.
+
+    ZaĹ‚oĹĽenia:
+    - bucket czasowy = 1 minuta (lub tyle, ile ustawisz w SPAM_BUCKET_SECONDS),
+    - limit wiadomoĹ›ci w buckecie = SPAM_MAX_PER_BUCKET (domyĹ›lnie 20),
+    - dane trzymane w DDB w tabeli IntentsStats:
+        pk = "{tenant_id}#{bucket}"
+        sk = "{phone}"
+        attrs: cnt, last_ts, blocked_until
+    """
+
+    def __init__(
+        self,
+        now_fn=None,
+        bucket_seconds: Optional[int] = None,
+        max_per_bucket: Optional[int] = None,
+    ) -> None:
+        self.table = ddb_resource().Table(TABLE_NAME)
+        self._now_fn = now_fn or (lambda: int(time.time()))
+        self.bucket_seconds = bucket_seconds or int(
+            os.getenv("SPAM_BUCKET_SECONDS", "60")
+        )
+        self.max_per_bucket = max_per_bucket or int(
+            os.getenv("SPAM_MAX_PER_BUCKET", "20")
+        )
+
+    def _bucket_for_ts(self, ts: int) -> str:
+        """
+        Zwraca identyfikator bucketa czasowego.
+        DomyĹ›lnie: dokĹ‚adnoĹ›Ä‡ do minuty (YYYYMMDDHHMM).
+        """
+        # MoĹĽna w przyszĹ‚oĹ›ci dostosowaÄ‡ do bucket_seconds, na razie prosto: 1 minuta
+        dt = datetime.datetime.utcfromtimestamp(ts)
+        return dt.strftime("%Y%m%d%H%M")
+
+    def _key(self, tenant_id: str, phone: str, ts: int) -> dict:
+        bucket = self._bucket_for_ts(ts)
+        return {
+            "pk": f"{tenant_id}#{bucket}",
+            "sk": phone,
+        }
+
+    def is_blocked(self, tenant_id: str, phone: Optional[str]) -> bool:
+        """
+        ZwiÄ™ksza licznik wiadomoĹ›ci w aktualnym buckecie
+        i zwraca True, jeĹ›li numer powinien byÄ‡ zablokowany.
+
+        Uwaga: woĹ‚amy to PRZED wrzuceniem wiadomoĹ›ci do kolejki.
+        """
+        if not phone:
+            # brak numeru â†’ nie blokujemy, ale logujemy
+            logger.warning({"spam": "no_phone_in_event", "tenant_id": tenant_id})
+            return False
+
+        now_ts = self._now_fn()
+        key = self._key(tenant_id, phone, now_ts)
+
+        try:
+            resp = self.table.update_item(
+                Key=key,
+                UpdateExpression=(
+                    "ADD cnt :one "
+                    "SET last_ts = :ts"
+                ),
+                ExpressionAttributeValues={
+                    ":one": 1,
+                    ":ts": now_ts,
+                },
+                ReturnValues="ALL_NEW",
+            )
+            attrs = resp.get("Attributes", {}) or {}
+        except Exception as e:
+            # W razie problemĂłw z DDB wolimy NIE blokowaÄ‡ klienta, tylko zalogowaÄ‡ bĹ‚Ä…d.
+            logger.error(
+                {
+                    "spam": "ddb_update_error",
+                    "error": str(e),
+                    "tenant_id": tenant_id,
+                    "phone": phone,
+                }
+            )
+            return False
+
+        cnt = int(attrs.get("cnt", 0))
+        blocked_until = int(attrs.get("blocked_until", 0))
+
+        # 1) JeĹĽeli mamy aktywnÄ… blokadÄ™ czasowÄ… â€“ honorujemy jÄ…
+        if blocked_until > now_ts:
+            logger.info(
+                {
+                    "spam": "already_blocked",
+                    "tenant_id": tenant_id,
+                    "phone": phone,
+                    "blocked_until": blocked_until,
+                }
+            )
+            return True
+
+        # 2) JeĹĽeli przekroczono limit w buckecie â€“ ustawiamy blokadÄ™ i zwracamy True
+        if cnt > self.max_per_bucket:
+            new_blocked_until = now_ts + self.bucket_seconds
+            try:
+                self.table.update_item(
+                    Key=key,
+                    UpdateExpression="SET blocked_until = :bu",
+                    ExpressionAttributeValues={":bu": new_blocked_until},
+                )
+            except Exception as e:
+                logger.error(
+                    {
+                        "spam": "set_blocked_until_failed",
+                        "error": str(e),
+                        "tenant_id": tenant_id,
+                        "phone": phone,
+                    }
+                )
+
+            logger.warning(
+                {
+                    "spam": "rate_limit_hit",
+                    "tenant_id": tenant_id,
+                    "phone": phone,
+                    "cnt": cnt,
+                    "max_per_bucket": self.max_per_bucket,
+                    "bucket_seconds": self.bucket_seconds,
+                }
+            )
+            return True
+
+        # 3) W normalnym przypadku â€“ nie blokujemy
+        return False
+
+
+===== C:\ProActive\gym-integrator\src\services\template_service.py =====
+
+from ..domain.templates import render_template
+class TemplateService:
+    def render(self, template: str, context: dict):
+        return render_template(template, context)
+
+
+===== C:\ProActive\gym-integrator\src\storage\ddb.py =====
+
+import os
+from ..common.aws import ddb_resource
+
+class MessagesRepo:
+    def __init__(self):
+        self.table = ddb_resource().Table(os.environ.get("DDB_TABLE_MESSAGES", "Messages"))
+    def put(self, item: dict): self.table.put_item(Item=item)
+
+class ConversationsRepo:
+    def __init__(self):
+        self.table = ddb_resource().Table(os.environ.get("DDB_TABLE_CONVERSATIONS", "Conversations"))
+    def get(self, pk: str): return self.table.get_item(Key={"pk": pk}).get("Item")
+    def put(self, item: dict): self.table.put_item(Item=item)
+    def delete(self, pk: str): self.table.delete_item(Key={"pk": pk})
+    
+class MembersIndexRepo:
+    def __init__(self):
+        self.table = ddb_resource().Table(os.environ.get("DDB_TABLE_MEMBERS_INDEX", "MembersIndex"))
+    def find_by_phone(self, tenant_id: str, phone: str):
+        # np. query po pk = f"{tenant_id}#{member_id}", secondary index po phone
+        ...
+
+
+===== C:\ProActive\gym-integrator\tests\conftest.py =====
+
+import os
+import pytest
+from moto import mock_aws
+import boto3
+
+# ============================
+#  MOCKI INTEGRACJI (AI, Twilio, PG, Jira)
+# ============================
+
+@pytest.fixture()
+def mock_ai(monkeypatch):
+    """
+    Mock AI â€“ zamiast OpenAI:
+    - 'godzin' / 'otwar' -> faq(hours)
+    - 'zapis' / 'rezerw'  -> reserve_class
+    - inne -> clarify
+    Patchujemy NLUService.classify_intent, wiÄ™c nie obchodzi nas kolejnoĹ›Ä‡ importĂłw.
+    """
+    def fake_classify_intent(self, text: str, lang: str = "pl"):
+        t = (text or "").lower()
+        if "godzin" in t or "otwar" in t:
+            return {"intent": "faq", "confidence": 0.95, "slots": {"topic": "hours"}}
+        if "zapis" in t or "rezerw" in t:
+            return {
+                "intent": "reserve_class",
+                "confidence": 0.96,
+                "slots": {"class_id": "777", "member_id": "105"},
+            }
+        return {"intent": "clarify", "confidence": 0.4, "slots": {}}
+
+    # Patch na poziomie serwisu, a nie klienta OpenAI
+    monkeypatch.setattr(
+        "src.services.nlu_service.NLUService.classify_intent",
+        fake_classify_intent,
+        raising=False,
+    )
+    return fake_classify_intent
+
+
+@pytest.fixture()
+def mock_twilio(monkeypatch):
+    """
+    Mock TwilioClient uĹĽywany w outbound_sender.handler:
+    - patchujemy moduĹ‚owÄ… zmiennÄ… `twilio`,
+      wiÄ™c nie ma znaczenia, kiedy moduĹ‚ zostaĹ‚ zaimportowany.
+    """
+    sent = []
+
+    class FakeTwilioClient:
+        def send_text(self, to: str, body: str):
+            sent.append({"to": to, "body": body})
+            # symulujemy sukces
+            return {"status": "OK", "sid": "fake-sid"}
+
+    # kluczowy patch: nadpisujemy instancjÄ™ twilio w handlerze
+    monkeypatch.setattr(
+        "src.lambdas.outbound_sender.handler.twilio",
+        FakeTwilioClient(),
+        raising=False,
+    )
+    return sent
+
+
+
+@pytest.fixture()
+def mock_pg(monkeypatch):
+    """
+    Mock PerfectGymClient â€“ rezerwacja zawsze OK.
+    """
+    class FakePG:
+        def reserve_class(self, member_id: str, class_id: str, idempotency_key: str):
+            return {"ok": True, "reservation_id": f"r-{class_id}"}
+
+        def get_member(self, member_id: str):
+            return {"member_id": member_id, "status": "Current", "balance": 0}
+
+    monkeypatch.setattr(
+        "src.adapters.perfectgym_client.PerfectGymClient",
+        lambda *a, **k: FakePG(),
+        raising=False,
+    )
+    return FakePG()
+
+
+@pytest.fixture()
+def mock_jira(monkeypatch):
+    """
+    Mock JiraClient â€“ udaje utworzenie ticketa.
+    """
+    class FakeJira:
+        def create_ticket(self, summary: str, description: str, tenant_id: str):
+            return {"ok": True, "ticket": "JIRA-TEST-1"}
+
+    monkeypatch.setattr(
+        "src.adapters.jira_client.JiraClient",
+        lambda *a, **k: FakeJira(),
+        raising=False,
+    )
+    return FakeJira()
+
+
+# ============================
+#  USTAWIENIA ENV (AWS + APP)
+# ============================
+
+@pytest.fixture(autouse=True)
+def env_setup(monkeypatch):
+    # AWS fake env
+    monkeypatch.setenv("AWS_REGION", "eu-central-1")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
+    monkeypatch.setenv("MOTO_ALLOW_NONEXISTENT_REGION", "true")
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+
+    # Zadbajmy, ĹĽeby w testach NIGDY nie poszĹ‚o do prawdziwego OpenAI/Twilio/PG/Jira
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("TWILIO_ACCOUNT_SID", raising=False)
+    monkeypatch.delenv("TWILIO_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("PG_BASE_URL", raising=False)
+    monkeypatch.delenv("JIRA_URL", raising=False)
+
+    # App env
+    monkeypatch.setenv("DEV_MODE", "true")
+    monkeypatch.setenv("DDB_TABLE_MESSAGES", "Messages")
+    monkeypatch.setenv("DDB_TABLE_CONVERSATIONS", "Conversations")
+    monkeypatch.setenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
+    # domyĹ›lne "lokalne" URL-e kolejek â€“ nadpiszemy w aws_stack
+    monkeypatch.setenv("OutboundQueueUrl", "http://localhost/queue/outbound")
+    monkeypatch.setenv("InboundEventsQueueUrl", "http://localhost/queue/inbound")
+
+
+# ============================
+#  AWS STACK (Moto: SQS + DDB)
+# ============================
+
+@pytest.fixture()
+def aws_stack(monkeypatch):
+    """
+    Tworzy lokalny (Moto) stack: kolejki SQS + tabele DDB.
+    Zabezpieczone przed ResourceInUseException (idempotentne).
+    """
+    with mock_aws():
+        sqs = boto3.client("sqs", region_name="eu-central-1")
+        ddb = boto3.client("dynamodb", region_name="eu-central-1")
+
+        inbound = sqs.create_queue(QueueName="inbound-events")
+        outbound = sqs.create_queue(QueueName="outbound-messages")
+
+        monkeypatch.setenv("InboundEventsQueueUrl", inbound["QueueUrl"])
+        monkeypatch.setenv("OutboundQueueUrl", outbound["QueueUrl"])
+
+        def ensure_table(name, attrs, keys):
+            try:
+                ddb.create_table(
+                    TableName=name,
+                    BillingMode="PAY_PER_REQUEST",
+                    AttributeDefinitions=attrs,
+                    KeySchema=keys,
+                )
+            except ddb.exceptions.ResourceInUseException:
+                # tabela juĹĽ istnieje â€“ ignorujemy
+                pass
+
+        ensure_table(
+            "Messages",
+            [
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+            ],
+            [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+        )
+
+        ensure_table(
+            "Conversations",
+            [{"AttributeName": "pk", "AttributeType": "S"}],
+            [{"AttributeName": "pk", "KeyType": "HASH"}],
+        )
+
+        ensure_table(
+            "Campaigns",
+            [{"AttributeName": "pk", "AttributeType": "S"}],
+            [{"AttributeName": "pk", "KeyType": "HASH"}],
+        )
+        ensure_table(
+            "IntentsStats",
+            [
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+            ],
+            [
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+        )
+
+
+        yield {
+            "inbound": inbound["QueueUrl"],
+            "outbound": outbound["QueueUrl"],
+        }
+
+
+===== C:\ProActive\gym-integrator\tests\test_flows.py =====
+
+import json
+import boto3
+
+from src.lambdas.message_router import handler as router_handler
+from src.lambdas.outbound_sender import handler as outbound_handler
+
+
+def _read_all_messages(queue_url: str, max_msgs: int = 10):
+    """
+    Pomocniczo â€“ czytamy wiadomoĹ›ci z kolejki (Moto SQS).
+    Uwaga: WaitTimeSeconds=0 ĹĽeby nie blokowaÄ‡ testĂłw.
+    """
+    sqs = boto3.client("sqs", region_name="eu-central-1")
+    resp = sqs.receive_message(
+        QueueUrl=queue_url,
+        MaxNumberOfMessages=max_msgs,
+        WaitTimeSeconds=0,  # waĹĽne: bez dĹ‚ugiego long-polla
+    )
+    return resp.get("Messages", [])
+
+
+def test_faq_flow_to_outbound_queue(aws_stack, mock_ai):
+    outbound_url = aws_stack["outbound"]
+
+    event = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-1",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "Godziny otwarcia",
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+
+    router_handler.lambda_handler(event, None)
+
+    msgs = _read_all_messages(outbound_url)
+    assert len(msgs) >= 1  # moĹĽe byÄ‡ wiÄ™cej, bo inne testy teĹĽ mogĹ‚y coĹ› dodaÄ‡
+
+    payloads = [json.loads(m["Body"]) for m in msgs]
+
+    faq_msgs = [
+        p for p in payloads
+        if p.get("to") == "whatsapp:+48123123123"
+        and (
+            "godzin" in p.get("body", "").lower()
+            or "otwar" in p.get("body", "").lower()
+        )
+    ]
+
+    assert faq_msgs, (
+        f"Nie znaleziono odpowiedzi FAQ w wiadomoĹ›ciach: "
+        f"{[p.get('body') for p in payloads]}"
+    )
+
+
+def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg):
+    outbound_url = aws_stack["outbound"]
+
+    # 1. WiadomoĹ›Ä‡ "chcÄ™ siÄ™ zapisaÄ‡"
+    event1 = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-2",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "ChcÄ™ siÄ™ zapisaÄ‡ na zajÄ™cia",
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+    router_handler.lambda_handler(event1, None)
+
+    # Czytamy z kolejki â€“ moĹĽe byÄ‡ wiÄ™cej wiadomoĹ›ci, wiÄ™c filtrujemy
+    msgs_1 = _read_all_messages(outbound_url, max_msgs=10)
+    assert msgs_1, "Brak jakichkolwiek wiadomoĹ›ci po pierwszym kroku rezerwacji"
+
+    payloads_1 = [json.loads(m["Body"]) for m in msgs_1]
+
+    confirm_msgs = [
+        p for p in payloads_1
+        if p.get("to") == "whatsapp:+48123123123"
+        and "potwierdzasz rezerwacj" in p.get("body", "").lower()
+    ]
+    assert confirm_msgs, (
+        "Nie znaleziono wiadomoĹ›ci z proĹ›bÄ… o potwierdzenie rezerwacji.\n"
+        f"WiadomoĹ›ci w kolejce: {[p.get('body') for p in payloads_1]}"
+    )
+
+    # 2. Potwierdzenie "TAK"
+    event2 = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-3",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "TAK",
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+    router_handler.lambda_handler(event2, None)
+
+    msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
+    assert msgs_2, "Brak jakichkolwiek wiadomoĹ›ci po potwierdzeniu rezerwacji"
+
+    payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
+    success_msgs = [
+        p for p in payloads_2
+        if p.get("to") == "whatsapp:+48123123123"
+        and "zarezerwowano" in p.get("body", "").lower()
+    ]
+
+    assert success_msgs, (
+        "Nie znaleziono wiadomoĹ›ci potwierdzajÄ…cej rezerwacjÄ™.\n"
+        f"WiadomoĹ›ci w kolejce: {[p.get('body') for p in payloads_2]}"
+    )
+
+def test_clarify_flow_when_intent_unknown(aws_stack, mock_ai):
+    outbound_url = aws_stack["outbound"]
+
+    event = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-4",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "asdfasdfasdf",  # przypadkowy tekst â†’ intent=clarify
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+
+    # Uruchamiamy router
+    router_handler.lambda_handler(event, None)
+
+    # Czytamy wiadomoĹ›ci z kolejki (moĹĽe byÄ‡ ich kilka!)
+    msgs = _read_all_messages(outbound_url, max_msgs=10)
+    assert msgs, f"Brak jakichkolwiek wiadomoĹ›ci w kolejce outbound: {msgs}"
+
+    payloads = [json.loads(m["Body"]) for m in msgs]
+
+    # Szukamy odpowiedzi clarify
+    clarify = [
+        p for p in payloads
+        if "doprec" in p.get("body", "").lower()  # obsĹ‚uguje doprecyzuj / doprecyzowaÄ‡
+        and p.get("to") == "whatsapp:+48123123123"
+    ]
+
+    assert clarify, (
+        "Brak wiadomoĹ›ci clarify (proĹ›by o doprecyzowanie) w kolejce.\n"
+        f"A oto wszystkie wiadomoĹ›ci: {[p.get('body') for p in payloads]}"
+    )
+
+
+
+def test_outbound_sender_uses_twilio_client(mock_twilio):
+    event = {
+        "Records": [
+            {"body": json.dumps({"to": "whatsapp:+48123123123", "body": "Hej z testu!"})}
+        ]
+    }
+
+    outbound_handler.lambda_handler(event, None)
+
+    assert len(mock_twilio) == 1
+    assert mock_twilio[0]["to"] == "whatsapp:+48123123123"
+    assert "Hej z testu!" in mock_twilio[0]["body"]
+
+
+===== C:\ProActive\gym-integrator\tests\test_inbound_webhook.py =====
+
+from src.lambdas.inbound_webhook.handler import lambda_handler
+
+def test_inbound_pushes_to_sqs(aws_stack):
+    event = {
+        "headers": {"Host": "localhost"},
+        "requestContext": {"path": "/webhooks/twilio", "requestTimeEpoch": 0},
+        "body": "From=whatsapp%3A%2B48123123123&To=whatsapp%3A%2B48000000000&Body=godziny",
+    }
+    res = lambda_handler(event, None)
+    assert res["statusCode"] == 200
+
+def test_inbound_rate_limited_returns_429(aws_stack, monkeypatch):
+    # erzatz SpamService, ktĂłry zawsze blokuje
+    class FakeSpam:
+        def is_blocked(self, tenant_id, phone):
+            return True
+
+    monkeypatch.setattr(
+        "src.lambdas.inbound_webhook.handler.spam_service",
+        FakeSpam(),
+        raising=False,
+    )
+
+    from src.lambdas.inbound_webhook.handler import lambda_handler
+
+    event = {
+        "headers": {"Host": "localhost"},
+        "requestContext": {"path": "/webhooks/twilio", "requestTimeEpoch": 0},
+        "body": "From=whatsapp%3A%2B48123123123&To=whatsapp%3A%2B48000000000&Body=godziny",
+    }
+
+    res = lambda_handler(event, None)
+    assert res["statusCode"] == 429
+
+
+===== C:\ProActive\gym-integrator\tests\test_message_router.py =====
+
+import json, boto3
+from src.lambdas.message_router.handler import lambda_handler
+
+def test_router_faq_to_outbound(aws_stack, mocker):
+    # Twardo wymuszamy, ĹĽe NLU zwraca FAQ(hours)
+    mocker.patch(
+        "src.services.nlu_service.NLUService.classify_intent",
+        return_value={"intent": "faq", "confidence": 0.9, "slots": {"topic": "hours"}},
+    )
+
+    event = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-1",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "godziny",
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+
+    lambda_handler(event, None)
+
+    sqs = boto3.client("sqs", region_name="eu-central-1")
+    resp = sqs.receive_message(
+        QueueUrl=aws_stack["outbound"],
+        MaxNumberOfMessages=10,
+        WaitTimeSeconds=0,  # bez long-polla
+    )
+    messages = resp.get("Messages", [])
+    assert messages, "Brak wiadomoĹ›ci na kolejce outbound"
+
+    payloads = [json.loads(m["Body"]) for m in messages]
+
+    faq_msgs = [
+        p
+        for p in payloads
+        if p.get("to") == "whatsapp:+48123123123"
+        and ("godzin" in p.get("body", "").lower() or "otwar" in p.get("body", "").lower())
+    ]
+
+    assert faq_msgs, (
+        "Nie znaleziono odpowiedzi FAQ na 'godziny' w kolejce outbound.\n"
+        f"WiadomoĹ›ci: {[p.get('body') for p in payloads]}"
+    )
+
+def test_router_reservation_confirm_flow(aws_stack, mocker):
+    mocker.patch("src.services.nlu_service.NLUService.classify_intent", return_value={
+        "intent":"reserve_class","confidence":0.9,"slots":{"class_id":"777","member_id":"105"}
+    })
+    event1 = {"Records":[{"body": json.dumps({
+        "event_id":"evt-2","from":"whatsapp:+48123123123","to":"whatsapp:+48000000000","body":"chcÄ™ rezerwacjÄ™","tenant_id":"default"
+    })}]}
+    lambda_handler(event1, None)
+
+    mocker.patch("src.adapters.perfectgym_client.PerfectGymClient.reserve_class", return_value={"ok": True, "reservation_id":"r-777"})
+    event2 = {"Records":[{"body": json.dumps({
+        "event_id":"evt-3","from":"whatsapp:+48123123123","to":"whatsapp:+48000000000","body":"TAK","tenant_id":"default"
+    })}]}
+    lambda_handler(event2, None)
+
+    sqs = boto3.client("sqs", region_name="eu-central-1")
+    msgs = sqs.receive_message(QueueUrl=aws_stack["outbound"], MaxNumberOfMessages=10)
+    bodies = [json.loads(m["Body"]) for m in msgs.get("Messages", [])]
+    assert any("Czy potwierdzasz rezerwacjÄ™" in b.get("body","") for b in bodies)
+    assert any("Zarezerwowano" in b.get("body","") for b in bodies)
+
+
+===== C:\ProActive\gym-integrator\tests\test_outbound_sender.py =====
+
+import json
+from src.lambdas.outbound_sender.handler import lambda_handler
+
+def test_outbound_sender_dev_mode():
+    event = {"Records":[{"body": json.dumps({"to":"whatsapp:+48123","body":"Hej!"})}]}
+    res = lambda_handler(event, None)
+    assert res["statusCode"] == 200
+
+
+===== C:\ProActive\gym-integrator\tests\test_spam_service.py =====
+
+import os
+from src.services.spam_service import SpamService
+from src.common.aws import ddb_resource
+
+def test_spam_service_blocks_after_limit(aws_stack):
+    fixed_ts = 1_700_000_000  # dowolny staĹ‚y timestamp
+
+    svc = SpamService(
+        now_fn=lambda: fixed_ts,
+        bucket_seconds=60,
+        max_per_bucket=3,
+    )
+
+    tenant = "test-tenant-spam"  # inny tenant niĹĽ "default", ĹĽeby nie kolidowaÄ‡
+    phone = "whatsapp:+48123123123"
+
+    blocked_flags = [svc.is_blocked(tenant, phone) for _ in range(5)]
+
+    assert blocked_flags[:3] == [False, False, False]
+    assert blocked_flags[3:] == [True, True]
+
