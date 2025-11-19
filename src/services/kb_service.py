@@ -27,10 +27,13 @@ class KBService:
     def __init__(self) -> None:
         """Inicjalizuje serwis, zapisując konfigurację bucketa i pusty cache w pamięci."""
         self.bucket: str = settings.kb_bucket
-        # cache: {tenant_id: {topic: answer}}
+        # cache: { "tenant/lang": {topic: answer} }
         self._cache: Dict[str, Dict[str, str]] = {}
 
-    def _load_tenant_faq(self, tenant_id: str) -> Optional[Dict[str, str]]:
+    def _cache_key(self, tenant_id: str, language_code: str | None) -> str:
+        return f"{tenant_id}/{language_code or 'default'}"
+        
+    def _load_tenant_faq(self, tenant_id: str, language_code: str | None) -> Optional[Dict[str, str]]:
         """
         Ładuje FAQ dla podanego tenanta z S3 (jeśli skonfigurowano bucket).
 
@@ -41,16 +44,18 @@ class KBService:
         if not self.bucket:
             return None
 
-        if tenant_id in self._cache:
-            return self._cache[tenant_id]
+        cache_key = self._cache_key(tenant_id, language_code)
+        if cache_key in self._cache:
+            return self._cache[cache_key]
 
-        key = f"kb/{tenant_id}/faq.json"
+        lang = language_code or "default"
+        key = f"kb/{tenant_id}/{lang}/faq.json"
+
         try:
             obj = s3_client().get_object(Bucket=self.bucket, Key=key)
             data = json.loads(obj["Body"].read())
             if isinstance(data, dict):
-                # zapamiętujemy w cache
-                self._cache[tenant_id] = data
+                self._cache[cache_key] = data
                 logger.info({"kb": "loaded", "bucket": self.bucket, "key": key})
                 return data
             logger.warning({"kb": "invalid_format", "bucket": self.bucket, "key": key})
@@ -59,7 +64,7 @@ class KBService:
             logger.info({"kb": "miss", "bucket": self.bucket, "key": key})
             return None
 
-    def answer(self, topic: str, tenant_id: str) -> Optional[str]:
+    def answer(self, topic: str, tenant_id: str, language_code: str | None = None) -> Optional[str]:
         """
         Zwraca odpowiedź FAQ dla danego tematu i tenanta.
 
@@ -72,10 +77,9 @@ class KBService:
         if not topic:
             return None
 
-        # 1) S3 (jeśli skonfigurowane)
-        tenant_faq = self._load_tenant_faq(tenant_id)
+        tenant_faq = self._load_tenant_faq(tenant_id, language_code)
         if tenant_faq and topic in tenant_faq:
             return tenant_faq[topic]
 
-        # 2) fallback do domyślnej listy
+        # fallback na domyślne (na razie bez wariantów językowych)
         return DEFAULT_FAQ.get(topic)

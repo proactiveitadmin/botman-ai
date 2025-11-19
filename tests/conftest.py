@@ -74,8 +74,9 @@ def mock_pg(monkeypatch):
         def get_member(self, member_id: str):
             return {"member_id": member_id, "status": "Current", "balance": 0}
 
+    # patchujemy PerfectGymClient w module routing_service
     monkeypatch.setattr(
-        "src.adapters.perfectgym_client.PerfectGymClient",
+        "src.services.routing_service.PerfectGymClient",
         lambda *a, **k: FakePG(),
         raising=False,
     )
@@ -126,6 +127,8 @@ def env_setup(monkeypatch):
     monkeypatch.setenv("DDB_TABLE_MESSAGES", "Messages")
     monkeypatch.setenv("DDB_TABLE_CONVERSATIONS", "Conversations")
     monkeypatch.setenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
+    monkeypatch.setenv("DDB_TABLE_INTENTS_STATS", "IntentsStats")  # DODANE
+    
     # domyślne "lokalne" URL-e kolejek – nadpiszemy w aws_stack
     monkeypatch.setenv("OutboundQueueUrl", "http://localhost/queue/outbound")
     monkeypatch.setenv("InboundEventsQueueUrl", "http://localhost/queue/inbound")
@@ -163,6 +166,7 @@ def aws_stack(monkeypatch):
                 # tabela już istnieje – ignorujemy
                 pass
 
+        # Messages
         ensure_table(
             "Messages",
             [
@@ -175,17 +179,21 @@ def aws_stack(monkeypatch):
             ],
         )
 
+        # Conversations
         ensure_table(
             "Conversations",
             [{"AttributeName": "pk", "AttributeType": "S"}],
             [{"AttributeName": "pk", "KeyType": "HASH"}],
         )
 
+        # Campaigns
         ensure_table(
             "Campaigns",
             [{"AttributeName": "pk", "AttributeType": "S"}],
             [{"AttributeName": "pk", "KeyType": "HASH"}],
         )
+
+        # IntentsStats – pod SpamService
         ensure_table(
             "IntentsStats",
             [
@@ -197,7 +205,33 @@ def aws_stack(monkeypatch):
                 {"AttributeName": "sk", "KeyType": "RANGE"},
             ],
         )
+        # Tenants – pod przyszłe repo Tenants / language per klub
+        ensure_table(
+            "Tenants",
+            [{"AttributeName": "tenant_id", "AttributeType": "S"}],
+            [{"AttributeName": "tenant_id", "KeyType": "HASH"}],
+        )
 
+        # Templates – pod TemplateService z DDB
+        ensure_table(
+            "Templates",
+            [{"AttributeName": "pk", "AttributeType": "S"}],
+            [{"AttributeName": "pk", "KeyType": "HASH"}],
+        )
+
+        # Consents – pod ConsentService (na razie stub, ale niech będzie)
+        ensure_table(
+            "Consents",
+            [{"AttributeName": "pk", "AttributeType": "S"}],
+            [{"AttributeName": "pk", "KeyType": "HASH"}],
+        )
+        
+        # MembersIndex – pod MembersIndexRepo
+        ensure_table(
+            "MembersIndex",
+            [{"AttributeName": "pk", "AttributeType": "S"}],
+            [{"AttributeName": "pk", "KeyType": "HASH"}],
+        )
 
         yield {
             "inbound": inbound["QueueUrl"],

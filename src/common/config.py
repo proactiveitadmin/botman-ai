@@ -51,6 +51,11 @@ class Settings:
     # Kolejki (opcjonalnie, żeby mieć 1 źródło prawdy)
     inbound_queue_url: str = os.getenv("InboundEventsQueueUrl", "")
     outbound_queue_url: str = os.getenv("OutboundQueueUrl", "")
+    
+    # np. w common/config.py
+    def get_default_language(self) -> str:
+        return self.tenant_default_lang or "en"
+
 
 
 # Globalna instancja ustawień używana w całej aplikacji.

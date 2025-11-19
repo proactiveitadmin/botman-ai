@@ -16,7 +16,12 @@ from ..services.kb_service import KBService
 from ..services.template_service import TemplateService
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..storage.ddb import ConversationsRepo
+from ..storage.tenants_repo import TenantsRepo
 from ..common.utils import new_id
+from ..services.metrics_service import MetricsService        
+from ..adapters.jira_client import JiraClient
+from ..storage.ddb import MembersIndexRepo
+from ..common.config import settings
 
 # Zestaw słów oznaczających potwierdzenie rezerwacji.
 CONFIRM_WORDS = {"tak", "tak.", "potwierdzam", "ok"}
@@ -36,14 +41,8 @@ class RoutingService:
         self.tpl = TemplateService()
         self.pg = PerfectGymClient()
         self.conv = ConversationsRepo()
-
-        # >>> TO MUSI TU BYĆ <<<
-        from ..services.metrics_service import MetricsService
+        self.tenants = TenantsRepo()
         self.metrics = MetricsService()
-
-        # Jeśli używasz MembersIndexRepo i JiraClient:
-        from ..adapters.jira_client import JiraClient
-        from ..storage.ddb import MembersIndexRepo
         self.jira = JiraClient()
         self.members_index = MembersIndexRepo()
 
@@ -54,6 +53,30 @@ class RoutingService:
         """
         return f"pending#{phone}"
 
+    def _resolve_and_persist_language(self, msg: Message) -> str:
+        # 1. Czy mamy już conversation z językiem?
+        existing = self.conv.get_conversation(msg.tenant_id, msg.from_phone)
+        if existing and existing.get("language_code"):
+            return existing["language_code"]
+
+        # 2. Tenant
+        tenant = self.tenants.get(msg.tenant_id) or {}
+        lang = tenant.get("language_code") or settings.get_default_language()
+
+        # 3. Zapis/aktualizacja rozmowy
+        self.conv.upsert_conversation(
+            msg.tenant_id,
+            msg.from_phone,
+            language_code=lang,
+            last_intent=None,
+            state_machine_status=None,
+        )
+        return lang
+
+    def change_conversation_language(self, tenant_id: str, phone: str, new_lang: str) -> dict:
+        """Metoda użyteczna na przyszłość (panel konsultanta)."""
+        return self.conv.set_language(tenant_id, phone, new_lang)
+
     def handle(self, msg: Message) -> List[Action]:
         """
         Przetwarza pojedynczą wiadomość biznesową i zwraca listę akcji do wykonania.
@@ -61,6 +84,8 @@ class RoutingService:
         Zwraca zwykle jedną akcję typu "reply", ale architektura pozwala na wiele akcji w przyszłości.
         """
         text = (msg.body or "").strip().lower()
+        # --- ustalenie języka rozmowy ---
+        lang = self._resolve_and_persist_language(msg)
 
         # --- 1. Obsługa oczekującej rezerwacji (TAK/NIE) ---
         pending = self.conv.get(self._pending_key(msg.from_phone))
@@ -116,22 +141,35 @@ class RoutingService:
             # traktujemy ją jako nowe zapytanie i NIE kasujemy pending.
 
         # --- 2. Klasyfikacja intencji ---
-        nlu = self.nlu.classify_intent(msg.body, lang="pl")
+        nlu = self.nlu.classify_intent(msg.body, lang=lang)
         intent = nlu.get("intent", "clarify")
         slots = nlu.get("slots", {}) or {}
 
         self.metrics.incr("intent_detected", intent=intent, tenant=msg.tenant_id)
-
-        # --- 3. FAQ ---
+        
+        # --- 3. Zapisz info o rozmowie (intent, stan, język) ---
+        self.conv.upsert_conversation(
+            msg.tenant_id,
+            msg.from_phone,
+            last_intent=intent,
+            state_machine_status=(
+                "awaiting_confirmation" 
+                if intent == "reserve_class" 
+                else None
+            ),
+            language_code=lang,
+        )
+        
+        # --- 4. FAQ ---
         if intent == "faq":
             topic = slots.get("topic", "hours")
             answer = (
-                self.kb.answer(topic, tenant_id=msg.tenant_id)
+                self.kb.answer(topic, tenant_id=msg.tenant_id, language_code=lang)
                 or "Przepraszam, nie mam informacji."
             )
             return [Action("reply", {"to": msg.from_phone, "body": answer})]
 
-        # --- 4. Rezerwacja zajęć ---
+        # --- 5. Rezerwacja zajęć ---
         if intent == "reserve_class":
             class_id = slots.get("class_id", "101")
             member_id = slots.get("member_id", "105")
@@ -145,10 +183,11 @@ class RoutingService:
                 }
             )
             body = self.tpl.render(CONFIRM_TEMPLATE, {"class_id": class_id})
+            # w przyszłości -> self.tpl.render_named(msg.tenant_id, "reserve_confirm", lang, {...})
             return [Action("reply", {"to": msg.from_phone, "body": body})]
 
 
-        # --- 5. Handover do człowieka ---
+        # --- 6. Handover do człowieka ---
         if intent == "handover":
             return [
                 Action(
@@ -160,7 +199,7 @@ class RoutingService:
                 )
             ]
             
-        # --- 5. Ticket do systemu ticketowego(Jira) ---   
+        # --- 7. Ticket do systemu ticketowego(Jira) ---   
         if intent == "ticket":
             res = self.jira.create_ticket(
                 summary=slots.get("summary") or "Zgłoszenie klienta",
@@ -173,7 +212,7 @@ class RoutingService:
                 body = "Nie udało się utworzyć zgłoszenia. Spróbuj później."
             return [Action("reply", {"to": msg.from_phone, "body": body})]
             
-        # --- 6. Domyślny clarify ---
+        # --- 8. Domyślny clarify ---
         return [
             Action(
                 "reply",

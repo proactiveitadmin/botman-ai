@@ -1,5 +1,6 @@
 import json
 import boto3
+import pytest
 
 from src.lambdas.message_router import handler as router_handler
 from src.lambdas.outbound_sender import handler as outbound_handler
@@ -14,11 +15,20 @@ def _read_all_messages(queue_url: str, max_msgs: int = 10):
     resp = sqs.receive_message(
         QueueUrl=queue_url,
         MaxNumberOfMessages=max_msgs,
-        WaitTimeSeconds=0,  # ważne: bez długiego long-polla
+        WaitTimeSeconds=0,
     )
     return resp.get("Messages", [])
 
-
+@pytest.fixture(autouse=True)
+def purge_queues_before_flow_tests(aws_stack):
+    """
+    Czyścimy outbound (i ewentualnie inbound) przed każdym testem flow,
+    żeby nie widzieć wiadomości z innych testów.
+    """
+    sqs = boto3.client("sqs", region_name="eu-central-1")
+    for url in aws_stack.values():
+        sqs.purge_queue(QueueUrl=url)
+        
 def test_faq_flow_to_outbound_queue(aws_stack, mock_ai):
     outbound_url = aws_stack["outbound"]
 
