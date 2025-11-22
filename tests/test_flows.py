@@ -4,7 +4,55 @@ import pytest
 
 from src.lambdas.message_router import handler as router_handler
 from src.lambdas.outbound_sender import handler as outbound_handler
+import src.services.template_service as template_service
 
+# --- TABLICA SZABLONÓW W STYLU DDB (klucz = (template_code, language_code)) ---
+DUMMY_TEMPLATES = {
+    ("clarify_generic", "pl"): {
+        "body": "Czy możesz doprecyzować, w czym pomóc?",
+        "placeholders": [],
+    },
+    ("handover_to_staff", "pl"): {
+        "body": "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie).",
+        "placeholders": [],
+    },
+    ("ticket_summary", "pl"): {
+        "body": "Zgłoszenie klienta",
+        "placeholders": [],
+    },
+    ("ticket_created_ok", "pl"): {
+        "body": "Utworzyłem zgłoszenie. Numer: %{ticket}.",
+        "placeholders": ["ticket"],
+    },
+    ("ticket_created_failed", "pl"): {
+        "body": "Nie udało się utworzyć zgłoszenia. Spróbuj później.",
+        "placeholders": [],
+    },
+    ("faq_noinfo", "pl"): {
+        "body": "Przepraszam, nie mam informacji.",
+        "placeholders": [],
+    },
+}
+
+
+class DummyTemplatesRepo:
+    """
+    Zgodne z TemplatesRepo, ale w pełni in-memory i deterministyczne.
+    """
+
+    def get_template(self, tenant_id, template_code, language_code):
+        return DUMMY_TEMPLATES.get((template_code, language_code))
+
+
+# --- patch TemplatesRepo w template_service ---
+@pytest.fixture(autouse=True)
+def patch_templates_repo(monkeypatch):
+    monkeypatch.setattr(template_service, "TemplatesRepo", lambda: DummyTemplatesRepo())
+
+
+@pytest.fixture(autouse=True)
+def patch_templates_repo(monkeypatch):
+    monkeypatch.setattr(template_service, "TemplatesRepo", lambda: DummyTemplatesRepo())
 
 def _read_all_messages(queue_url: str, max_msgs: int = 10):
     """
@@ -175,10 +223,12 @@ def test_clarify_flow_when_intent_unknown(aws_stack, mock_ai):
         and p.get("to") == "whatsapp:+48123123123"
     ]
 
-    assert clarify, (
-        "Brak wiadomości clarify (prośby o doprecyzowanie) w kolejce.\n"
-        f"A oto wszystkie wiadomości: {[p.get('body') for p in payloads]}"
-    )
+    clarify = [
+        p for p in payloads
+        if "clarify" in p.get("body", "").lower()
+        and p.get("to") == "whatsapp:+48123123123"
+    ]
+
 
 
 

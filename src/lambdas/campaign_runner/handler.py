@@ -61,6 +61,7 @@ def lambda_handler(event, context):
             continue
 
         tenant_id = item.get("tenant_id", "default")
+        lang = item.get("language_code")  # <- nowość
 
         for phone in svc.select_recipients(item):
             if not consents.has_opt_in(tenant_id, phone):
@@ -72,6 +73,9 @@ def lambda_handler(event, context):
                 "body": body,
                 "tenant_id": tenant_id,
             }
+            if lang:
+                payload["language_code"] = lang
+
             sqs_client().send_message(
                 QueueUrl=out_q_url,
                 MessageBody=json.dumps(payload),

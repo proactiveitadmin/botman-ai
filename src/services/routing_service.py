@@ -144,8 +144,11 @@ class RoutingService:
         nlu = self.nlu.classify_intent(msg.body, lang=lang)
         intent = nlu.get("intent", "clarify")
         slots = nlu.get("slots", {}) or {}
+        confidence = nlu.get("confidence", 1.0)
 
-        self.metrics.incr("intent_detected", intent=intent, tenant=msg.tenant_id)
+        if intent != "clarify" and confidence < 0.3:
+            intent = "clarify"
+
         
         # --- 3. Zapisz info o rozmowie (intent, stan, język) ---
         self.conv.upsert_conversation(
@@ -189,12 +192,18 @@ class RoutingService:
 
         # --- 6. Handover do człowieka ---
         if intent == "handover":
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "handover_to_staff",
+                lang,
+                {},
+            )
             return [
                 Action(
                     "reply",
                     {
                         "to": msg.from_phone,
-                        "body": "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie).",
+                        "body": body,
                     },
                 )
             ]
@@ -202,23 +211,42 @@ class RoutingService:
         # --- 7. Ticket do systemu ticketowego(Jira) ---   
         if intent == "ticket":
             res = self.jira.create_ticket(
-                summary=slots.get("summary") or "Zgłoszenie klienta",
+                summary=slots.get("summary")
+                or self.tpl.render_named(msg.tenant_id, "ticket_summary", lang, {}),
                 description=slots.get("description") or msg.body,
-                tenant_id=msg.tenant_id
+                tenant_id=msg.tenant_id,
             )
+
             if res.get("ok"):
-                body = f"Utworzyłem zgłoszenie. Numer: {res['ticket']}."
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "ticket_created_ok",
+                    lang,
+                    {"ticket": res["ticket"]},
+                )
             else:
-                body = "Nie udało się utworzyć zgłoszenia. Spróbuj później."
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "ticket_created_failed",
+                    lang,
+                    {},
+                )
+
             return [Action("reply", {"to": msg.from_phone, "body": body})]
-            
+
         # --- 8. Domyślny clarify ---
+        body = self.tpl.render_named(
+            msg.tenant_id,
+            "clarify_generic",
+            lang,
+            {},
+        )
         return [
             Action(
                 "reply",
                 {
                     "to": msg.from_phone,
-                    "body": "Czy możesz doprecyzować, w czym pomóc?",
+                    "body": body,
                 },
             )
         ]

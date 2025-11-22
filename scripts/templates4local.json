@@ -1,0 +1,59 @@
+{
+  "Templates-gi-dev": [
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id":     { "S": "default" },
+          "template_code": { "S": "handover_to_staff" },
+          "language_code": { "S": "pl" },
+          "body":          { "S": "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)." },
+          "placeholders":  { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id":     { "S": "default" },
+          "template_code": { "S": "ticket_summary" },
+          "language_code": { "S": "pl" },
+          "body":          { "S": "Zgłoszenie klienta" },
+          "placeholders":  { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id":     { "S": "default" },
+          "template_code": { "S": "ticket_created_ok" },
+          "language_code": { "S": "pl" },
+          "body":          { "S": "Utworzyłem zgłoszenie. Numer: %{ticket}." },
+          "placeholders":  { "L": [ { "S": "ticket" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id":     { "S": "default" },
+          "template_code": { "S": "ticket_created_failed" },
+          "language_code": { "S": "pl" },
+          "body":          { "S": "Nie udało się utworzyć zgłoszenia. Spróbuj później." },
+          "placeholders":  { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id":     { "S": "default" },
+          "template_code": { "S": "clarify_generic" },
+          "language_code": { "S": "pl" },
+          "body":          { "S": "Czy możesz doprecyzować, w czym pomóc?" },
+          "placeholders":  { "L": [] }
+        }
+      }
+    }
+  ]
+}

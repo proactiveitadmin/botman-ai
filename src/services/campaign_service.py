@@ -12,16 +12,82 @@ DEFAULT_SEND_TO = os.getenv("CAMPAIGN_SEND_TO", "20:00")
 
 class CampaignService:
     def __init__(self, now_fn=None) -> None:
-        """
-        now_fn – do testów możemy wstrzyknąć własną funkcję zwracającą datetime.
-        Domyślnie używamy UTC (Lambda).
-        """
         self._now_fn = now_fn or datetime.utcnow
 
     def select_recipients(self, campaign: Dict) -> List[str]:
-        recipients = campaign.get("recipients", [])
-        logger.info({"campaign": "recipients", "count": len(recipients)})
-        return recipients
+        """
+        Zwraca listę numerów telefonu dla kampanii.
+
+        Obsługiwane formaty:
+          1) Proste: ["whatsapp:+48...", ...]
+          2) Z tagami:
+             [
+               {"phone": "whatsapp:+48...", "tags": ["vip", "active"]},
+               ...
+             ]
+
+        Filtry:
+          - include_tags: jeżeli niepuste, bierzemy tylko odbiorców posiadających
+            przynajmniej jeden z tagów
+          - exclude_tags: jeżeli odbiorca ma którykolwiek z tych tagów, jest pomijany
+        """
+        raw_recipients = campaign.get("recipients", []) or []
+        include_tags = set(campaign.get("include_tags") or [])
+        exclude_tags = set(campaign.get("exclude_tags") or [])
+
+        result: List[str] = []
+
+        # tryb: brak filtrów -> zachowaj się jak dotychczas
+        if not include_tags and not exclude_tags:
+            for r in raw_recipients:
+                if isinstance(r, dict):
+                    phone = r.get("phone")
+                else:
+                    phone = r
+                if phone:
+                    result.append(phone)
+            logger.info(
+                {"campaign": "recipients",
+                 "mode": "simple",
+                 "count": len(result)}
+            )
+            return result
+
+        # tryb z filtrami / tagami
+        for r in raw_recipients:
+            if isinstance(r, dict):
+                phone = r.get("phone")
+                tags = set(r.get("tags") or [])
+            else:
+                # brak struktury -> nie umiemy ocenić tagów,
+                # więc traktujemy tags = empty set
+                phone = r
+                tags = set()
+
+            if not phone:
+                continue
+
+            # include_tags: musi być przecięcie
+            if include_tags and not (tags & include_tags):
+                continue
+
+            # exclude_tags: jeśli przecięcie niepuste -> skip
+            if exclude_tags and (tags & exclude_tags):
+                continue
+
+            result.append(phone)
+
+        logger.info(
+            {
+                "campaign": "recipients",
+                "mode": "filtered",
+                "count": len(result),
+                "include_tags": list(include_tags),
+                "exclude_tags": list(exclude_tags),
+            }
+        )
+        return result
+
 
     @staticmethod
     def _parse_hhmm(value: str) -> time:

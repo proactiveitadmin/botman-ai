@@ -15,7 +15,39 @@ def test_faq_intent_uses_kb_service_answer():
             return " KB answer "
 
     class DummyTemplateService:
-        pass
+        """
+        Dummy szablonów na potrzeby testów routingu.
+        Nie korzysta z żadnego DDB – tylko stałe stringi.
+        """
+
+        def render(self, template: str, context: dict):
+            # Używane przy CONFIRM_TEMPLATE: np. "Potwierdź rezerwację %{class_id}"
+            text = template
+            for k, v in (context or {}).items():
+                placeholder = f"%{{{k}}}"
+                text = text.replace(placeholder, str(v))
+            return text
+
+        def render_named(self, tenant_id: str, name: str, language_code: str, context: dict):
+            # Szablony, których używa RoutingService
+            if name == "clarify_generic":
+                return "Czy możesz doprecyzować, w czym pomóc?"
+
+            if name == "handover_to_staff":
+                return "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)."
+
+            if name == "ticket_summary":
+                return "Zgłoszenie klienta"
+
+            if name == "ticket_created_ok":
+                ticket = context.get("ticket", "XXX")
+                return f"Utworzyłem zgłoszenie. Numer: {ticket}."
+
+            if name == "ticket_created_failed":
+                return "Nie udało się utworzyć zgłoszenia. Spróbuj później."
+
+            # Fallback – przydatny w debugowaniu
+            return name
 
     class DummyRepos:
         class DummyConversations:

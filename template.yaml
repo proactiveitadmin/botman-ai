@@ -310,7 +310,9 @@ Resources:
         - DynamoDBReadPolicy:
             TableName: !Ref Campaigns
         - SQSSendMessagePolicy:
-            QueueName: !GetAtt OutboundQueue.QueueName
+            QueueName: !GetAtt OutboundQueue.QueueName 
+        - DynamoDBReadPolicy:
+            TableName: !Ref Consents
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue

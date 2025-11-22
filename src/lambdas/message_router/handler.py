@@ -9,6 +9,7 @@ import json
 
 from ...domain.models import Message
 from ...services.routing_service import RoutingService
+from ...services.template_service import TemplateService
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
@@ -25,6 +26,7 @@ def lambda_handler(event, context):
     - dla akcji typu "reply" publikuje komunikat do kolejki outbound.
     """
     router = RoutingService()
+    router.tpl = TemplateService()
     out_queue = resolve_queue_url("OutboundQueueUrl")
 
     records = event.get("Records", []) or []

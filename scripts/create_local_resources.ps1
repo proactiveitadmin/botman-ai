@@ -33,6 +33,8 @@ aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name
 
 aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name MembersIndex --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
 
+aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Consents --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+
 #"=== S3 bucket ==="
 
 aws --endpoint-url $Endpoint --region $Region s3api create-bucket --bucket local-kb

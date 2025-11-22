@@ -16,8 +16,39 @@ class DummyKB:
 
 
 class DummyTemplateService:
-    def render(self, tenant_id: str, language_code: str | None):
-        return "Czy możesz doprecyzować, o co dokładnie chodzi?"
+    """
+    Dummy szablonów na potrzeby testów routingu.
+    Nie korzysta z żadnego DDB – tylko stałe stringi.
+    """
+
+    def render(self, template: str, context: dict):
+        # Używane przy CONFIRM_TEMPLATE: np. "Potwierdź rezerwację %{class_id}"
+        text = template
+        for k, v in (context or {}).items():
+            placeholder = f"%{{{k}}}"
+            text = text.replace(placeholder, str(v))
+        return text
+
+    def render_named(self, tenant_id: str, name: str, language_code: str, context: dict):
+        # Szablony, których używa RoutingService
+        if name == "clarify_generic":
+            return "Czy możesz doprecyzować, w czym pomóc?"
+
+        if name == "handover_to_staff":
+            return "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)."
+
+        if name == "ticket_summary":
+            return "Zgłoszenie klienta"
+
+        if name == "ticket_created_ok":
+            ticket = context.get("ticket", "XXX")
+            return f"Utworzyłem zgłoszenie. Numer: {ticket}."
+
+        if name == "ticket_created_failed":
+            return "Nie udało się utworzyć zgłoszenia. Spróbuj później."
+
+        # Fallback – przydatny w debugowaniu
+        return name
 
 
 class DummyRepos:
@@ -90,4 +121,4 @@ def test_low_confidence_triggers_clarify():
     assert len(actions) == 1
     action = actions[0]
     assert action.type == "reply"
-    assert "doprecyz" in action.payload["body"].lower()
+    assert "doprec" in action.payload["body"].lower()
