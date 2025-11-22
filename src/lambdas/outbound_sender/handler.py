@@ -1,15 +1,13 @@
 import json
+
 from ...adapters.twilio_client import TwilioClient
 from ...common.aws import sqs_client, resolve_queue_url
-from ...common.security import verify_twilio_signature
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
-from ...services.spam_service import SpamService
 from ...services.metrics_service import MetricsService
 
 
 twilio = TwilioClient()
-spam_service = SpamService()
 metrics = MetricsService()
 
 

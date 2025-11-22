@@ -11,11 +11,18 @@ def _cfg():
         retries={"max_attempts": int(os.getenv("AWS_MAX_ATTEMPTS", "3")), "mode": "standard"}
     )
 
-def resolve_queue_url(name_env_key: str) -> str:
-    name = os.getenv(name_env_key)
-    if not name:
-        raise RuntimeError(f"Missing {name_env_key} in ENV")
-    return name
+def resolve_queue_url(env_name: str) -> str:
+    url = os.getenv(env_name)
+    if url:
+        return url
+
+    # LocalStack fallback by queue name
+    try:
+        sqs = sqs_client()
+        return sqs.get_queue_url(QueueName=env_name)["QueueUrl"]
+    except Exception:
+        raise ValueError(f"Missing queue URL env: {env_name}")
+
     
 def _endpoint_for(service: str) -> str | None:
     # 1) endpoint per-usługa (najwyższy priorytet)

@@ -87,7 +87,7 @@ def lambda_handler(event, context):
     """
     Główny handler AWS Lambda dla webhooka Twilio.
 
-    Waliduje sygnaturę (chyba że TWILIO_SKIP_SIGNATURE=true), a następnie:
+    Waliduje sygnaturę (chyba że DEV_MODE=true), a następnie:
     - buduje obiekt zdarzenia wewnętrznego,
     - wysyła go do kolejki InboundEventsQueueUrl.
     """
@@ -105,17 +105,14 @@ def lambda_handler(event, context):
         content_type = headers_in.get("Content-Type") or headers_in.get("content-type") or ""
 
         params = _parse_params(body_raw, content_type)
-
+        
+        url = _build_public_url(event, headers_in)
+        signature = headers_in.get("X-Twilio-Signature", "")
+        
         # Weryfikacja sygnatury Twilio (jeśli nie wyłączona flagą)
-        if os.getenv("TWILIO_SKIP_SIGNATURE", "false").lower() != "true":
-            url = _build_public_url(event, headers_in)
-            signature = headers_in.get("X-Twilio-Signature", "")
-
-            if not verify_twilio_signature(url, params, signature):
-                logger.warning({"webhook": "invalid_signature"})
-                return {"statusCode": 403, "body": "Forbidden"}
-        else:
-            logger.info({"webhook": "signature_skipped_dev"})
+        if not verify_twilio_signature(url, params, signature):
+            logger.warning({"webhook": "invalid_signature"})
+            return {"statusCode": 403, "body": "Forbidden"}
 
         tenant_id = "default"  # TODO: w przyszłości mapowanie po numerze / endpointcie
         from_phone = params.get("From")
@@ -160,5 +157,5 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        logger.exception({"error": str(e)})
-        return {"statusCode": 500, "body": f"Error: {e}"}
+        logger.error({"inbound_error": str(e)})
+        return {"statusCode": 200, "body": "<Response></Response>"}

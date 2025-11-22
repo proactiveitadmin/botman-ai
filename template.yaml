@@ -75,6 +75,9 @@ Globals:
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
         
         KB_BUCKET: !Ref KnowledgeBaseBucket
+        
+        CAMPAIGN_SEND_FROM: "09:00"
+        CAMPAIGN_SEND_TO: "20:00"
     
 
 Resources:

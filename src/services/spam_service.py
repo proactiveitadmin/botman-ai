@@ -29,6 +29,7 @@ class SpamService:
         now_fn=None,
         bucket_seconds: Optional[int] = None,
         max_per_bucket: Optional[int] = None,
+        tenant_max_per_bucket: Optional[int] = None,
     ) -> None:
         self.table = ddb_resource().Table(TABLE_NAME)
         self._now_fn = now_fn or (lambda: int(time.time()))
@@ -38,6 +39,10 @@ class SpamService:
         self.max_per_bucket = max_per_bucket or int(
             os.getenv("SPAM_MAX_PER_BUCKET", "20")
         )
+        self.tenant_max_per_bucket = tenant_max_per_bucket or int(
+            os.getenv("SPAM_TENANT_MAX_PER_BUCKET", "300")  # 300 msg/min/tenant
+        )
+
 
     def _bucket_for_ts(self, ts: int) -> str:
         """
@@ -96,11 +101,33 @@ class SpamService:
             )
             return False
 
+        #---  total per tenant/bucket ---
         cnt = int(attrs.get("cnt", 0))
         blocked_until = int(attrs.get("blocked_until", 0))
-
+        total_key = {"pk": key["pk"], "sk": "__TOTAL__"}
+        total_cnt = 0
+        try:
+            total_resp = self.table.update_item(
+                Key=total_key,
+                UpdateExpression="ADD cnt :one SET last_ts = :ts",
+                ExpressionAttributeValues={":one": 1, ":ts": now_ts},
+                ReturnValues="ALL_NEW",
+            )
+            total_attrs = total_resp.get("Attributes", {}) or {}
+            total_cnt = int(total_attrs.get("cnt", 0))
+        except Exception as e:
+            logger.error(
+                {
+                    "spam": "ddb_update_error_total",
+                    "error": str(e),
+                    "tenant_id": tenant_id,
+                }
+            )
+            # jeśli padnie total – nie blokujemy z tego powodu
+            total_cnt = 0
+            
         # 1) Jeżeli mamy aktywną blokadę czasową – honorujemy ją
-        if blocked_until > now_ts:
+        if blocked_until and now_ts < blocked_until:
             logger.info(
                 {
                     "spam": "already_blocked",
@@ -141,6 +168,20 @@ class SpamService:
                 }
             )
             return True
-
+            
+        # 3) Jeżeli przekroczono limit TENANTA w buckecie – też blokujemy ten request
+        if self.tenant_max_per_bucket and total_cnt > self.tenant_max_per_bucket:
+            logger.warning(
+                {
+                    "spam": "tenant_bucket_limit_exceeded",
+                    "tenant_id": tenant_id,
+                    "phone": phone,
+                    "total_cnt": total_cnt,
+                }
+            )
+            # nie ustawiamy tu osobnego blocked_until dla wszystkich,
+            # po prostu ten konkretny request jest odrzucony
+            return True
+        
         # 3) W normalnym przypadku – nie blokujemy
         return False
