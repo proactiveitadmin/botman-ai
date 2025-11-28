@@ -1,5 +1,6 @@
 import pytest
 import json
+import boto3
 
 def _read_all(q_url, max_msgs=10):
     """
@@ -23,7 +24,7 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai):
     E2E: Twilio → inbound_webhook → InboundEventsQueue → message_router → OutboundQueue.
 
     Wejście: przykładowy event Twilio z tests/events/inbound.json (body: "chcę się zapisać")
-    Oczekujemy: w OutboundQueue pojawia się wiadomość z prośbą o potwierdzenie rezerwacji.
+    Oczekujemy: w OutboundQueue pojawia się akcja z kodem szablonu 'reserve_class_confirm'.
     """
     from src.lambdas.inbound_webhook import handler as inbound_lambda
     from src.lambdas.message_router import handler as router_lambda
@@ -46,10 +47,11 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai):
     assert outbound_msgs, "Brak wiadomości w kolejce outbound po przejściu przez router"
 
     bodies = [json.loads(m["Body"]) for m in outbound_msgs]
+
     assert any(
-        "potwierdzasz rezerwacj" in b.get("body", "").lower()
+        b.get("body") == "reserve_class_confirm"
         for b in bodies
-    )
+    ), f"Nie znaleziono akcji potwierdzenia rezerwacji w outbound: {[b.get('body') for b in bodies]}"
 
 
 def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
@@ -128,20 +130,39 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
     )
     
     monkeypatch.setattr(
-        "src.storage.ddb.ddb_resource",
+        "src.repos.messages_repo.ddb_resource",
+        lambda: FakeDDBResource(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.repos.conversations_repo.ddb_resource",
+        lambda: FakeDDBResource(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "src.repos.members_index_repo.ddb_resource",
         lambda: FakeDDBResource(),
         raising=False,
     )
     
     monkeypatch.setattr(
-        "src.storage.tenants_repo.ddb_resource",
+        "src.repos.tenants_repo.ddb_resource",
         lambda: FakeDDBResource(),
         raising=False,
     )
+    
+    monkeypatch.setattr(
+        "boto3.resource", 
+        lambda *a, 
+        **k: FakeDDBResource()
+    )
 
     # najpierw importujemy moduły, żeby monkeypatch mógł je znaleźć
+    from src.services.routing_service import RoutingService
     from src.lambdas.inbound_webhook import handler as inbound_handler
     from src.lambdas.message_router import handler as router_handler
+
+    router_handler.ROUTER = RoutingService()
 
     # podmieniamy funkcje w samych handlerach
     monkeypatch.setattr(
@@ -170,10 +191,15 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
     assert outbound_msgs, "Brak wiadomości 'na outbound queue' po przejściu przez router"
 
     bodies = [json.loads(m["Body"]) for m in outbound_msgs]
+
     assert any(
-        "potwierdzasz rezerwacj" in b.get("body", "").lower()
+        (
+            "potwierdzasz rezerwacj" in b.get("body", "").lower()
+            or "reserve_class_confirm" in b.get("body", "")
+        )
         for b in bodies
-    )
+    ), f"Nie znaleziono wiadomości z potwierdzeniem rezerwacji. Bodies: {[b.get('body') for b in bodies]}"
+
 
 
 

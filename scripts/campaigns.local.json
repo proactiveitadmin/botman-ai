@@ -1,0 +1,71 @@
+[
+  {
+    "campaign_id": "camp-birthday-template",
+    "tenant_id": "tenant-a",
+    "active": true,
+
+    "template_name": "campaign_birthday",
+    "language_code": null,
+
+    "body": null,
+
+    "recipients": [
+      "whatsapp:+48111111111",
+      {
+        "phone": "whatsapp:+48111111112",
+        "tags": ["vip", "active"]
+      }
+    ],
+    "include_tags": [],
+    "exclude_tags": [],
+
+    "send_from": "09:00",
+    "send_to": "20:00"
+  },
+  {
+    "campaign_id": "camp-vip-template-pl",
+    "tenant_id": "tenant-a",
+    "active": true,
+
+    "template_name": "campaign_vip_offer",
+    "language_code": "pl",
+
+    "body": null,
+
+    "recipients": [
+      {
+        "phone": "whatsapp:+48123400001",
+        "tags": ["vip", "active"]
+      },
+      {
+        "phone": "whatsapp:+48123400002",
+        "tags": ["blocked"]
+      },
+      "whatsapp:+48123400003"
+    ],
+    "include_tags": ["vip"],
+    "exclude_tags": ["blocked"],
+
+    "send_from": "21:00",
+    "send_to": "06:00"
+  },
+  {
+    "campaign_id": "camp-body-fallback",
+    "tenant_id": "tenant-b",
+    "active": true,
+
+    "template_name": null,
+    "language_code": "en",
+
+    "body": "Manual campaign body – fallback without templates.",
+
+    "recipients": [
+      "whatsapp:+447000000001"
+    ],
+    "include_tags": [],
+    "exclude_tags": [],
+
+    "send_from": "10:00",
+    "send_to": "18:00"
+  }
+]

@@ -137,7 +137,10 @@ def lambda_handler(event, context):
             "tenant_id": tenant_id,
             "ts": (event.get("requestContext") or {}).get("requestTimeEpoch"),
             "message_sid": params.get("MessageSid"),
+            "channel": "whatsapp",
+            "channel_user_id": from_phone,
         }
+
 
         queue_url = resolve_queue_url("InboundEventsQueueUrl")
         sqs_client().send_message(QueueUrl=queue_url, MessageBody=json.dumps(msg))

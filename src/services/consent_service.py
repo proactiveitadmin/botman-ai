@@ -1,7 +1,7 @@
 # src/services/consent_service.py
 from typing import Optional, Dict
 
-from ..storage.consents_repo import ConsentsRepo  # ścieżka względna
+from ..repos.consents_repo import ConsentsRepo  # ścieżka względna
 
 class ConsentService:
     def __init__(self, repo: ConsentsRepo | None = None) -> None:

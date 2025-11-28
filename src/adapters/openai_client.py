@@ -20,12 +20,23 @@ from openai import APIError, APIConnectionError, APIStatusError, RateLimitError
 from ..common.config import settings
 
 SYSTEM_PROMPT = """Jesteś klasyfikatorem intencji dla siłowni/fitness klubu.
-Zwracaj JSON o kluczach: intent (reserve_class|faq|handover|clarify|ticket), confidence (0..1), slots (dict).
+Zwracaj JSON o kluczach:
+- intent (reserve_class|faq|handover|clarify|ticket|pg_available_classes|pg_contract_status),
+- confidence (0..1),
+- slots (dict).
+
 faq slots: {"topic": one of [hours, price, location, contact]}
 reserve_class slots: {"class_id": optional, "member_id": optional}
+pg_available_classes slots: {}
+pg_contract_status slots: {"email": optional}
 """
 
-_VALID_INTENTS = {"reserve_class", "faq", "handover", "clarify", "ticket"}
+
+_VALID_INTENTS = {
+    "reserve_class", "faq", "handover", "clarify", "ticket",
+    "pg_available_classes", "pg_contract_status",
+}
+
 
 
 class OpenAIClient:

@@ -8,7 +8,9 @@ class Message:
     to_phone: str
     body: str
     channel: str = "whatsapp"
+    channel_user_id: Optional[str] = None
     conversation_id: Optional[str] = None
+    language_code: Optional[str] = None
 
 @dataclass
 class Action:

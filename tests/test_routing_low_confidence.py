@@ -59,7 +59,7 @@ class DummyRepos:
         def upsert_conversation(self, *a, **k):
             return {}
 
-        def get_conversation(self, tenant_id, phone):
+        def get_conversation(self, tenant_id, channel, channel_user_id):
             return None
 
         def get(self, pk):

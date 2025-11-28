@@ -293,6 +293,7 @@ Resources:
           TWILIO_FROM: ""
           TWILIO_MESSAGING_SID: ""
           TWILIO_WHATSAPP_NUMBER: ""
+          WebOutboundEventsQueueUrl: !Ref OutboundQueue
       Events:
         SQSEvent:
           Type: SQS
@@ -348,6 +349,48 @@ Resources:
           Properties:
             Path: /api/pg/test
             Method: post
+            
+  WebWidgetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: src/lambdas/web_widget/handler.lambda_handler
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName:
+              Fn::GetAtt:
+                - InboundEventsQueue
+                - QueueName
+      Environment:
+        Variables:
+          InboundEventsQueueUrl:
+            Ref: InboundEventsQueue
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /web/widget
+            Method: post
+    Metadata:
+      SamResourceId: WebWidgetFunction
+      
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName:
+        Fn::Sub: health-${AWS::StackName}
+      CodeUri: src
+      Handler: src/lambdas/health/handler.lambda_handler
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /health
+            Method: get
+    Metadata:
+      SamResourceId: HealthFunction
+
+
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL

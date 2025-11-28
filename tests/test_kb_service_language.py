@@ -34,12 +34,12 @@ def test_kb_service_uses_language_specific_faq(monkeypatch):
 
     s3.put_object(
         Bucket=bucket_name,
-        Key="kb/default/pl/faq.json",
+        Key="default/faq_pl.json",   # wcześniej: "kb/default/pl/faq.json"
         Body=json.dumps(pl_faq).encode("utf-8"),
     )
     s3.put_object(
         Bucket=bucket_name,
-        Key="kb/default/en/faq.json",
+        Key="default/faq_en.json",   # wcześniej: "kb/default/en/faq.json"
         Body=json.dumps(en_faq).encode("utf-8"),
     )
 

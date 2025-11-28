@@ -28,7 +28,14 @@ class KBService:
         """Inicjalizuje serwis, zapisując konfigurację bucketa i pusty cache w pamięci."""
         self.bucket: str = settings.kb_bucket
         # cache: { "tenant/lang": {topic: answer} }
-        self._cache: Dict[str, Dict[str, str]] = {}
+        self._cache: Dict[str, Dict[str, str]] = {}       
+    
+    def _faq_key(self, tenant_id: str, language_code: str | None) -> str:
+        # np. "tenantA/faq_pl.json" albo "tenantA/faq_en.json"
+        lang = language_code or "en"
+        if "-" in lang:
+            lang = lang.split("-", 1)[0]
+        return f"{tenant_id}/faq_{lang}.json"
 
     def _cache_key(self, tenant_id: str, language_code: str | None) -> str:
         return f"{tenant_id}/{language_code or 'default'}"
@@ -44,24 +51,28 @@ class KBService:
         if not self.bucket:
             return None
 
-        cache_key = self._cache_key(tenant_id, language_code)
+        cache_key = f"{tenant_id}#{language_code or 'en'}"
         if cache_key in self._cache:
             return self._cache[cache_key]
 
-        lang = language_code or "default"
-        key = f"kb/{tenant_id}/{lang}/faq.json"
+        key = self._faq_key(tenant_id, language_code)
 
         try:
-            obj = s3_client().get_object(Bucket=self.bucket, Key=key)
-            data = json.loads(obj["Body"].read())
-            if isinstance(data, dict):
-                self._cache[cache_key] = data
-                logger.info({"kb": "loaded", "bucket": self.bucket, "key": key})
-                return data
-            logger.warning({"kb": "invalid_format", "bucket": self.bucket, "key": key})
-            return None
-        except ClientError:
-            logger.info({"kb": "miss", "bucket": self.bucket, "key": key})
+            resp = s3_client().get_object(Bucket=self.bucket, Key=key)
+            body = resp["Body"].read().decode("utf-8")
+            data = json.loads(body) or {}
+            if not isinstance(data, dict):
+                data = {}
+            # normalizujemy klucze
+            normalized = { (k or "").strip().lower(): v for k, v in data.items() }
+            self._cache[cache_key] = normalized
+            return normalized
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchKey":
+                logger.warning(
+                    {"kb_error": "s3_get_failed", "tenant_id": tenant_id, "key": key, "err": str(e)}
+                )
+            self._cache[cache_key] = None
             return None
 
     def answer(self, topic: str, tenant_id: str, language_code: str | None = None) -> Optional[str]:

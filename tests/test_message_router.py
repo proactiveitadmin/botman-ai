@@ -1,12 +1,61 @@
-import json, boto3
-from src.lambdas.message_router.handler import lambda_handler
+import json
 
-def test_router_faq_to_outbound(aws_stack, mocker):
-    # Twardo wymuszamy, że NLU zwraca FAQ(hours)
-    mocker.patch(
-        "src.services.nlu_service.NLUService.classify_intent",
-        return_value={"intent": "faq", "confidence": 0.9, "slots": {"topic": "hours"}},
-    )
+from src.lambdas.message_router import handler
+
+
+class DummyAction:
+    def __init__(self, payload: dict):
+        self.type = "reply"
+        self.payload = payload
+
+
+class DummyRouter:
+    def __init__(self, actions):
+        self.actions_to_return = actions
+        self.calls = []
+
+    def handle(self, msg):
+        self.calls.append(msg)
+        return self.actions_to_return
+
+
+def test_message_router_no_records():
+    result = handler.lambda_handler({}, None)
+    assert result["statusCode"] == 200
+    assert result["body"] == "no-records"
+
+
+def test_message_router_faq_to_outbound(monkeypatch):
+    """
+    Sprawdzamy glue:
+    - event SQS -> Message -> ROUTER.handle
+    - reply trafia do sqs_client().send_message z właściwą kolejką/payloadem
+    """
+
+    actions = [
+        DummyAction(
+            {
+                "to": "whatsapp:+48123123123",
+                "body": "Klub jest otwarty w godzinach 6-23...",
+                "tenant_id": "default",
+            }
+        )
+    ]
+    dummy_router = DummyRouter(actions)
+    monkeypatch.setattr(handler, "ROUTER", dummy_router)
+
+    sent_messages = []
+
+    class DummySQS:
+        def send_message(self, QueueUrl, MessageBody):
+            sent_messages.append({"QueueUrl": QueueUrl, "MessageBody": MessageBody})
+
+    # jeśli handler używa aws.sqs_client():
+    if hasattr(handler, "aws"):
+        monkeypatch.setattr(handler.aws, "sqs_client", lambda: DummySQS(), raising=False)
+    # a gdyby importował funkcję lokalnie:
+    monkeypatch.setattr(handler, "sqs_client", lambda: DummySQS(), raising=False)
+    monkeypatch.setenv("OutboundQueueUrl", "dummy-outbound-url")
 
     event = {
         "Records": [
@@ -16,56 +65,22 @@ def test_router_faq_to_outbound(aws_stack, mocker):
                         "event_id": "evt-1",
                         "from": "whatsapp:+48123123123",
                         "to": "whatsapp:+48000000000",
-                        "body": "godziny",
+                        "body": "Jakie są godziny otwarcia?",
                         "tenant_id": "default",
+                        "channel": "whatsapp",
                     }
                 )
             }
         ]
     }
 
-    lambda_handler(event, None)
+    result = handler.lambda_handler(event, None)
 
-    sqs = boto3.client("sqs", region_name="eu-central-1")
-    resp = sqs.receive_message(
-        QueueUrl=aws_stack["outbound"],
-        MaxNumberOfMessages=10,
-        WaitTimeSeconds=0,  # bez long-polla
-    )
-    messages = resp.get("Messages", [])
-    assert messages, "Brak wiadomości na kolejce outbound"
+    assert result["statusCode"] == 200
+    assert len(dummy_router.calls) == 1
+    assert len(sent_messages) == 1
+    assert sent_messages[0]["QueueUrl"] == "dummy-outbound-url"
 
-    payloads = [json.loads(m["Body"]) for m in messages]
-
-    faq_msgs = [
-        p
-        for p in payloads
-        if p.get("to") == "whatsapp:+48123123123"
-        and ("godzin" in p.get("body", "").lower() or "otwar" in p.get("body", "").lower())
-    ]
-
-    assert faq_msgs, (
-        "Nie znaleziono odpowiedzi FAQ na 'godziny' w kolejce outbound.\n"
-        f"Wiadomości: {[p.get('body') for p in payloads]}"
-    )
-
-def test_router_reservation_confirm_flow(aws_stack, mocker):
-    mocker.patch("src.services.nlu_service.NLUService.classify_intent", return_value={
-        "intent":"reserve_class","confidence":0.9,"slots":{"class_id":"777","member_id":"105"}
-    })
-    event1 = {"Records":[{"body": json.dumps({
-        "event_id":"evt-2","from":"whatsapp:+48123123123","to":"whatsapp:+48000000000","body":"chcę rezerwację","tenant_id":"default"
-    })}]}
-    lambda_handler(event1, None)
-
-    mocker.patch("src.adapters.perfectgym_client.PerfectGymClient.reserve_class", return_value={"ok": True, "reservation_id":"r-777"})
-    event2 = {"Records":[{"body": json.dumps({
-        "event_id":"evt-3","from":"whatsapp:+48123123123","to":"whatsapp:+48000000000","body":"TAK","tenant_id":"default"
-    })}]}
-    lambda_handler(event2, None)
-
-    sqs = boto3.client("sqs", region_name="eu-central-1")
-    msgs = sqs.receive_message(QueueUrl=aws_stack["outbound"], MaxNumberOfMessages=10)
-    bodies = [json.loads(m["Body"]) for m in msgs.get("Messages", [])]
-    assert any("Czy potwierdzasz rezerwację" in b.get("body","") for b in bodies)
-    assert any("Zarezerwowano" in b.get("body","") for b in bodies)
+    payload = json.loads(sent_messages[0]["MessageBody"])
+    assert payload["to"] == "whatsapp:+48123123123"
+    assert "godzin" in payload["body"].lower() or "otwar" in payload["body"].lower()

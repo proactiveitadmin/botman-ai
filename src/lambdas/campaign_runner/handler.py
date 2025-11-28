@@ -61,20 +61,26 @@ def lambda_handler(event, context):
             continue
 
         tenant_id = item.get("tenant_id", "default")
-        lang = item.get("language_code")  # <- nowość
 
         for phone in svc.select_recipients(item):
             if not consents.has_opt_in(tenant_id, phone):
                 continue
 
-            body = item.get("body", "Nowa oferta klubu!")
+            # tutaj w przyszłości możesz zbudować context z danych odbiorcy (imię, saldo, klub itd.)
+            msg = svc.build_message(
+                campaign=item,
+                tenant_id=tenant_id,
+                recipient_phone=phone,
+                context={},  # na razie puste
+            )
+
             payload = {
                 "to": phone,
-                "body": body,
+                "body": msg["body"],
                 "tenant_id": tenant_id,
             }
-            if lang:
-                payload["language_code"] = lang
+            if msg.get("language_code"):
+                payload["language_code"] = msg["language_code"]
 
             sqs_client().send_message(
                 QueueUrl=out_q_url,

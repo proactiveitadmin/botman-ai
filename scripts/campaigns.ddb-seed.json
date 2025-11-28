@@ -1,0 +1,121 @@
+{
+  "Campaigns": [
+    {
+      "PutRequest": {
+        "Item": {
+          "campaign_id": { "S": "camp-birthday-template" },
+          "tenant_id":   { "S": "tenant-a" },
+          "active":      { "BOOL": true },
+
+          "template_name": { "S": "campaign_birthday" },
+          "language_code": { "NULL": true },
+
+          "body": { "NULL": true },
+
+          "recipients": {
+            "L": [
+              { "S": "whatsapp:+48111111111" },
+              {
+                "M": {
+                  "phone": { "S": "whatsapp:+48111111112" },
+                  "tags": {
+                    "L": [
+                      { "S": "vip" },
+                      { "S": "active" }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          "include_tags": { "L": [] },
+          "exclude_tags": { "L": [] },
+
+          "send_from": { "S": "09:00" },
+          "send_to":   { "S": "20:00" }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "campaign_id": { "S": "camp-vip-template-pl" },
+          "tenant_id":   { "S": "tenant-a" },
+          "active":      { "BOOL": true },
+
+          "template_name": { "S": "campaign_vip_offer" },
+          "language_code": { "S": "pl" },
+
+          "body": { "NULL": true },
+
+          "recipients": {
+            "L": [
+              {
+                "M": {
+                  "phone": { "S": "whatsapp:+48123400001" },
+                  "tags": {
+                    "L": [
+                      { "S": "vip" },
+                      { "S": "active" }
+                    ]
+                  }
+                }
+              },
+              {
+                "M": {
+                  "phone": { "S": "whatsapp:+48123400002" },
+                  "tags": {
+                    "L": [
+                      { "S": "blocked" }
+                    ]
+                  }
+                }
+              },
+              { "S": "whatsapp:+48123400003" }
+            ]
+          },
+          "include_tags": {
+            "L": [
+              { "S": "vip" }
+            ]
+          },
+          "exclude_tags": {
+            "L": [
+              { "S": "blocked" }
+            ]
+          },
+
+          "send_from": { "S": "21:00" },
+          "send_to":   { "S": "06:00" }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "campaign_id": { "S": "camp-body-fallback" },
+          "tenant_id":   { "S": "tenant-b" },
+          "active":      { "BOOL": true },
+
+          "template_name": { "NULL": true },
+          "language_code": { "S": "en" },
+
+          "body": {
+            "S": "Manual campaign body – fallback without templates."
+          },
+
+          "recipients": {
+            "L": [
+              { "S": "whatsapp:+447000000001" }
+            ]
+          },
+          "include_tags": { "L": [] },
+          "exclude_tags": { "L": [] },
+
+          "send_from": { "S": "10:00" },
+          "send_to":   { "S": "18:00" }
+        }
+      }
+    }
+  ]
+}

@@ -1,18 +1,32 @@
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
 from datetime import datetime, time
 import os
 
 from ..common.logging import logger
+from .template_service import TemplateService
+from ..repos.tenants_repo import TenantsRepo
+from ..repos.conversations_repo import ConversationsRepo
+from ..common.config import settings
 
-
-# Domyślne okno wysyłki – zgodnie z dokumentacją (9:00–20:00) :contentReference[oaicite:1]{index=1}
+# Domyślne okno wysyłki – zgodnie z dokumentacją (9:00–20:00)
 DEFAULT_SEND_FROM = os.getenv("CAMPAIGN_SEND_FROM", "09:00")
 DEFAULT_SEND_TO = os.getenv("CAMPAIGN_SEND_TO", "20:00")
 
 
 class CampaignService:
-    def __init__(self, now_fn=None) -> None:
+    def __init__(
+        self,
+        now_fn=None,
+        template_service: Optional[TemplateService] = None,
+        tenants_repo: Optional[TenantsRepo] = None,
+        conversations_repo: Optional[ConversationsRepo] = None,
+    ) -> None:
         self._now_fn = now_fn or datetime.utcnow
+        self.tpl = template_service or TemplateService()
+        self.tenants = tenants_repo or TenantsRepo()
+        self.conversations = conversations_repo or ConversationsRepo()
+        # cache na listy słów, gdybyś kiedyś chciał używać templatek do słówek TAK/NIE w kampaniach
+        self._words_cache: dict[tuple[str, str, str], set[str]] = {}
 
     def select_recipients(self, campaign: Dict) -> List[str]:
         """
@@ -47,9 +61,11 @@ class CampaignService:
                 if phone:
                     result.append(phone)
             logger.info(
-                {"campaign": "recipients",
-                 "mode": "simple",
-                 "count": len(result)}
+                {
+                    "campaign": "recipients",
+                    "mode": "simple",
+                    "count": len(result),
+                }
             )
             return result
 
@@ -88,7 +104,6 @@ class CampaignService:
         )
         return result
 
-
     @staticmethod
     def _parse_hhmm(value: str) -> time:
         """
@@ -108,8 +123,7 @@ class CampaignService:
 
     def _resolve_window(self, campaign: Dict) -> tuple[time, time]:
         """
-        Na razie używamy tylko globalnych envów.
-        W przyszłości możesz dodać np. campaign["send_from"], campaign["send_to"].
+        Używamy wartości z kampanii, a jeśli ich nie ma – globalnych envów.
         """
         send_from_str = campaign.get("send_from") or DEFAULT_SEND_FROM
         send_to_str = campaign.get("send_to") or DEFAULT_SEND_TO
@@ -129,3 +143,72 @@ class CampaignService:
 
         # Okno przez północ, np. 22:00–06:00
         return now >= start or now <= end
+
+    # ---------- I18N DLA KAMPANII ----------
+
+    def _resolve_language_for_recipient(
+        self,
+        tenant_id: str,
+        phone: str,
+        campaign_lang: Optional[str] = None,
+    ) -> str:
+        """
+        Kolejność:
+        1. language_code z kampanii (jeśli ustawione),
+        2. language_code z Conversations dla danego numeru,
+        3. language_code tenanta,
+        4. globalny default z settings.
+        """
+        if campaign_lang:
+            return campaign_lang
+
+        conv = self.conversations.get_conversation(
+            tenant_id=tenant_id,
+            channel="whatsapp",
+            channel_user_id=phone,
+        )
+        if conv and conv.get("language_code"):
+            return conv["language_code"]
+
+        tenant = self.tenants.get(tenant_id) or {}
+        return tenant.get("language_code") or settings.get_default_language()
+
+    def build_message(
+        self,
+        campaign: Dict[str, Any],
+        tenant_id: str,
+        recipient_phone: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Buduje finalną wiadomość kampanii dla konkretnego odbiorcy.
+
+        Jeśli kampania ma:
+          - campaign["template_name"] -> użyj TemplateService (i18n, parametry),
+          - tylko campaign["body"]    -> użyj literalnego body (już przetłumaczonego).
+        """
+        context = context or {}
+
+        lang = self._resolve_language_for_recipient(
+            tenant_id,
+            recipient_phone,
+            campaign_lang=campaign.get("language_code"),
+        )
+
+        template_name = campaign.get("template_name")
+
+        if template_name:
+            body = self.tpl.render_named(
+                tenant_id,
+                template_name,
+                lang,
+                context,
+            )
+        else:
+            # fallback – zachowanie zgodne z dotychczasowym kodem
+            body = campaign.get("body", "Nowa oferta klubu!")
+
+        return {
+            "body": body,
+            "language_code": lang,
+        }

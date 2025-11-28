@@ -10,20 +10,26 @@ class FakeConvRepo:
         self._existing = existing
         self.last_upsert = None
 
-    def get_conversation(self, tenant_id: str, phone: str):
+    def get_conversation(self, tenant_id: str, channel: str, channel_user_id: str):
         return self._existing
 
-    def upsert_conversation(self, tenant_id: str, phone: str, **kwargs):
-        self.last_upsert = {"tenant_id": tenant_id, "phone": phone, **kwargs}
+    def upsert_conversation(self, tenant_id: str,  channel: str, channel_user_id: str, **kwargs):
+        self.last_upsert = {"tenant_id": tenant_id, "channel": channel, "channel_user_id":channel_user_id, **kwargs}
         return self.last_upsert
 
-    # kompatybilność, gdyby ktoś gdzieś wołał stare API:
+    def put(self, item: dict):
+        key = item["pk"]
+        self.pending[key] = dict(item)
+        
     def get(self, pk: str):
         return None
 
-    def put(self, item: dict):
-        self.last_upsert = item
+    def delete(self, key: str):
+        self.deleted.append(key)
+        self.pending.pop(key, None)
 
+    def find_by_verification_code(self, tenant_id, verification_code):
+        return None
 
 class FakeTenantsRepo:
     def __init__(self, lang: str | None):
