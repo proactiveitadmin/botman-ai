@@ -73,6 +73,7 @@ Globals:
         DDB_TABLE_CONSENTS:      !Sub 'Consents-${AWS::StackName}'
         DDB_TABLE_INTENTS_STATS: !Sub 'IntentsStats-${AWS::StackName}'
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
+        DDB_TABLE_LEADS:          !Sub 'Leads-${AWS::StackName}'
         
         KB_BUCKET: !Ref KnowledgeBaseBucket
         
@@ -127,9 +128,13 @@ Resources:
       AttributeDefinitions:
         - AttributeName: pk
           AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
 
   Messages:
     Type: AWS::DynamoDB::Table
@@ -191,10 +196,30 @@ Resources:
       AttributeDefinitions:
         - AttributeName: pk
           AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
-
+        - AttributeName: sk
+          KeyType: RANGE
+  
+  Leads:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'Leads-${AWS::StackName}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+          
   MembersIndex:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -256,6 +281,8 @@ Resources:
             TableName: !Ref Messages
         - DynamoDBCrudPolicy:
             TableName: !Ref Conversations
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Leads 
         - DynamoDBReadPolicy:
             TableName: !Ref Templates
         - DynamoDBReadPolicy:

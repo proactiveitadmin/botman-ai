@@ -41,20 +41,35 @@ class JiraClient:
             ],
         }
 
-    def create_ticket(self, summary: str, description: str, tenant_id: str):
+    def create_ticket(
+        self,
+        summary: str,
+        description: str,
+        tenant_id: str,
+        meta: dict | None = None,
+    ) -> dict:
         if not self.url:
-            logger.info({"jira": "dev", "summary": summary})
+            logger.info({"jira": "dev", "summary": summary, "meta": meta or {}})
             return {"ok": True, "ticket": "JIRA-DEV"}
-            
-        endpoint = f"{self.url}/rest/api/3/issue"
-        description_adf = self._build_description_adf(description)
-        
+
+        # meta jako sekcja na początku opisu
+        meta_lines = []
+        if meta:
+            for k, v in meta.items():
+                meta_lines.append(f"{k}: {v}")
+        full_description = ""
+        if meta_lines:
+            full_description += "[META]\n" + "\n".join(meta_lines) + "\n\n"
+        full_description += description or ""
+
+        description_adf = self._build_description_adf(full_description)
+
         payload = {
             "fields": {
                 "project": {"key": self.project},
                 "summary": f"[{tenant_id}] {summary}",
                 "description": description_adf,
-                "issuetype": {"name": self.issue_type_name}
+                "issuetype": {"name": self.issue_type_name},
             }
         }
         headers = {

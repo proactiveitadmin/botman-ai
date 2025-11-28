@@ -1,2 +1,2 @@
 from aws_lambda_powertools import Logger
-logger = Logger(service="gym-integrator")
+logger = Logger(service="botman-ai")

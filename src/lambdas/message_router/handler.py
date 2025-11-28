@@ -48,6 +48,8 @@ def _build_message(body: dict) -> Message:
         channel=body.get("channel", "whatsapp"),
         channel_user_id=body.get("channel_user_id") or body.get("from"),
         language_code=body.get("language_code"),
+        intent=body.get("intent"),    
+        slots=body.get("slots") or {}, 
     )
 
 
@@ -56,6 +58,11 @@ def _publish_actions(actions, original_body: dict):
     for a in actions or []:
         if a.type != "reply":
             continue
+        elif a.type == "ticket":
+            sqs_client().send_message(
+                QueueUrl=tickets_url,
+                MessageBody=json.dumps(a.payload),
+            )
 
         payload = a.payload
         sqs_client().send_message(

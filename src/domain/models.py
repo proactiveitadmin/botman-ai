@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 
 @dataclass
 class Message:
@@ -11,6 +11,8 @@ class Message:
     channel_user_id: Optional[str] = None
     conversation_id: Optional[str] = None
     language_code: Optional[str] = None
+    intent: Optional[str] = None
+    slots: Optional[Dict[str, Any]] = None
 
 @dataclass
 class Action:

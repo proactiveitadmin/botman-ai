@@ -18,6 +18,24 @@ class ConversationsRepo:
             Key=self.conversation_pk(tenant_id, channel, channel_user_id)
         )
         return resp.get("Item")
+    
+    def assign_agent(self, tenant_id: str, channel: str, channel_user_id: str, agent_id: str):
+        self.upsert_conversation(
+            tenant_id,
+            channel,
+            channel_user_id,
+            assigned_agent=agent_id,
+            state_machine_status="handover",
+        )
+
+    def release_agent(self, tenant_id: str, channel: str, channel_user_id: str):
+        self.upsert_conversation(
+            tenant_id,
+            channel,
+            channel_user_id,
+            assigned_agent=None,
+            state_machine_status=None,
+        )
 
     def upsert_conversation(
         self,
@@ -34,6 +52,7 @@ class ConversationsRepo:
         verification_code: str | None = None,
         pg_challenge_type: str | None = None,
         pg_challenge_attempts: int | None = None,
+        assigned_agent: str | None = None,
     ):
         """
         Upsert rozmowy – tylko pola, które nie są None, są aktualizowane.
@@ -68,6 +87,8 @@ class ConversationsRepo:
             set_field("pg_challenge_type", pg_challenge_type)
         if pg_challenge_attempts is not None:
             set_field("pg_challenge_attempts", pg_challenge_attempts)
+        if assigned_agent is not None:
+            set_field("assigned_agent", assigned_agent)
 
         if not update_expr_parts:
             return

@@ -64,3 +64,21 @@ class MessagesRepo:
             UpdateExpression="SET delivery_status = :ds",
             ExpressionAttributeValues={":ds": delivery_status},
         )
+    
+    def get_last_messages(
+        self,
+        tenant_id: str,
+        conv_key: str,
+        limit: int = 10,
+    ) -> list[dict]:
+        """
+        Zwraca ostatnie N wiadomości w rozmowie (sort desc po SK).
+        conv_key = conversation_id lub from_phone – tak jak w log_message.
+        """
+        pk = f"{tenant_id}#{conv_key}"
+        resp = self.table.query(
+            KeyConditionExpression=Key("pk").eq(pk),
+            ScanIndexForward=False,  # od najnowszych
+            Limit=limit,
+        )
+        return resp.get("Items") or []

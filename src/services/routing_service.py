@@ -18,6 +18,7 @@ from ..services.template_service import TemplateService
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
+from ..repos.messages_repo import MessagesRepo
 from ..common.utils import new_id
 from ..services.metrics_service import MetricsService        
 from ..adapters.jira_client import JiraClient
@@ -40,6 +41,7 @@ class RoutingService:
         pg: PerfectGymClient | None = None,
         conv: ConversationsRepo | None = None,
         tenants: TenantsRepo | None = None,
+        messages: MessagesRepo | None = None,
         metrics: MetricsService | None = None,
         jira: JiraClient | None = None,
         members_index: MembersIndexRepo | None = None,
@@ -50,6 +52,7 @@ class RoutingService:
         self.pg = pg or PerfectGymClient()
         self.conv = conv or ConversationsRepo()
         self.tenants = tenants or TenantsRepo()
+        self.messages = messages or MessagesRepo()
         self.metrics = metrics or MetricsService()
         self.jira = jira or JiraClient()
         self.members_index = members_index or MembersIndexRepo()
@@ -381,7 +384,7 @@ class RoutingService:
         channel_user_id = msg.channel_user_id or msg.from_phone
         conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
         state = conv.get("state_machine_status")
-
+     
         # --- 0. Obsługa stanu awaiting_challenge (challenge PG na WhatsApp) ---
         if state == STATE_AWAITING_CHALLENGE and channel == "whatsapp":
             return self._handle_pg_challenge(msg, conv, lang)
@@ -562,10 +565,23 @@ class RoutingService:
             ]
 
         # --- 2. Klasyfikacja intencji ---
-        nlu = self.nlu.classify_intent(msg.body, lang=lang)
-        intent = nlu.get("intent", "clarify")
-        slots = nlu.get("slots", {}) or {}
-        confidence = nlu.get("confidence", 1.0)
+        if msg.intent:
+            # precomputed intent → pomijamy NLU, pewność "na sztywno"
+            intent = msg.intent
+            slots = msg.slots or {}
+            confidence = 1.0
+        else:
+            nlu = self.nlu.classify_intent(msg.body, lang)
+            
+            # wynik NLU może być dict albo obiektem z atrybutami
+            if isinstance(nlu, dict):
+                intent = nlu.get("intent", "clarify")
+                slots = nlu.get("slots") or {}
+                confidence = float(nlu.get("confidence", 1.0))
+            else:
+                intent = getattr(nlu, "intent", "clarify")
+                slots = getattr(nlu, "slots", {}) or {}
+                confidence = float(getattr(nlu, "confidence", 1.0))
 
         if intent != "clarify" and confidence < 0.3:
             intent = "clarify"
@@ -641,6 +657,12 @@ class RoutingService:
 
         # --- 6. Handover do człowieka ---
         if intent == "handover":
+            self.conv.assign_agent(
+                tenant_id=msg.tenant_id,
+                channel=msg.channel or "whatsapp",
+                channel_user_id=msg.channel_user_id or msg.from_phone,
+                agent_id=slots.get("agent_id", "UNKNOWN"),   # np. przekazane w slots
+            )
             body = self.tpl.render_named(
                 msg.tenant_id,
                 "handover_to_staff",
@@ -656,25 +678,75 @@ class RoutingService:
                         "tenant_id": msg.tenant_id,
                         "channel": msg.channel,
                         "channel_user_id": msg.channel_user_id,
+                        "language_code": lang,
                     },
                 )
             ]
-            
-        # --- 7. Ticket do systemu ticketowego(Jira) ---   
+             
+        # --- 7. Ticket do systemu ticketowego (Jira) ---
         if intent == "ticket":
-            res = self.jira.create_ticket(
-                summary=slots.get("summary")
-                or self.tpl.render_named(msg.tenant_id, "ticket_summary", lang, {}),
-                description=slots.get("description") or msg.body,
-                tenant_id=msg.tenant_id,
+            conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
+
+            history_items: list[dict] = []
+            if hasattr(self, "messages") and self.messages:
+                try:
+                    history_items = self.messages.get_last_messages(
+                        tenant_id=msg.tenant_id,
+                        conv_key=conv_key,
+                        limit=10,
+                    ) or []
+                except Exception:
+                    history_items = []
+
+            # zbuduj prosty tekst z historii
+            history_lines = []
+            for item in reversed(history_items):  # od najstarszych do najnowszych
+                direction = item.get("direction", "?")
+                body_item = item.get("body", "")
+                history_lines.append(f"{direction}: {body_item}")
+
+            history_block = "\n".join(history_lines) if history_lines else "(brak historii)"
+
+            summary = slots.get("summary") or self.tpl.render_named(
+                msg.tenant_id,
+                "ticket_summary",
+                lang,
+                {},
             )
 
-            if res.get("ok"):
+            description = (
+                slots.get("description")
+                or f"Zgłoszenie z chatu.\n\nOstatnia wiadomość:\n{msg.body}\n\nHistoria:\n{history_block}"
+            )
+
+            meta = {
+                "conversation_id": conv_key,
+                "phone": msg.from_phone,
+                "channel": msg.channel,
+                "channel_user_id": msg.channel_user_id,
+                "intent": intent,
+                "slots": slots,
+                "language_code": lang,
+            }
+
+            # KLUCZOWE: wywołujemy Jirę
+            res = self.jira.create_ticket(
+                summary=summary,
+                description=description,
+                tenant_id=msg.tenant_id,
+                meta=meta,
+            )
+
+            ticket_id = None
+            if isinstance(res, dict):
+                ticket_id = res.get("ticket") or res.get("key")
+
+            if ticket_id:
                 body = self.tpl.render_named(
                     msg.tenant_id,
                     "ticket_created_ok",
                     lang,
-                    {"ticket": res["ticket"]},
+                    {"ticket": ticket_id},
                 )
             else:
                 body = self.tpl.render_named(
@@ -684,16 +756,20 @@ class RoutingService:
                     {},
                 )
 
-            return [ Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )]
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                        "language_code": lang,
+                    },
+                )
+            ]
+
         
         # --- 8. Lista dostępnych zajęć (PerfectGym) ---
         if intent == "pg_available_classes":
@@ -710,7 +786,7 @@ class RoutingService:
                     {},
                 )
                 return [
-                     Action(
+                    Action(
                         "reply",
                         {
                             "to": msg.from_phone,
@@ -719,8 +795,21 @@ class RoutingService:
                             "channel": msg.channel,
                             "channel_user_id": msg.channel_user_id,
                         },
-                    )
-                ]
+                    ),
+                    Action(
+                        "ticket",
+                        {
+                            "tenant_id": msg.tenant_id,
+                            "conversation_id": conv_key,
+                            "phone": msg.from_phone,
+                            "channel": msg.channel,
+                            "channel_user_id": msg.channel_user_id,
+                            "intent": intent,
+                            "slots": slots,
+                            "language_code": lang,
+                        },
+                    ),
+                                ]
 
             lines: list[str] = []
             for c in classes:
