@@ -1,5 +1,5 @@
 # ==== KONFIGURACJA ====
-$tableName = "Templates-gi-stage"   # <- PODMIEŃ NA SWOJĄ NAZWĘ TABELI
+$tableName = "Templates-botman-stage"   # <- PODMIEŃ NA SWOJĄ NAZWĘ TABELI
 $region   = "eu-central-1"          # <- jeśli używasz innego, zmień
 
 # ==== 1. handover_to_staff ====
