@@ -18,23 +18,33 @@ from openai import OpenAI
 from openai import APIError, APIConnectionError, APIStatusError, RateLimitError
 
 from ..common.config import settings
+from ..common.logging import logger
 
-SYSTEM_PROMPT = """Jesteś klasyfikatorem intencji dla siłowni/fitness klubu.
-Zwracaj JSON o kluczach:
-- intent (reserve_class|faq|handover|clarify|ticket|pg_available_classes|pg_contract_status),
-- confidence (0..1),
-- slots (dict).
+SYSTEM_PROMPT = """
+You are an intent classifier for a fitness club. 
+Return exactly one valid json object with keys:
+- "intent": one of ["reserve_class", "faq", "handover", "clarify", "ticket", "pg_available_classes", "pg_contract_status", "greeting"]
+- "confidence": float 0..1
+- "slots": object with extracted parameters.
 
-faq slots: {"topic": one of [hours, price, location, contact]}
-reserve_class slots: {"class_id": optional, "member_id": optional}
-pg_available_classes slots: {}
-pg_contract_status slots: {"email": optional}
+Intent rules:
+- "greeting": message is only a greeting/polite phrase in any language and contains no request.
+- "faq": user asks for general information on topics [hours price location contact schedule classes trainers membership equipment parking rules facilities age_limit guest_pass lost_and_found cancellation opening_soon].
+- "reserve_class": user wants to sign up/reserve a class (extract class_id, member_id if present).
+- "pg_available_classes": user asks what classes are available.
+- "pg_contract_status": user asks about membership/contract/account status.
+- "ticket": user reports a problem or asks for staff help.
+- "handover": user explicitly wants to speak to a human.
+- "clarify": message is unclear or does not fit any other intent.
+
+Always respond with one minimal json object and nothing else.
 """
+
 
 
 _VALID_INTENTS = {
     "reserve_class", "faq", "handover", "clarify", "ticket",
-    "pg_available_classes", "pg_contract_status",
+    "pg_available_classes", "pg_contract_status", "greeting",
 }
 
 
@@ -134,12 +144,20 @@ class OpenAIClient:
             except APIError as e:
                 # „logiczny” błąd API — raczej nie ustąpi po retry
                 last_api_error = e
+                logger.error(
+                    {
+                        "component": "openai_client",
+                        "event": "api_error",
+                        "error_type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
                 break
 
         # ostateczny fallback (json, żeby parser po drugiej stronie nie padł)
         note = "LLM unavailable (retries exhausted)"
         if last_api_error is not None:
-            note = f"LLM error: {type(last_api_error).__name__}"
+            note = f"LLM error: {type(last_api_error).__name__}: {last_api_error}"
 
         return json.dumps(
             {
@@ -164,16 +182,21 @@ class OpenAIClient:
     def classify(self, text: str, lang: str = "pl") -> Dict[str, Any]:
         """
         Wygodny wrapper do klasyfikacji intencji.
-
-        Buduje prompt system/user, wywołuje LLM i normalizuje wynik do postaci:
-        {"intent": ..., "confidence": ..., "slots": {...}}.
         """
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"LANG={lang}\nTEXT={text}"},
+            {
+                "role": "user",
+                "content": (
+                    f"LANG={lang}\nTEXT={text}\n\n"
+                    "Respond strictly in json according to the specification above."
+                ),
+            },
         ]
+
         content = self.chat(messages, model=self.model, max_tokens=256)
         return self._parse_classification(content)
+
 
     async def classify_async(self, text: str, lang: str = "pl") -> Dict[str, Any]:
         """

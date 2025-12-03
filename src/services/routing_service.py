@@ -9,6 +9,8 @@ Na podstawie wyniku NLU decyduje, czy:
 """
 
 import time
+import re
+from datetime import datetime
 from typing import List, Optional
 
 from ..domain.models import Message, Action
@@ -28,6 +30,7 @@ from ..common.config import settings
 STATE_AWAITING_CONFIRMATION = "awaiting_confirmation"
 STATE_AWAITING_VERIFICATION = "awaiting_verification"
 STATE_AWAITING_CHALLENGE = "awaiting_challenge"
+STATE_AWAITING_CLASS_SELECTION = "awaiting_class_selection"
 
 class RoutingService:
     """
@@ -245,7 +248,6 @@ class RoutingService:
                 },
             )
         ]
-        
 
     def _handle_pg_challenge(self, msg: Message, conv: dict, lang: str) -> List[Action]:
         """
@@ -366,7 +368,251 @@ class RoutingService:
                 },
             )
         ]
-        
+    def _handle_class_selection(self, msg: Message, lang: str) -> Optional[List[Action]]:
+        text = (msg.body or "").strip().lower()
+
+        classes_item = self.conv.get(self._pending_key(msg.from_phone), "classes")
+        if not classes_item:
+            return None
+
+        items = classes_item.get("items") or []
+        if not items:
+            return None
+
+        # 1) Użytkownik podał numer (np. "1", "nr 2")
+        m = re.search(r"\b(\d{1,2})\b", text)
+        if m:
+            idx = int(m.group(1))
+            selected = next((c for c in items if c.get("index") == idx), None)
+            if not selected:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_available_classes_invalid_index",
+                    lang,
+                    {"max_index": len(items)},
+                )
+                return [
+                    Action(
+                        "reply",
+                        {
+                            "to": msg.from_phone,
+                            "body": body,
+                            "tenant_id": msg.tenant_id,
+                            "channel": msg.channel,
+                            "channel_user_id": msg.channel_user_id,
+                        },
+                    )
+                ]
+            return self._start_reservation_from_selection(msg, lang, selected)
+
+        # 2) "dzisiaj"/"today" – filtrujemy po dzisiejszej dacie
+        today = datetime.now().date().isoformat()  # "YYYY-MM-DD"
+
+        if any(w in text for w in ["dzis", "dziś", "dzisiaj", "today"]):
+            todays = [c for c in items if c.get("date") == today]
+            if not todays:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_available_classes_no_today",
+                    lang,
+                    {},
+                )
+                return [
+                    Action(
+                        "reply",
+                        {
+                            "to": msg.from_phone,
+                            "body": body,
+                            "tenant_id": msg.tenant_id,
+                            "channel": msg.channel,
+                            "channel_user_id": msg.channel_user_id,
+                        },
+                    )
+                ]
+
+            if len(todays) == 1:
+                # jedna klasa dzisiaj – od razu przechodzimy do potwierdzenia
+                return self._start_reservation_from_selection(msg, lang, todays[0])
+
+            # kilka klas dzisiaj – pokaż ponumerowaną listę i poproś o numer
+            lines: list[str] = []
+            for c in todays:
+                line = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_available_classes_item",
+                    lang,
+                    {
+                        "index": c["index"],
+                        "date": c["date"],
+                        "time": c["time"],
+                        "name": c["name"],
+                        "capacity": "",
+                    },
+                )
+                lines.append(line)
+
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "pg_available_classes_today",
+                lang,
+                {"classes": "\n".join(lines)},
+            )
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                    },
+                )
+            ]
+
+        # 3) Użytkownik podał konkretną datę (np. "2025-12-03") – prosty parser ISO
+        iso_match = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", text)
+        if iso_match:
+            date_str = iso_match.group(1)
+            same_day = [c for c in items if c.get("date") == date_str]
+            if not same_day:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_available_classes_no_classes_on_date",
+                    lang,
+                    {"date": date_str},
+                )
+                return [
+                    Action(
+                        "reply",
+                        {
+                            "to": msg.from_phone,
+                            "body": body,
+                            "tenant_id": msg.tenant_id,
+                            "channel": msg.channel,
+                            "channel_user_id": msg.channel_user_id,
+                        },
+                    )
+                ]
+
+            if len(same_day) == 1:
+                return self._start_reservation_from_selection(msg, lang, same_day[0])
+
+            # kilka zajęć danego dnia – pokaż listę + prośba o numer
+            lines: list[str] = []
+            for c in same_day:
+                line = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_available_classes_item",
+                    lang,
+                    {
+                        "index": c["index"],
+                        "date": c["date"],
+                        "time": c["time"],
+                        "name": c["name"],
+                        "capacity": "",
+                    },
+                )
+                lines.append(line)
+
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "pg_available_classes_today",  # możesz zrobić osobny template na "on_date"
+                lang,
+                {"classes": "\n".join(lines)},
+            )
+            # dodatkowa, jasna prośba o numer (osobny template)
+            extra = self.tpl.render_named(
+                msg.tenant_id,
+                "pg_available_classes_select_by_number",
+                lang,
+                {},
+            )
+
+            full_body = f"{body}\n\n{extra}"
+
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": full_body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                        },
+                    )
+            ]
+
+        # 4) Nic nie wybraliśmy – oddaj dalej do NLU / clarify
+        return None
+    
+    def _start_reservation_from_selection(self, msg: Message, lang: str, selected: dict) -> List[Action]:
+        class_id = selected.get("class_id")
+        if not class_id:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "reserve_class_missing_id",
+                lang,
+                {},
+            )
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                    },
+                )
+            ]
+
+        # TODO: podłącz realny member_id (z PG / z profilu)
+        member_id = "105"
+        idem = new_id("idem-")
+
+        self.conv.put(
+            {
+                "pk": self._pending_key(msg.from_phone),
+                "sk": "pending",
+                "class_id": class_id,
+                "member_id": member_id,
+                "idempotency_key": idem,
+            }
+        )
+
+        # czyścimy listę zajęć, przechodzimy do potwierdzenia
+        self.conv.delete(self._pending_key(msg.from_phone), "classes")
+        self.conv.upsert_conversation(
+            tenant_id=msg.tenant_id,
+            channel=msg.channel or "whatsapp",
+            channel_user_id=msg.channel_user_id or msg.from_phone,
+            last_intent="reserve_class",
+            state_machine_status=STATE_AWAITING_CONFIRMATION,
+            language_code=lang,
+        )
+
+        body = self.tpl.render_named(
+            msg.tenant_id,
+            "reserve_class_confirm",
+            lang,
+            {"class_id": class_id},
+        )
+        return [
+            Action(
+                "reply",
+                {
+                    "to": msg.from_phone,
+                    "body": body,
+                    "tenant_id": msg.tenant_id,
+                    "channel": msg.channel,
+                    "channel_user_id": msg.channel_user_id,
+                },
+            )
+        ]
+
     def handle(self, msg: Message) -> List[Action]:
         """
         Przetwarza pojedynczą wiadomość biznesową i zwraca listę akcji do wykonania.
@@ -388,10 +634,16 @@ class RoutingService:
         # --- 0. Obsługa stanu awaiting_challenge (challenge PG na WhatsApp) ---
         if state == STATE_AWAITING_CHALLENGE and channel == "whatsapp":
             return self._handle_pg_challenge(msg, conv, lang)
+        
+        # --- 0b. Użytkownik wybiera zajęcia z listy ---
+        if state == STATE_AWAITING_CLASS_SELECTION:
+            selection_response = self._handle_class_selection(msg, lang)
+            if selection_response is not None:
+                return selection_response
 
         
         # --- 1. Obsługa oczekującej rezerwacji (TAK/NIE) ---
-        pending = self.conv.get(self._pending_key(msg.from_phone))
+        pending = self.conv.get(self._pending_key(msg.from_phone), "pending")
         if pending:
             confirm_words = self._get_words_set(
                 msg.tenant_id,
@@ -413,15 +665,20 @@ class RoutingService:
                     class_id=class_id,
                     idempotency_key=idem,
                 )
-                self.conv.delete(self._pending_key(msg.from_phone))
+                self.conv.delete(self._pending_key(msg.from_phone), "pending")
 
                 if (res or {}).get("ok", True):
                     body = self.tpl.render_named(
                         msg.tenant_id,
                         "reserve_class_confirmed",
                         lang,
-                        {},
+                        {
+                            "class_id": class_id,
+                            "class_name": name,
+                        },
+                    
                     )
+
                     return [
                         Action(
                             "reply",
@@ -455,7 +712,7 @@ class RoutingService:
 
             if text_lower in decline_words:
                 # użytkownik odrzucił rezerwację
-                self.conv.delete(self._pending_key(msg.from_phone))
+                self.conv.delete(self._pending_key(msg.from_phone), "pending")
                 body = self.tpl.render_named(
                     msg.tenant_id,
                     "reserve_class_declined",
@@ -583,36 +840,208 @@ class RoutingService:
                 slots = getattr(nlu, "slots", {}) or {}
                 confidence = float(getattr(nlu, "confidence", 1.0))
 
-        if intent != "clarify" and confidence < 0.3:
+        if intent not in ("clarify", "greeting") and confidence < 0.3:
             intent = "clarify"
 
-        
         # --- 3. Zapisz info o rozmowie (intent, stan, język) ---
+        sm_state = None
+        if intent == "reserve_class" and (slots.get("class_id") or "").strip():
+            sm_state = STATE_AWAITING_CONFIRMATION
+        elif intent == "pg_available_classes":
+            sm_state = STATE_AWAITING_CLASS_SELECTION
+
         self.conv.upsert_conversation(
             tenant_id=msg.tenant_id,
             channel=msg.channel or "whatsapp",
             channel_user_id=msg.channel_user_id or msg.from_phone,
             last_intent=intent,
-             state_machine_status=(
-                STATE_AWAITING_CONFIRMATION if intent == "reserve_class" else None
-            ),
+            state_machine_status=sm_state,
             language_code=lang,
         )
         
-        # --- 4. FAQ ---
-        if intent == "faq":
-            topic = slots.get("topic", "hours")
-            body = (
-                self.kb.answer(topic, tenant_id=msg.tenant_id, language_code=lang)
-                or 
-                self.tpl.render_named(
-                    msg.tenant_id,
-                    "faq_no_info",
-                    lang,
-                    {},
-                )
+        # --- 4. Intent: greeting (powitanie) ---
+        if intent == "greeting":
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "greeting",
+                lang,
+                {},
             )
-            return [Action(
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                    },
+                )
+            ]
+
+        # --- 5. FAQ ---
+        
+        if intent == "faq":
+            # 1) Pierwszy wybór: AI generuje odpowiedź na podstawie FAQ
+            ai_body = self.kb.answer_ai(
+                question=msg.body,
+                tenant_id=msg.tenant_id,
+                language_code=lang,
+            )
+
+            if ai_body:
+                body = ai_body
+            else:
+                # 2) Fallback – stary mechanizm po topic
+                topic = slots.get("topic", "hours")
+                body = (
+                    self.kb.answer(topic, tenant_id=msg.tenant_id, language_code=lang)
+                    or self.tpl.render_named(
+                        msg.tenant_id,
+                        "faq_no_info",
+                        lang,
+                        {},
+                    )
+                )
+
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                    },
+                )
+            ]
+
+        # --- 6. Rezerwacja zajęć (PerfectGym) ---
+        if intent == "reserve_class":
+            class_id = (slots.get("class_id") or "").strip()
+            member_id = (slots.get("member_id") or "").strip()
+
+            # 5a) Brak class_id → pokaż listę zajęć z numerkami + zapisz do DDB
+            if not class_id:
+                pg = PerfectGymClient()
+                classes_resp = pg.get_available_classes(top=10)
+                classes = classes_resp.get("value") or []
+
+                if not classes:
+                    body = self.tpl.render_named(
+                        msg.tenant_id,
+                        "pg_available_classes_empty",
+                        lang,
+                        {},
+                    )
+                    return [
+                        Action(
+                            "reply",
+                            {
+                                "to": msg.from_phone,
+                                "body": body,
+                                "tenant_id": msg.tenant_id,
+                                "channel": msg.channel,
+                                "channel_user_id": msg.channel_user_id,
+                            },
+                        )
+                    ]
+
+                lines: list[str] = []
+                simplified: list[dict] = []
+
+                for idx, c in enumerate(classes, start=1):
+                    start = str(c.get("startDate") or c.get("startdate") or "")
+                    date_str = start[:10] if len(start) >= 10 else "?"
+                    time_str = start[11:16] if len(start) >= 16 else "?"
+                    class_type = (c.get("classType") or {}).get("name") or "Class"
+
+                    attendees_count = c.get("attendeesCount") or 0
+                    attendees_limit = c.get("attendeesLimit")
+
+                    if attendees_limit is None:
+                        capacity_info = self.tpl.render_named(
+                            msg.tenant_id,
+                            "pg_available_classes_capacity_no_limit",
+                            lang,
+                            {},
+                        )
+                    else:
+                        free = max(attendees_limit - attendees_count, 0)
+                        if free <= 0:
+                            capacity_info = self.tpl.render_named(
+                                msg.tenant_id,
+                                "pg_available_classes_capacity_full",
+                                lang,
+                                {"limit": attendees_limit},
+                            )
+                        else:
+                            capacity_info = self.tpl.render_named(
+                                msg.tenant_id,
+                                "pg_available_classes_capacity_free",
+                                lang,
+                                {
+                                    "free": free,
+                                    "limit": attendees_limit,
+                                },
+                            )
+
+                    # TU dodajemy index do szablonu, więc {index} w template się poprawnie zrenderuje
+                    line = self.tpl.render_named(
+                        msg.tenant_id,
+                        "pg_available_classes_item",
+                        lang,
+                        {
+                            "index": idx,
+                            "date": date_str,
+                            "time": time_str,
+                            "name": class_type,
+                            "capacity": capacity_info,
+                        },
+                    )
+                    lines.append(line)
+
+                    simplified.append(
+                        {
+                            "index": idx,
+                            "class_id": c.get("id"),
+                            "date": date_str,
+                            "time": time_str,
+                            "name": class_type,
+                            "start": start,
+                        }
+                    )
+
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_available_classes",
+                    lang,
+                    {"classes": "\n".join(lines)},
+                )
+
+                # Zapis listy klas do późniejszego wyboru typu "1", "2", ...
+                self.conv.put(
+                    {
+                        "pk": self._pending_key(msg.from_phone),
+                        "sk": "classes",
+                        "items": simplified,
+                    }
+                )
+
+                # Ustawiamy stan, żeby następna wiadomość poleciała do _handle_class_selection
+                self.conv.upsert_conversation(
+                    tenant_id=msg.tenant_id,
+                    channel=msg.channel or "whatsapp",
+                    channel_user_id=msg.channel_user_id or msg.from_phone,
+                    last_intent="pg_available_classes",
+                    state_machine_status=STATE_AWAITING_CLASS_SELECTION,
+                    language_code=lang,
+                )
+
+                return [
+                    Action(
                         "reply",
                         {
                             "to": msg.from_phone,
@@ -621,16 +1050,42 @@ class RoutingService:
                             "channel": msg.channel,
                             "channel_user_id": msg.channel_user_id,
                         },
-                    )]
+                    )
+                ]
 
-        # --- 5. Rezerwacja zajęć ---
-        if intent == "reserve_class":
-            class_id = slots.get("class_id", "101")
-            member_id = slots.get("member_id", "105")
+
+            # 6b) Mamy już class_id → standardowy flow z potwierdzeniem
+            verify_resp = self._ensure_pg_verification(msg, conv, lang)
+            if verify_resp:
+                return verify_resp
+
+            member_id = conv.get("pg_member_id")
+            if not member_id:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "pg_member_not_linked",
+                    lang,
+                    {},
+                )
+                return [
+                    Action(
+                        "reply",
+                        {
+                            "to": msg.from_phone,
+                            "body": body,
+                            "tenant_id": msg.tenant_id,
+                            "channel": msg.channel,
+                            "channel_user_id": msg.channel_user_id,
+                        },
+                    )
+                ]
+
+
             idem = new_id("idem-")
             self.conv.put(
                 {
                     "pk": self._pending_key(msg.from_phone),
+                    "sk": "pending",
                     "class_id": class_id,
                     "member_id": member_id,
                     "idempotency_key": idem,
@@ -642,20 +1097,23 @@ class RoutingService:
                 lang,
                 {"class_id": class_id},
             )
-            
-            return [Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )]
+
+            return [
+                Action(
+                    "reply",
+                    {
+                        "to": msg.from_phone,
+                        "body": body,
+                        "tenant_id": msg.tenant_id,
+                        "channel": msg.channel,
+                        "channel_user_id": msg.channel_user_id,
+                    },
+                )
+            ]
 
 
-        # --- 6. Handover do człowieka ---
+
+        # --- 7. Handover do człowieka ---
         if intent == "handover":
             self.conv.assign_agent(
                 tenant_id=msg.tenant_id,
@@ -683,7 +1141,7 @@ class RoutingService:
                 )
             ]
              
-        # --- 7. Ticket do systemu ticketowego (Jira) ---
+        # --- 8. Ticket do systemu ticketowego (Jira) ---
         if intent == "ticket":
             conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
 
@@ -771,12 +1229,11 @@ class RoutingService:
             ]
 
         
-        # --- 8. Lista dostępnych zajęć (PerfectGym) ---
+        # --- 9. Lista dostępnych zajęć (PerfectGym) ---
         if intent == "pg_available_classes":
             pg = PerfectGymClient()
-            # Na początek weźmy najbliższe 10 zajęć od teraz
             classes_resp = pg.get_available_classes(top=10)
-            classes = classes_resp.get("value", []) or []
+            classes = classes_resp.get("value") or []
 
             if not classes:
                 body = self.tpl.render_named(
@@ -795,26 +1252,14 @@ class RoutingService:
                             "channel": msg.channel,
                             "channel_user_id": msg.channel_user_id,
                         },
-                    ),
-                    Action(
-                        "ticket",
-                        {
-                            "tenant_id": msg.tenant_id,
-                            "conversation_id": conv_key,
-                            "phone": msg.from_phone,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                            "intent": intent,
-                            "slots": slots,
-                            "language_code": lang,
-                        },
-                    ),
-                                ]
+                    )
+                ]
 
             lines: list[str] = []
-            for c in classes:
+            simplified: list[dict] = []
+
+            for idx, c in enumerate(classes, start=1):
                 start = str(c.get("startDate") or c.get("startdate") or "")
-                # TODO: weryfikacja! startDate: "2025-11-23T10:00:00+01:00"
                 date_str = start[:10] if len(start) >= 10 else "?"
                 time_str = start[11:16] if len(start) >= 16 else "?"
                 class_type = (c.get("classType") or {}).get("name") or "Class"
@@ -843,10 +1288,7 @@ class RoutingService:
                             msg.tenant_id,
                             "pg_available_classes_capacity_free",
                             lang,
-                            {
-                                "free": free,
-                                "limit": attendees_limit,
-                            },
+                            {"free": free, "limit": attendees_limit},
                         )
 
                 line = self.tpl.render_named(
@@ -854,6 +1296,7 @@ class RoutingService:
                     "pg_available_classes_item",
                     lang,
                     {
+                        "index": idx,
                         "date": date_str,
                         "time": time_str,
                         "name": class_type,
@@ -862,11 +1305,31 @@ class RoutingService:
                 )
                 lines.append(line)
 
+                simplified.append(
+                    {
+                        "index": idx,
+                        "class_id": c.get("id"),
+                        "date": date_str,
+                        "time": time_str,
+                        "name": class_type,
+                        "start": start,
+                    }
+                )
+
             body = self.tpl.render_named(
                 msg.tenant_id,
                 "pg_available_classes",
                 lang,
                 {"classes": "\n".join(lines)},
+            )
+
+            # zapis listy klas do późniejszego wyboru
+            self.conv.put(
+                {
+                    "pk": self._pending_key(msg.from_phone),
+                    "sk": "classes",
+                    "items": simplified,
+                }
             )
 
             return [
@@ -882,8 +1345,7 @@ class RoutingService:
                 )
             ]
 
-
-        # --- 9. Status kontraktu (PerfectGym) ---
+        # --- 10. Status kontraktu (PerfectGym) ---
         if intent == "pg_contract_status":
             verify_resp = self._ensure_pg_verification(msg, conv, lang)
             if verify_resp:
@@ -993,7 +1455,7 @@ class RoutingService:
                     },
                 )
             ]
-        # --- 10. Saldo członkowskie (PerfectGym) ---
+        # --- 11. Saldo członkowskie (PerfectGym) ---
         if intent == "pg_member_balance":
             verify_resp = self._ensure_pg_verification(msg, conv, lang)
             if verify_resp:
@@ -1043,7 +1505,7 @@ class RoutingService:
                     },
                 )
             ]
-        # --- 11. Domyślny clarify ---
+        # --- 12. Domyślny clarify ---
         body = self.tpl.render_named(
             msg.tenant_id,
             "clarify_generic",

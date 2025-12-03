@@ -27,7 +27,7 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
             # symulacja zapisania handoveru
             self.last_upsert = kwargs
 
-        def get(self, key):
+        def get(self, key, sk):
             return self.pending.get(key)
 
         def put(self, item: dict):
@@ -49,8 +49,10 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
 
     class DummyKB:
         def answer(self, *args, **kwargs):
-            return "KB answer"
-
+            return "KB answer "       
+        
+        def answer_ai(self, *args, **kwargs):
+            return " KB AI answer "
     class DummyTpl:
         def render_named(self, tenant, template_name, lang, ctx):
             if template_name == "handover_to_staff":

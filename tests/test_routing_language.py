@@ -21,7 +21,7 @@ class FakeConvRepo:
         key = item["pk"]
         self.pending[key] = dict(item)
         
-    def get(self, pk: str):
+    def get(self, pk: str, sk: str):
         return None
 
     def delete(self, key: str):

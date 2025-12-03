@@ -13,6 +13,9 @@ class DummyNLU:
 class DummyKB:
     def answer(self, *args, **kwargs):
         return " KB answer "
+        
+    def answer_ai(self, *args, **kwargs):
+        return " KB AI answer "
 
 
 class DummyTemplateService:
@@ -62,7 +65,7 @@ class DummyRepos:
         def get_conversation(self, tenant_id, channel, channel_user_id):
             return None
 
-        def get(self, pk):
+        def get(self, pk, sk):
             return self._store.get(pk)
 
         def put(self, item):

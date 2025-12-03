@@ -34,7 +34,7 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
         def upsert_conversation(self, *args, **kwargs):
             pass
 
-        def get(self, key):
+        def get(self, key, sk):
             return self.pending.get(key)
 
         def put(self, item: dict):

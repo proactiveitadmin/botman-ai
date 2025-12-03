@@ -45,6 +45,16 @@ Globals:
     Tracing: Active
     Environment:
       Variables:
+       # !!! UWAGA !!!
+        # Sekcja ENV z nazwami DDB/SQS/S3 jest traktowana jako "infra".
+        # Przy zmianach samego kodu NIE ruszamy:
+        #   - nazewnictwa kolejek
+        #   - TableName w DDB
+        #   - nazwy bucketów
+        # Zmieniać można:
+        #   - kod (src/*)
+        #   - handler/timeout/memory Lambd
+        #   - zwykłe zmienne ENV nietrzymające nazw zasobów (np. LANG_DEFAULT).
         PYTHONPATH: /var/task/src
         DEV_MODE:           !Ref DevMode
         LANG_DEFAULT:       !Ref LangDefault
@@ -84,6 +94,8 @@ Globals:
 Resources:
   InboundEventsQueue:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'inbound-events-${AWS::StackName}'
       VisibilityTimeout: 60
@@ -92,11 +104,15 @@ Resources:
         maxReceiveCount: 5
   InboundDLQ:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'inbound-events-${AWS::StackName}-dlq'
 
   OutboundQueue:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'outbound-messages-${AWS::StackName}'
       VisibilityTimeout: 60
@@ -105,11 +121,15 @@ Resources:
         maxReceiveCount: 5
   OutboundDLQ:
     Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'outbound-messages-${AWS::StackName}-dlq'
 
   Tenants:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Tenants-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -122,6 +142,8 @@ Resources:
 
   Conversations:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Conversations-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -138,6 +160,8 @@ Resources:
 
   Messages:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Messages-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -154,6 +178,8 @@ Resources:
 
   Templates:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Templates-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -166,6 +192,8 @@ Resources:
 
   Campaigns:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Campaigns-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -178,6 +206,8 @@ Resources:
 
   Consents:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Consents-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -190,6 +220,8 @@ Resources:
 
   IntentsStats:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'IntentsStats-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -206,6 +238,8 @@ Resources:
   
   Leads:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'Leads-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
@@ -222,18 +256,39 @@ Resources:
           
   MembersIndex:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub 'MembersIndex-${AWS::StackName}'
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: phone
+          AttributeType: S
         - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
           AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: tenant_phone_idx
+          KeySchema:
+            - AttributeName: tenant_id
+              KeyType: HASH
+            - AttributeName: phone
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
 
   KnowledgeBaseBucket:
     Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
       VersioningConfiguration:
@@ -253,12 +308,6 @@ Resources:
       Environment:
         Variables:
           InboundEventsQueueUrl: !Ref InboundEventsQueue
-          LOCALSTACK_ENDPOINT: ""         
-          TwilioAccountSid: ""
-          TwilioAuthToken: ""
-          TWILIO_FROM: ""
-          TWILIO_MESSAGING_SID: ""
-          TWILIO_WHATSAPP_NUMBER: ""
       Events:
         Api:
           Type: Api
@@ -292,11 +341,6 @@ Resources:
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue      
-          TwilioAccountSid: ""
-          TwilioAuthToken: ""
-          TWILIO_FROM: ""
-          TWILIO_MESSAGING_SID: ""
-          TWILIO_WHATSAPP_NUMBER: ""
       Events:
         SQSEvent:
           Type: SQS
@@ -315,11 +359,6 @@ Resources:
             QueueName: !GetAtt OutboundQueue.QueueName      
       Environment:
         Variables:    
-          TwilioAccountSid: ""
-          TwilioAuthToken: ""
-          TWILIO_FROM: ""
-          TWILIO_MESSAGING_SID: ""
-          TWILIO_WHATSAPP_NUMBER: ""
           WebOutboundEventsQueueUrl: !Ref OutboundQueue
       Events:
         SQSEvent:

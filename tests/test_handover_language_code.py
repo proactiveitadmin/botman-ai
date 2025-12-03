@@ -24,7 +24,7 @@ def test_handover_reply_contains_language_code(monkeypatch):
             pass
 
         # używane przez RoutingService do obsługi pending rezerwacji
-        def get(self, key):
+        def get(self, key, sk):
             return self.pending.get(key)
 
         def put(self, item: dict):

@@ -43,7 +43,7 @@ def test_pg_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
         def _pending_key(self, phone):
             return f"pending#{phone}"
 
-        def get(self, key):
+        def get(self, key, sk):
             return self.pending.get(key)
 
         def put(self, item: dict):

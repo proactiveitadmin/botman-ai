@@ -1,5 +1,6 @@
 import os, time
 from ..common.aws import ddb_resource
+from boto3.dynamodb.conditions import Key
 
 class ConversationsRepo:
     def __init__(self):
@@ -102,23 +103,25 @@ class ConversationsRepo:
         )
 
     def find_by_verification_code(self, tenant_id: str, verification_code: str) -> dict | None:
-        # MVP: scan – docelowo GSI po (tenant_id, verification_code)
-        resp = self.table.scan(
-            FilterExpression="tenant_id = :t AND verification_code = :v",
-            ExpressionAttributeValues={
-                ":t": tenant_id,
-                ":v": verification_code,
-            },
+        resp = self.table.query(
+            IndexName="tenant_verification_idx",
+            KeyConditionExpression=Key("tenant_id").eq(tenant_id)
+                                   & Key("verification_code").eq(verification_code),
+            Limit=1,
         )
         items = resp.get("Items") or []
         return items[0] if items else None
         
-    def get(self, pk: str):
-        return self.table.get_item(Key={"pk": pk}).get("Item")
+    def get(self, pk: str, sk: str):
+        return self.table.get_item(Key={"pk": pk, "sk": sk}).get("Item")
+
+    def delete(self, pk: str, sk: str):
+        self.table.delete_item(Key={"pk": pk, "sk": sk})
 
     def put(self, item: dict):
         self.table.put_item(Item=item)
 
-    def delete(self, pk: str):
-        self.table.delete_item(Key={"pk": pk})
+
+        
+    
 

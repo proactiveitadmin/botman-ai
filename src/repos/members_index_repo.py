@@ -1,5 +1,6 @@
 import os, time
 from ..common.aws import ddb_resource
+from boto3.dynamodb.conditions import Key
 
 class MembersIndexRepo:
     def __init__(self):
@@ -8,16 +9,11 @@ class MembersIndexRepo:
         )
 
     def find_by_phone(self, tenant_id: str, phone: str) -> dict | None:
-        """
-        Wersja MVP – scan po tenant_id + phone.
-        TODO Docelowo: query po GSI (tenant_id, phone).
-        """
-        resp = self.table.scan(
-            FilterExpression="tenant_id = :t AND phone = :p",
-            ExpressionAttributeValues={
-                ":t": tenant_id,
-                ":p": phone,
-            },
+        resp = self.table.query(
+            IndexName="tenant_phone_idx",
+            KeyConditionExpression=Key("tenant_id").eq(tenant_id)
+                                   & Key("phone").eq(phone),
+            Limit=1,
         )
         items = resp.get("Items") or []
         return items[0] if items else None

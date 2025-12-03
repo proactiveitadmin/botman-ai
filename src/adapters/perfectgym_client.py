@@ -183,24 +183,58 @@ class PerfectGymClient:
         except requests.RequestException as e:
             self.logger.error({"pg": "get_contracts_by_email_and_phone_error", "error": str(e)})
             return {"value": []}
-    
+
     def get_member_balance(self, member_id: int) -> dict:
         """
         Zwraca informację o saldzie membera.
-        TODO: podmień endpoint na właściwy z PerfectGym (np. /Members({id})/Balance)
+
+        Używa:
+          GET /Members({id})?$expand=memberBalance
+
+        Oczekiwany kształt:
+          {
+            "memberBalance": {
+                "prepaidBalance": ...,
+                "prepaidBonusBalance": ...,
+                "currentBalance": ...,
+                "memberId": ...,
+                "negativeBalanceSince": ...
+            },
+            ...
+          }
         """
-        url = f"{self.base_url}/Members({member_id})/Balance"
+        url = f"{self.base_url}/Members({member_id})?$expand=memberBalance"
         try:
             resp = requests.get(url, headers=self._headers(), timeout=10)
             resp.raise_for_status()
             data = resp.json()
+
+            # jeśli to /Members?filter=... przypadkiem:
+            if "value" in data:
+                items = data.get("value") or []
+                data = items[0] if items else {}
+
+            mb = data.get("memberBalance") or {}
             self.logger.info(
                 {"pg": "get_member_balance_ok", "member_id": member_id}
             )
-            return data
+            # zwracamy uproszczony słownik
+            return {
+                "prepaidBalance": mb.get("prepaidBalance", 0),
+                "prepaidBonusBalance": mb.get("prepaidBonusBalance", 0),
+                "currentBalance": mb.get("currentBalance", 0),
+                "negativeBalanceSince": mb.get("negativeBalanceSince"),
+                "raw": mb,
+            }
         except requests.RequestException as e:
             self.logger.error(
                 {"pg": "get_member_balance_error", "member_id": member_id, "error": str(e)}
             )
             # fallback – zero zaległości
-            return {"balance": 0}
+            return {
+                "prepaidBalance": 0,
+                "prepaidBonusBalance": 0,
+                "currentBalance": 0,
+                "negativeBalanceSince": None,
+                "raw": {},
+            }

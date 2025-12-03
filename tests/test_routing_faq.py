@@ -13,6 +13,9 @@ def test_faq_intent_uses_kb_service_answer():
     class DummyKB:
         def answer(self, *args, **kwargs):
             return " KB answer "
+             
+        def answer_ai(self, *args, **kwargs):
+            return " KB AI answer "
 
     class DummyTemplateService:
         """
@@ -60,7 +63,7 @@ def test_faq_intent_uses_kb_service_answer():
             def get_conversation(self, tenant_id, channel, channel_user_id):
                 return None
 
-            def get(self, pk):
+            def get(self, pk, sk):
                 return self._store.get(pk)
 
             def put(self, item):
@@ -106,5 +109,5 @@ def test_faq_intent_uses_kb_service_answer():
     assert len(actions) == 1
     action = actions[0]
     assert action.type == "reply"
-    assert "kb answer" in action.payload["body"].lower()
+    assert "kb ai answer" in action.payload["body"].lower()
     

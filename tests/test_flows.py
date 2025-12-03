@@ -335,18 +335,18 @@ def test_clarify_flow_when_intent_unknown(aws_stack, mock_ai, monkeypatch):
 
     payloads = [json.loads(m["Body"]) for m in msgs]
 
-    # Szukamy odpowiedzi clarify
+    # Szukamy odpowiedzi clarify (obsługujemy zarówno stare "doprecyzuj", jak i nowe "clarify")
     clarify = [
-        p for p in payloads
-        if "doprec" in p.get("body", "").lower()  # obsługuje doprecyzuj / doprecyzować
+        p
+        for p in payloads
+        if (
+            "doprec" in p.get("body", "").lower()
+            or "clarify" in p.get("body", "").lower()
+        )
         and p.get("to") == "whatsapp:+48123123123"
     ]
 
-    clarify = [
-        p for p in payloads
-        if "clarify" in p.get("body", "").lower()
-        and p.get("to") == "whatsapp:+48123123123"
-    ]
+    assert len(clarify) == 1, f"Oczekiwano jednej wiadomości clarify, było: {clarify}"
 
 
 

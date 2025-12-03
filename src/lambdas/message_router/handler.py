@@ -6,6 +6,7 @@ i przekazuje do RoutingService, a następnie wrzuca odpowiedzi do kolejki outbou
 """
 
 import json
+import time
 
 from ...services.routing_service import RoutingService
 from ...services.template_service import TemplateService
@@ -18,8 +19,11 @@ from ...common.aws import resolve_queue_url, sqs_client
 from ...domain.models import Message
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
+from ...repos.messages_repo import MessagesRepo
 
 ROUTER = RoutingService()
+MESSAGES = MessagesRepo()
+
 
 def _parse_record(record: dict) -> dict | None:
     raw_body = record.get("body", "")
@@ -100,7 +104,31 @@ def lambda_handler(event, context):
         msg_body = _parse_record(r)
         if not msg_body:
             continue
+        event_id = msg_body.get("event_id")
+        tenant_id = msg_body.get("tenant_id", "default")
+        from_phone = msg_body.get("from")
 
+        # Prosta idempotencja: jeśli ten event już przerobiliśmy, skip
+        if event_id:
+            # np. pk = tenant_id#from_phone, sk = event#event_id
+            existing = MESSAGES.table.get_item(
+                Key={
+                    "pk": f"{tenant_id}#{from_phone}",
+                    "sk": f"event#{event_id}",
+                }
+            ).get("Item")
+            if existing:
+                # już było – pomijamy
+                continue
+
+            # zapisujemy event jako przetworzony
+            MESSAGES.table.put_item(
+                Item={
+                    "pk": f"{tenant_id}#{from_phone}",
+                    "sk": f"event#{event_id}",
+                    "created_at": int(time.time()),
+                }
+            )
         logger.info(
             {
                 "handler": "message_router",

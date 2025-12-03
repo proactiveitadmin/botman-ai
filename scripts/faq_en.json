@@ -1,0 +1,22 @@
+{
+  "hours": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
+  "pool_hours": "The pool is available daily from 6:00 AM to 9:30 PM. Last entry is 45 minutes before closing.",
+  "sauna_hours": "The sauna area is open from 2:00 PM to 10:00 PM on weekdays and from 10:00 AM to 8:00 PM on weekends.",
+  "kids_zone": "The Kids Zone is open on Saturdays and Sundays from 10:00 AM to 6:00 PM.",
+  "membership_price": "Monthly membership starts at 139 PLN. Quarterly and annual plans are also available.",
+  "classes_booking": "Group classes can be booked through our app or by contacting the front desk.",
+  "classes_cancellation": "Classes can be cancelled no later than 2 hours before they start. After that, a fee applies.",
+  "parking": "Members get 2 hours of free parking. Please take a ticket at the entrance.",
+  "personal_trainer": "You can schedule a personal training session at the front desk or directly with your chosen trainer.",
+  "contract_freeze": "The contract can be frozen once a year for up to 30 days. The cost of freezing is 29 PLN.",
+  "contract_termination": "Contract termination requires signing a form at the front desk. The notice period is 1 month.",
+  "wifi": "Free Wi-Fi is available throughout the club. Network name: FITNESS_WIFI, password: trening2024.",
+  "towels": "Towels are available at the front desk for an additional fee of 5 PLN.",
+  "locker_room": "Lockers operate with a PIN code. If you forget your code, please contact the front desk.",
+  "lost_items": "Lost items can be collected at the front desk. We keep them for 30 days.",
+  "rules": "The club's rules are available on our website and at the front desk.",
+  "app_help": "If you're having issues with the mobile app, try updating it to the latest version or contact the front desk.",
+  "payments": "We accept card payments, BLIK, and recurring payments.",
+  "maintenance": "Current maintenance and area closures are posted on the information board at the entrance and in the app.",
+  "faq_no_info": "Unfortunately, I couldn't find an answer to that question. Can I help you with something else?"
+}
