@@ -3,7 +3,11 @@ from ..common.config import settings
 from ..common.logging import logger
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-# src/adapters/perfectgym_client.py
+from urllib.parse import quote
+import logging
+
+logger = logging.getLogger("botman-ai")
+
 
 BASE_MEMBER_FIELDS = [
     "Id",
@@ -45,7 +49,43 @@ class PerfectGymClient:
         r = requests.get(url, headers=self._headers(), timeout=10)
         r.raise_for_status()
         return r.json()
+        
+    def get_member_by_phone(self, phone: str) -> dict:
+        """
+        Zwraca listę memberów dopasowanych po numerze telefonu.
 
+        Używa:
+          GET /Members?$expand=MemberBalance&$filter=phoneNumber eq '<phone-url-encoded>'
+
+        Zwraca dokładnie JSON z PerfectGym (dict z kluczem "value").
+        """
+        if not self.base_url:
+            logger.warning({"pg": "base_url_missing"})
+            return {"value": []}
+
+        # PerfectGym oczekuje numeru w formacie %2B48..., więc url-encode
+        quoted = quote(phone, safe="")  # '+48123...' → '%2B48123...'
+
+        url = (
+            f"{self.base_url}/Members"
+            f"?$expand=MemberBalance"
+            f"&$filter=phoneNumber eq '{quoted}'"
+        )
+
+        try:
+            resp = requests.get(url, headers=self._headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except requests.RequestException as e:
+            logger.error(
+                {
+                    "pg": "get_member_by_phone_error",
+                    "phone": phone,
+                    "error": str(e),
+                }
+            )
+            return {"value": []}
+        
     def reserve_class(self, member_id: str, class_id: str, idempotency_key: str):
         if not self.base_url:
             return {"ok": True, "reservation_id": f"r-{class_id}"}
@@ -184,6 +224,18 @@ class PerfectGymClient:
             self.logger.error({"pg": "get_contracts_by_email_and_phone_error", "error": str(e)})
             return {"value": []}
 
+    def get_contracts_by_member_id(self, tenant_id: str, member_id: str) -> dict:
+        """
+        Zwraca listę kontraktów dla członka PerfectGym.
+        Powinna zwracać strukturę z kluczem 'value' jak inne metody PG.
+        """
+        base_url = self._base_url(tenant_id)
+        # Przykład – dopasuj do realnego endpointu u Ciebie
+        url = f"{base_url}/api/v2.2/odata/Members({member_id})/Contracts"
+        resp = self._session.get(url, headers=self._headers(tenant_id))
+        resp.raise_for_status()
+        return resp.json()
+        
     def get_member_balance(self, member_id: int) -> dict:
         """
         Zwraca informację o saldzie membera.

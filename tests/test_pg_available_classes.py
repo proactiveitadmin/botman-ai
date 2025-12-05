@@ -117,3 +117,14 @@ def test_pg_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
     assert len(actions) == 1
     assert actions[0].type == "reply"
     assert "Zumba" in actions[0].payload["body"]
+    
+    #sprawdzamy, że stan i pending są ustawione
+    pk = "pending#" + msg.from_phone
+    pending_item = router.conv.pending.get(pk)
+    assert pending_item is not None
+    assert pending_item["sk"] == "classes"
+
+    key = router.conv.conversation_pk(msg.tenant_id, msg.channel, msg.channel_user_id)
+    stored_conv = router.conv.data[key]
+    assert stored_conv["state_machine_status"] == "awaiting_class_selection"
+

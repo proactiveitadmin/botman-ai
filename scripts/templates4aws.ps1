@@ -251,6 +251,32 @@ aws dynamodb put-item `
     "body":          {"S": "Nie widzę żadnej umowy powiązanej z adresem {email} i numerem {phone}. Upewnij się proszę, że dane są zgodne z PerfectGym."},
     "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
   }'
+  
+# ==== 18.a pg_challenge_ask_dob ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#pg_challenge_ask_dob#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "pg_challenge_ask_dob"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "W celu weryfikacji podaj swoją datę urodzenia."},
+    "placeholders":  {"L": []}
+  }'
+  
+# ==== 18.b pg_challenge_success ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#pg_challenge_success#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "pg_challenge_success"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "Zweryfikowaliśmy Twoje konto."},
+    "placeholders":  {"L": []}
+  }'
 
 # ==== 19. pg_contract_details ====
 aws dynamodb put-item `
@@ -287,8 +313,11 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirmed"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Zarezerwowano zajęcia (ID {class_id}). Do zobaczenia!"},
-    "placeholders":  {"L": [ { "S": "class_id" } ]}
+    "body":          {"S": "Zarezerwowano {class_name} w dniu {class_date} o {class_time}. Do zobaczenia!"},
+    "placeholders":  {"L": [ 
+		{ "S": "class_name" },
+        { "S": "class_date" },
+        { "S": "class_time" } ]
   }'
 
 # ==== 21. reserve_class_failed ====
@@ -439,7 +468,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "faq_no_info"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Przepraszam, nie mam informacji."},
+    "body":          {"S": "Przepraszam, nie mam informacji. . Czy mogę jeszcze w czymś pomóc?"},
     "placeholders":  {"L": []}
   }'
 
@@ -457,5 +486,29 @@ aws dynamodb put-item `
     "template_code": {"S": "greeting"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Cześć! Jestem wirtualnym asystentem klubu fitness. Napisz, w czym mogę pomóc."},
+    "placeholders":  {"L": []}
+  }'
+# ==== 33. pg_challenge_retry ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#pg_challenge_retry#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "pg_challenge_retry"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "Weryfikacja nie powiodła się. Sprobuj jeszcze raz"},
+    "placeholders":  {"L": []}
+  }'
+# ==== 34. pg_challenge_fail_handover ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#pg_challenge_fail_handover#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "pg_challenge_fail_handover"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "Niestety weryfikacja nie powiodła się. Spróbuj innym razem."},
     "placeholders":  {"L": []}
   }'

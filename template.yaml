@@ -336,6 +336,8 @@ Resources:
             TableName: !Ref Templates
         - DynamoDBReadPolicy:
             TableName: !Ref Tenants
+        - DynamoDBReadPolicy:
+            TableName: !Ref MembersIndex
         - S3ReadPolicy:
             BucketName: !Ref KnowledgeBaseBucket
       Environment:

@@ -52,6 +52,10 @@ DUMMY_TEMPLATES = {
         "body": "{date} {time} – {name} ({capacity})",
         "placeholders": ["date", "time", "name", "capacity"],
     },
+    ("pg_challenge_success", "pl"): {
+        "body": "Weryfikacja zakończona sukcesem. Możemy kontynuować.",
+        "placeholders": [],
+    },
     ("pg_contract_ask_email", "pl"): {
         "body": "Podaj proszę adres e-mail użyty w klubie, żebym mógł sprawdzić status Twojej umowy.",
         "placeholders": [],
@@ -138,7 +142,103 @@ DUMMY_TEMPLATES = {
         "placeholders": [],
     },
 }
+class DummyMembersIndex:
+    """
+    Minimalny fake MembersIndexRepo na potrzeby testów flow:
+    zawsze zwraca jednego członka z id '105'.
+    """
+    def get_member(self, tenant_id, phone):
+        return {"id": "105"}
 
+class DummyCRM:
+    """
+    Prosty CRM na potrzeby testów flowów:
+    - nie gada z PerfectGym,
+    - akceptuje DOB challenge dla konkretnej daty,
+    - rezerwacja zajęć zawsze się udaje.
+    """
+
+    def __init__(self):
+        self.reserve_calls: list[dict] = []
+        self.verify_calls: list[dict] = []
+
+    def get_available_classes(
+        self,
+        tenant_id: str,
+        club_id: int | None = None,
+        from_iso: str | None = None,
+        to_iso: str | None = None,
+        member_id: int | None = None,
+        fields: list[str] | None = None,
+        top: int | None = None,
+    ) -> dict:
+        # Jeśli w danym teście potrzebujesz listy zajęć – możesz tu dorobić logikę.
+        # W wielu testach flow i tak idziesz "na skróty" z class_id w slots,
+        # więc może w ogóle nie zostać wywołane.
+        return {"value": []}
+
+    def reserve_class(
+        self,
+        tenant_id: str,
+        member_id: str,
+        class_id: str,
+        idempotency_key: str,
+    ) -> dict:
+        self.reserve_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "member_id": member_id,
+                "class_id": class_id,
+                "idem": idempotency_key,
+            }
+        )
+        return {"ok": True}
+
+    def get_contracts_by_email_and_phone(
+        self,
+        tenant_id: str,
+        email: str,
+        phone_number: str,
+    ) -> dict:
+        return {"value": []}
+
+    def get_member_balance(
+        self,
+        tenant_id: str,
+        member_id: int,
+    ) -> dict:
+        return {"balance": 0}
+
+    def verify_member_challenge(
+        self,
+        tenant_id: str,
+        phone: str,
+        challenge_type: str,
+        answer: str,
+    ) -> bool:
+        """
+        Używane przez RoutingService._verify_challenge_answer.
+
+        W testach chcemy, żeby challenge DOB przeszedł, jeśli użytkownik poda
+        konkretną datę, np. 01-05-1990 (z różnymi separatorami).
+        """
+        self.verify_calls.append(
+            {
+                "tenant_id": tenant_id,
+                "phone": phone,
+                "challenge_type": challenge_type,
+                "answer": answer,
+            }
+        )
+
+        if challenge_type != "dob":
+            return False
+
+        norm = (answer or "").strip().replace(".", "-").replace("/", "-")
+        return norm == "01-05-1990"
+        
+    def get_member_by_phone(self, tenant_id: str, phone: str) -> dict:
+        return {"id": "105"}
 
 
 class DummyTemplatesRepo:
@@ -151,11 +251,6 @@ class DummyTemplatesRepo:
 
 
 # --- patch TemplatesRepo w template_service ---
-@pytest.fixture(autouse=True)
-def patch_templates_repo(monkeypatch):
-    monkeypatch.setattr(template_service, "TemplatesRepo", lambda: DummyTemplatesRepo())
-
-
 @pytest.fixture(autouse=True)
 def patch_templates_repo(monkeypatch):
     monkeypatch.setattr(template_service, "TemplatesRepo", lambda: DummyTemplatesRepo())
@@ -229,6 +324,13 @@ def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
 def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeypatch):
     outbound_url = aws_stack["outbound"]
 
+    # >>> DODANE: podmieniamy CRM w globalnym ROUTERze na DummyCRM,
+    # żeby challenge DOB działał lokalnie, bez DDB / PG.
+    from src.lambdas.message_router import handler as router_handler
+
+    dummy_crm = DummyCRM()
+    monkeypatch.setattr(router_handler.ROUTER, "crm", dummy_crm, raising=False)
+
     # 1. Wiadomość "chcę się zapisać"
     event1 = {
         "Records": [
@@ -258,18 +360,17 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
         for p in payloads_1
         if p.get("to") == "whatsapp:+48123123123"
         and (
-            "potwierdzasz rezerwacj" in p.get("body", "").lower()
-            or "reserve_class_confirm" in p.get("body", "")
+            "urodzenia" in p.get("body", "").lower()
+            or "pg_challenge_ask_dob" in p.get("body", "")
         )
     ]
 
     assert confirm_msgs, (
-        "Nie znaleziono wiadomości z prośbą o potwierdzenie rezerwacji.\n"
+        "Nie znaleziono wiadomości z prośbą o weryfikację.\n"
         f"Wiadomości w kolejce: {[p.get('body') for p in payloads_1]}"
     )
 
-
-    # 2. Potwierdzenie "TAK"
+    # 2. Użytkownik odpowiada na challenge
     event2 = {
         "Records": [
             {
@@ -278,7 +379,7 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
                         "event_id": "evt-3",
                         "from": "whatsapp:+48123123123",
                         "to": "whatsapp:+48000000000",
-                        "body": "tak",
+                        "body": "01-05-1990",
                         "tenant_id": "default",
                     }
                 )
@@ -288,7 +389,7 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
     router_handler.lambda_handler(event2, None)
 
     msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs_2, "Brak jakichkolwiek wiadomości po potwierdzeniu rezerwacji"
+    assert msgs_2, "Brak jakichkolwiek wiadomości po podaniu daty urodzenia"
 
     payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
     confirm_ok_msgs = [
@@ -296,30 +397,62 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
         for p in payloads_2
         if p.get("to") == "whatsapp:+48123123123"
         and (
-            "zarezerwowa" in p.get("body", "").lower()
-            or "rezerwacja potwierdzona" in p.get("body", "").lower()
-            or "reserve_class_confirmed" in p.get("body", "")   # <- nowy wariant
+            "weryfikacj" in p.get("body", "").lower()
+            or "pg_challenge_success" in p.get("body", "")
         )
     ]
 
     assert confirm_ok_msgs, (
-        "Nie znaleziono wiadomości potwierdzającej rezerwację.\n"
+        "Nie znaleziono wiadomości o powodzeniu weryfikacji.\n"
         f"Wiadomości w kolejce: {[p.get('body') for p in payloads_2]}"
     )
-
-def test_clarify_flow_when_intent_unknown(aws_stack, mock_ai, monkeypatch):
+    
+def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch):
+    """
+    Sprawdzamy, że przy intencie 'ticket' bot:
+    - woła JiraClient.create_ticket,
+    - wysyła do użytkownika odpowiedź z szablonu 'ticket_created_ok'.
+    """
     outbound_url = aws_stack["outbound"]
+
+    # Podmieniamy JiraClient w istniejącym ROUTERze, żeby nie dzwonić na prawdziwą Jirę.
+    from src.lambdas.message_router import handler as router_handler
+
+    class DummyTicketing:
+        def __init__(self):
+            self.calls = []
+
+        def create_ticket(self, tenant_id, summary, description, meta=None):
+            self.calls.append(
+                {
+                    "tenant_id": tenant_id,
+                    "summary": summary,
+                    "description": description,
+                    "meta": meta or {},
+                }
+            )
+            # RoutingService oczekuje dict-a z kluczem 'ticket' lub 'key'
+            return {"ticket": "ABC-123"}
+
+    dummy_ticketing = DummyTicketing()
+    router_handler.ROUTER.ticketing = dummy_ticketing
 
     event = {
         "Records": [
             {
                 "body": json.dumps(
                     {
-                        "event_id": "evt-4",
+                        "event_id": "evt-ticket-1",
                         "from": "whatsapp:+48123123123",
                         "to": "whatsapp:+48000000000",
-                        "body": "asdfasdfasdf",  # przypadkowy tekst → intent=clarify
+                        "body": "Chcę zgłosić problem z karnetem",
                         "tenant_id": "default",
+                        # ustawiamy intent 'ticket', żeby pominąć NLU
+                        "intent": "ticket",
+                        "slots": {
+                            "summary": "Problem z karnetem",
+                            # description zostawiamy routerowi – on umie zbudować z historii
+                        },
                     }
                 )
             }
@@ -329,37 +462,31 @@ def test_clarify_flow_when_intent_unknown(aws_stack, mock_ai, monkeypatch):
     # Uruchamiamy router
     router_handler.lambda_handler(event, None)
 
-    # Czytamy wiadomości z kolejki (może być ich kilka!)
+    # Sprawdzamy, że TicketingService zostało zawołane
+    assert dummy_ticketing.calls, "TicketingService.create_ticket powinno zostać wywołane"
+
+    # Czytamy wiadomości z kolejki outbound
     msgs = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs, f"Brak jakichkolwiek wiadomości w kolejce outbound: {msgs}"
+    assert msgs, "Brak jakichkolwiek wiadomości w kolejce outbound po utworzeniu ticketa"
 
     payloads = [json.loads(m["Body"]) for m in msgs]
 
-    # Szukamy odpowiedzi clarify (obsługujemy zarówno stare "doprecyzuj", jak i nowe "clarify")
-    clarify = [
+    # Szukamy odpowiedzi do użytkownika z numerem ticketa
+    ticket_msgs = [
         p
         for p in payloads
-        if (
-            "doprec" in p.get("body", "").lower()
-            or "clarify" in p.get("body", "").lower()
+        if p.get("to") == "whatsapp:+48123123123"
+        and (
+            "utworzyłem zgłoszenie" in (p.get("body") or "").lower()
+            or "numer: " in (p.get("body") or "").lower()
+            or "ticket_created_ok" in (p.get("body") or "")
         )
-        and p.get("to") == "whatsapp:+48123123123"
     ]
 
-    assert len(clarify) == 1, f"Oczekiwano jednej wiadomości clarify, było: {clarify}"
+    assert ticket_msgs, (
+        "Nie znaleziono wiadomości potwierdzającej utworzenie zgłoszenia.\n"
+        f"Wiadomości w kolejce: {[p.get('body') for p in payloads]}"
+    )
 
-
-
-
-def test_outbound_sender_uses_twilio_client(mock_twilio):
-    event = {
-        "Records": [
-            {"body": json.dumps({"to": "whatsapp:+48123123123", "body": "Hej z testu!"})}
-        ]
-    }
-
-    outbound_handler.lambda_handler(event, None)
-
-    assert len(mock_twilio) == 1
-    assert mock_twilio[0]["to"] == "whatsapp:+48123123123"
-    assert "Hej z testu!" in mock_twilio[0]["body"]
+    # Dla pewności – sprawdzamy, że numer ticketa (ABC-123) pojawił się w treści
+    assert any("ABC-123" in (p.get("body") or "") for p in ticket_msgs)

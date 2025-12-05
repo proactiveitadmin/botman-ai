@@ -54,6 +54,8 @@ class ConversationsRepo:
         pg_challenge_type: str | None = None,
         pg_challenge_attempts: int | None = None,
         assigned_agent: str | None = None,
+        pg_post_intent: str | None = None,
+        pg_post_slots: dict | None = None,
     ):
         """
         Upsert rozmowy – tylko pola, które nie są None, są aktualizowane.
@@ -90,7 +92,11 @@ class ConversationsRepo:
             set_field("pg_challenge_attempts", pg_challenge_attempts)
         if assigned_agent is not None:
             set_field("assigned_agent", assigned_agent)
-
+        if pg_post_intent is not None:
+            set_field("pg_post_intent", pg_post_intent)
+        if pg_post_slots is not None:
+            set_field("pg_post_slots", pg_post_slots)
+            
         if not update_expr_parts:
             return
 
@@ -102,6 +108,19 @@ class ConversationsRepo:
             ExpressionAttributeValues=expr_vals,
         )
 
+    def clear_pg_challenge(self, tenant_id: str, channel: str, channel_user_id: str) -> None:
+        """
+        Usuwa pola związane z challenge PG i post-intentem z rekordu rozmowy.
+        """
+        key = self.conversation_pk(tenant_id, channel, channel_user_id)
+        self.table.update_item(
+            Key=key,
+            UpdateExpression=(
+                "REMOVE pg_challenge_type, pg_challenge_attempts, "
+                "pg_post_intent, pg_post_slots"
+            ),
+        )
+        
     def find_by_verification_code(self, tenant_id: str, verification_code: str) -> dict | None:
         resp = self.table.query(
             IndexName="tenant_verification_idx",

@@ -7,6 +7,7 @@ i przekazuje do RoutingService, a następnie wrzuca odpowiedzi do kolejki outbou
 
 import json
 import time
+import os
 
 from ...services.routing_service import RoutingService
 from ...services.template_service import TemplateService
@@ -19,7 +20,7 @@ from ...common.aws import resolve_queue_url, sqs_client
 from ...domain.models import Message
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
-from ...repos.messages_repo import MessagesRepo
+from ...common.utils import new_id
 
 ROUTER = RoutingService()
 MESSAGES = MessagesRepo()
@@ -58,19 +59,53 @@ def _build_message(body: dict) -> Message:
 
 
 def _publish_actions(actions, original_body: dict):
-    queue_url = resolve_queue_url("OutboundQueueUrl")
+    outbound_url = resolve_queue_url("OutboundQueueUrl")
+    tickets_url = (
+        resolve_queue_url("TicketsQueueUrl")
+        if "TicketsQueueUrl" in os.environ
+        else None
+    )
+
     for a in actions or []:
+        # akcje ticket – do kolejki ticketów, nie wysyłamy do klienta
+        if a.type == "ticket":
+            if tickets_url:
+                sqs_client().send_message(
+                    QueueUrl=tickets_url,
+                    MessageBody=json.dumps(a.payload),
+                )
+            continue
+
+        # interesują nas tylko reply (odpowiedzi do użytkownika)
         if a.type != "reply":
             continue
-        elif a.type == "ticket":
-            sqs_client().send_message(
-                QueueUrl=tickets_url,
-                MessageBody=json.dumps(a.payload),
-            )
 
         payload = a.payload
+
+        conv_key = (
+            original_body.get("conversation_id")
+            or original_body.get("channel_user_id")
+            or original_body.get("from")
+        )
+
+        # logujemy OUTBOUND do Messages (historia dla FAQ itd.)
+        try:
+            MESSAGES.log_message(
+                tenant_id=payload.get(
+                    "tenant_id", original_body.get("tenant_id", "default")
+                ),
+                conversation_id=conv_key,
+                msg_id=new_id("out-"),
+                direction="outbound",
+                body=payload.get("body") or "",
+                channel=payload.get("channel") or original_body.get("channel", "whatsapp"),
+            )
+        except Exception:
+            pass
+
+        # wysyłka do kolejki outbound
         sqs_client().send_message(
-            QueueUrl=queue_url,
+            QueueUrl=outbound_url,
             MessageBody=json.dumps(payload),
         )
 
@@ -84,6 +119,8 @@ def _publish_actions(actions, original_body: dict):
                 "tenant_id": payload.get("tenant_id", original_body.get("tenant_id")),
             }
         )
+
+
 
 def lambda_handler(event, context):
     """
@@ -142,6 +179,23 @@ def lambda_handler(event, context):
         )
 
         msg = _build_message(msg_body)
+         # klucz rozmowy – tak jak w ticketach (conversation_id lub user)
+        conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
+
+        # logujemy inbound do Messages
+        try:
+            MESSAGES.log_message(
+                tenant_id=msg.tenant_id,
+                conversation_id=conv_key,
+                msg_id=new_id("in-"),
+                direction="inbound",
+                body=msg.body or "",
+                channel=msg.channel or "whatsapp",
+            )
+        except Exception:
+            # nie blokujemy flow jeśli logowanie padnie
+            pass
+
         actions = ROUTER.handle(msg)
         _publish_actions(actions, msg_body)
 

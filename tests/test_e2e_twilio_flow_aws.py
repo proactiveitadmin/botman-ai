@@ -49,9 +49,9 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai):
     bodies = [json.loads(m["Body"]) for m in outbound_msgs]
 
     assert any(
-        b.get("body") == "reserve_class_confirm"
+        b.get("body") == "pg_challenge_ask_dob"
         for b in bodies
-    ), f"Nie znaleziono akcji potwierdzenia rezerwacji w outbound: {[b.get('body') for b in bodies]}"
+    ), f"Nie znaleziono wiadomosci z prośbą o weryfikację: {[b.get('body') for b in bodies]}"
 
 
 def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
@@ -163,7 +163,23 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
     from src.lambdas.message_router import handler as router_handler
 
     router_handler.ROUTER = RoutingService()
+    
+    class FakeMessagesTable:
+        def get_item(self, **kwargs):
+            return {}  # brak duplikatu eventu
 
+        def put_item(self, **kwargs):
+            pass
+
+        def query(self, **kwargs):
+            return {"Items": []}
+
+    class FakeMessagesRepo:
+        def __init__(self):
+            self.table = FakeMessagesTable()
+
+    router_handler.MESSAGES = FakeMessagesRepo()
+    
     # podmieniamy funkcje w samych handlerach
     monkeypatch.setattr(
         inbound_handler, "sqs_client", fake_sqs_client, raising=False
@@ -194,11 +210,11 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
 
     assert any(
         (
-            "potwierdzasz rezerwacj" in b.get("body", "").lower()
-            or "reserve_class_confirm" in b.get("body", "")
+            "urodzenia" in b.get("body", "").lower()
+            or "pg_challenge_ask_dob" in b.get("body", "")
         )
         for b in bodies
-    ), f"Nie znaleziono wiadomości z potwierdzeniem rezerwacji. Bodies: {[b.get('body') for b in bodies]}"
+    ), f"Nie znaleziono wiadomości z prośbą o weryfikację (challenge PG).\n Bodies: {[b.get('body') for b in bodies]}"
 
 
 

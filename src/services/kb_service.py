@@ -7,6 +7,7 @@ Odpowiada za pobieranie odpowiedzi FAQ dla danego tenanta:
 """
 
 import json
+import re
 from typing import Dict, Optional
 
 from botocore.exceptions import ClientError
@@ -82,6 +83,52 @@ class KBService:
                 )
             self._cache[cache_key] = None
             return None
+            
+    def _select_relevant_faq_entries(
+        self,
+        question: str,
+        tenant_faq: Dict[str, str],
+        k: int = 3,
+    ) -> Dict[str, str]:
+        """
+        Bardzo prosty retrieval: wybiera do K najbardziej pasujących wpisów FAQ
+        bazując na overlapie słów z pytaniem użytkownika.
+
+        Zwraca:
+            dict topic -> answer (maksymalnie K wpisów).
+            Jeśli nic sensownego nie pasuje, zwraca pełne tenant_faq (fallback).
+        """
+        q = (question or "").lower()
+        q_tokens = set(re.findall(r"\w+", q))
+
+        scored: list[tuple[int, str, str]] = []
+
+        for key, answer in tenant_faq.items():
+            if not answer:
+                continue
+
+            text = f"{key} {answer}".lower()
+            t_tokens = set(re.findall(r"\w+", text))
+            overlap = len(q_tokens & t_tokens)
+
+            # mały fallback: pełne pytanie w tekście
+            if overlap == 0 and q and q in text:
+                overlap = 1
+
+            if overlap > 0:
+                scored.append((overlap, key, answer))
+
+        if not scored:
+            # brak dopasowania → zachowujemy się jak wcześniej: całe FAQ
+            return tenant_faq
+
+        scored.sort(key=lambda x: (-x[0], x[1]))
+
+        selected: Dict[str, str] = {}
+        for _, key, answer in scored[:k]:
+            selected[key] = answer
+
+        return selected
 
     def answer(self, topic: str, tenant_id: str, language_code: str | None = None) -> Optional[str]:
         """
@@ -105,17 +152,19 @@ class KBService:
         
     def answer_ai(
         self,
+        *,
         question: str,
         tenant_id: str,
         language_code: Optional[str] = None,
+        history: list[dict] | None = None,
     ) -> Optional[str]:
         """
         Generuje odpowiedź na pytanie użytkownika na podstawie FAQ tenanta
         z użyciem LLM (OpenAIClient).
 
-        Zwraca:
-          - wygenerowaną odpowiedź (str), jeśli się uda,
-          - None, jeśli nie ma FAQ albo LLM nie jest dostępne.
+        - wybiera kilka najbardziej pasujących wpisów FAQ (retrieval),
+        - opcjonalnie dokleja historię rozmowy (user/assistant),
+        - oczekuje JSON-a {"answer": "..."} i zwraca sam tekst odpowiedzi.
         """
         question = (question or "").strip()
         if not question:
@@ -129,12 +178,18 @@ class KBService:
         if not tenant_faq:
             return None
 
-        # 2) Zbuduj kontekst FAQ jako lista Q/A
+        # 2) wybierz kilka wpisów FAQ pasujących do pytania
+        relevant_faq = self._select_relevant_faq_entries(
+            question=question,
+            tenant_faq=tenant_faq,
+            k=3,
+        )
+
+        # 3) zbuduj kontekst FAQ jako Q/A
         lines: list[str] = []
-        for key, answer in tenant_faq.items():
+        for key, answer in relevant_faq.items():
             if not answer:
                 continue
-            # key traktujemy jak "temat" / pytanie nagłówkowe
             lines.append(f"Q: {key}")
             lines.append(f"A: {answer}")
         faq_context = "\n".join(lines)
@@ -142,15 +197,14 @@ class KBService:
         if not faq_context:
             return None
 
-        # 3) System prompt – twarde ograniczenie do FAQ
         system_prompt = (
             "You are a helpful assistant for a fitness club.\n"
             "You answer the user's question ONLY using the FAQ entries below.\n"
             "Always respond as a json object with a single key \"answer\".\n"
             "In the \"answer\" value, explain the information in your own words, "
-            "based on the FAQ, and do not copy any FAQ entry verbatim unless absolutely necessary.\n"
-            "If the FAQ does not contain the information, set \"answer\" to a brief sentence "
-            "that the information is not available and suggest contacting staff.\n\n"
+            "in the same language as the user's question.\n"
+            "If the FAQ does not contain the information needed to answer the question,"
+            "reply that you don't know AND ask the user if there is anything else you can help with.\n"
             "FAQ entries:\n"
             f"{faq_context}\n"
         )
@@ -164,21 +218,28 @@ class KBService:
                 "\nAnswer in the same language as the user's question."
             )
 
-        messages = [
+        messages: list[dict] = [
             {"role": "system", "content": system_prompt},
+        ]
+
+        # 4) opcjonalna historia rozmowy (user / assistant)
+        if history:
+            messages.extend(history)
+
+        # 5) aktualne pytanie
+        messages.append(
             {
                 "role": "user",
                 "content": (
                     f"{question}\n\n"
-                    "Respond strictly in json with a single key \"answer\"."
+                    'Respond strictly in json with a single key "answer".'
                 ),
-            },
-        ]
+            }
+        )
 
-
-        # 4) Wołamy LLM z retry (OpenAIClient.chat ma w sobie retry + fallback)
+        # 6) Wołamy LLM – UWAGA: BEZ self.model
         try:
-            raw = self._client.chat(messages, max_tokens=512)
+            raw = self._client.chat(messages=messages, max_tokens=512)
         except Exception as e:
             logger.error(
                 {
@@ -193,14 +254,17 @@ class KBService:
             return None
 
         raw = raw.strip()
+
+        # 7) próbujemy wyciągnąć "answer" z JSON-a
         try:
             data = json.loads(raw)
-            # Oczekujemy {"answer": "..."}
             ans = data.get("answer")
             if isinstance(ans, str):
                 return ans.strip()
         except Exception:
-            # jeśli model wypluje jednak czysty tekst, nie-json – użyj jak jest
             pass
 
+        # fallback: jeśli model jednak zwrócił czysty tekst
         return raw
+
+

@@ -59,8 +59,8 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
 
     called = {}
 
-    class DummyJira:
-        def create_ticket(self, summary, description, tenant_id, meta=None):
+    class DummyTicketing:
+        def create_ticket(self, tenant_id, summary, description, meta=None):
             called["summary"] = summary
             called["description"] = description
             called["meta"] = meta or {}
@@ -71,7 +71,7 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     svc.kb = DummyKB()
     svc.tpl = DummyTpl()
     svc.messages = DummyMessagesRepo()
-    svc.jira = DummyJira()
+    svc.ticketing = DummyTicketing()
     svc.conv = DummyConvRepo()
     svc.tenants = DummyTenants()
 
@@ -86,8 +86,8 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
 
     actions = svc.handle(msg)
 
-    # upewniamy się, że Jira została wywołana
-    assert called, "JiraClient.create_ticket powinno zostać wywołane"
+    # upewniamy się, że TicketingService.create_ticket zostało wywołane
+    assert called, "TicketingService.create_ticket powinno zostać wywołane"
     assert "Problem z karnetem" in called["summary"] or "Zgłoszenie klienta" in called["summary"]
     assert "problem z karnetem." in called["description"]
 

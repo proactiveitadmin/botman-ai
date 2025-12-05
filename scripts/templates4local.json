@@ -217,6 +217,28 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_ask_dob" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "W celu weryfikacji podaj swoją datę urodzenia." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_success" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Zweryfikowaliśmy Twoje konto." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "pg_contract_details" },
           "language_code": { "S": "pl" },
           "body": {
@@ -244,8 +266,13 @@
           "tenant_id": { "S": "default" },
           "template_code": { "S": "reserve_class_confirmed" },
           "language_code": { "S": "pl" },
-          "body": { "S": "Zarezerwowano zajęcia (ID {class_id}). Do zobaczenia!" },
-          "placeholders": { "L": [ { "S": "class_id" } ] }
+          "body": { "S": "Zarezerwowano {class_name} w dniu {class_date} o {class_time}. Do zobaczenia!" },
+          "placeholders": { "L": [ 
+								{ "S": "class_name" },
+								{ "S": "class_date" },
+								{ "S": "class_time" } 
+				] 
+			}
         }
       }
     },
@@ -382,7 +409,7 @@
           "tenant_id": { "S": "default" },
           "template_code": { "S": "faq_no_info" },
           "language_code": { "S": "pl" },
-          "body": { "S": "Przepraszam, nie mam informacji." },
+          "body": { "S": "Przepraszam, nie mam informacji. Czy mogę jeszcze w czymś pomóc?" },
           "placeholders": { "L": [] }
         }
       }
@@ -397,6 +424,28 @@
           "template_code": { "S": "greeting" },
           "language_code": { "S": "pl" },
           "body": { "S": "Cześć! Jestem wirtualnym asystentem klubu fitness. Napisz, w czym mogę pomóc." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+	{
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_retry" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Weryfikacja nie powiodła się. Sprobuj jeszcze raz" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+	{
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_fail_handover" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Niestety weryfikacja nie powiodła się. Spróbuj innym razem." },
           "placeholders": { "L": [] }
         }
       }

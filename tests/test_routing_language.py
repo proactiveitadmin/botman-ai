@@ -54,9 +54,9 @@ def test_routing_uses_tenant_language_for_nlu_and_kb(monkeypatch):
         called["nlu_lang"] = lang
         return {"intent": "faq", "confidence": 0.9, "slots": {"topic": "hours"}}
 
-    def fake_answer(self, topic: str, tenant_id: str, language_code: str | None = None):
+    def fake_answer_ai(self, question: str, tenant_id: str, language_code: str | None = None, history=None):
         called["kb_lang"] = language_code
-        return f"FAQ-{language_code}"
+        return f"AI-{language_code}"
 
     monkeypatch.setattr(
         "src.services.nlu_service.NLUService.classify_intent",
@@ -64,8 +64,8 @@ def test_routing_uses_tenant_language_for_nlu_and_kb(monkeypatch):
         raising=False,
     )
     monkeypatch.setattr(
-        "src.services.kb_service.KBService.answer",
-        fake_answer,
+        "src.services.kb_service.KBService.answer_ai",
+        fake_answer_ai,
         raising=False,
     )
 
@@ -104,9 +104,9 @@ def test_routing_prefers_existing_conversation_language(monkeypatch):
         called["nlu_lang"] = lang
         return {"intent": "faq", "confidence": 0.9, "slots": {"topic": "hours"}}
 
-    def fake_answer(self, topic: str, tenant_id: str, language_code: str | None = None):
+    def fake_answer_ai(self, question: str, tenant_id: str, language_code: str | None = None, history=None):
         called["kb_lang"] = language_code
-        return f"FAQ-{language_code}"
+        return f"AI-{language_code}"
 
     monkeypatch.setattr(
         "src.services.nlu_service.NLUService.classify_intent",
@@ -114,8 +114,8 @@ def test_routing_prefers_existing_conversation_language(monkeypatch):
         raising=False,
     )
     monkeypatch.setattr(
-        "src.services.kb_service.KBService.answer",
-        fake_answer,
+        "src.services.kb_service.KBService.answer_ai",
+        fake_answer_ai,
         raising=False,
     )
 

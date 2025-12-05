@@ -57,6 +57,18 @@ def test_message_router_faq_to_outbound(monkeypatch):
     monkeypatch.setattr(handler, "sqs_client", lambda: DummySQS(), raising=False)
     monkeypatch.setenv("OutboundQueueUrl", "dummy-outbound-url")
 
+    class DummyTable:
+        def get_item(self, **kwargs):
+            return {}  # brak duplikatu eventu
+
+        def put_item(self, **kwargs):
+            pass  # ignorujemy logowanie
+
+    class DummyMessages:
+        table = DummyTable()
+
+    monkeypatch.setattr(handler, "MESSAGES", DummyMessages(), raising=False)
+
     event = {
         "Records": [
             {

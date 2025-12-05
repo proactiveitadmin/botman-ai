@@ -61,7 +61,8 @@ class JiraClient:
         if meta_lines:
             full_description += "[META]\n" + "\n".join(meta_lines) + "\n\n"
         full_description += description or ""
-
+           
+        endpoint = f"{self.url}/rest/api/3/issue"
         description_adf = self._build_description_adf(full_description)
 
         payload = {

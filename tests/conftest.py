@@ -56,6 +56,7 @@ def disable_custom_aws_endpoints(monkeypatch):
         "AWS_ENDPOINT_URL_SQS",
         "DYNAMODB_ENDPOINT",
         "SQS_ENDPOINT",
+        "S3_ENDPOINT",
         "LOCALSTACK_HOST",
         "LOCALSTACK_HOSTNAME",
         "LOCALSTACK_ENDPOINT",
@@ -202,8 +203,16 @@ def aws_stack(monkeypatch):
     Zabezpieczone przed ResourceInUseException (idempotentne).
     """
     with mock_aws():
+        for name in [
+            "AWS_ENDPOINT_URL",
+            "LOCALSTACK_ENDPOINT",
+            "LOCALSTACK_HOSTNAME",
+            "SQS_ENDPOINT",
+            "DYNAMODB_ENDPOINT",
+        ]:
+            monkeypatch.delenv(name, raising=False)
+
         sqs = boto3.client("sqs", region_name="eu-central-1")
-        ddb = boto3.client("dynamodb", region_name="eu-central-1")
         ddb = boto3.client("dynamodb", region_name="eu-central-1")
         print("TABLES:", ddb.list_tables()["TableNames"])
 
@@ -319,10 +328,15 @@ def aws_stack(monkeypatch):
             ],
         )
 
+        # na końcu, po ensure_table:
         from src.lambdas.message_router import handler as router_handler
         from src.services.routing_service import RoutingService
+        from src.repos.messages_repo import MessagesRepo
 
+        # świeży RoutingService działający na Moto
         router_handler.ROUTER = RoutingService()
+        # świeży MessagesRepo, też na Moto
+        router_handler.MESSAGES = MessagesRepo()
 
         yield {
             "inbound": inbound["QueueUrl"],
