@@ -1,0 +1,457 @@
+{
+  "Templates-botman-dev": [
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "handover_to_staff" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I’m connecting you with a club staff member (you’ll be switched over shortly)." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "ticket_summary" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Customer ticket" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "ticket_created_ok" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I’ve created a ticket for you. Number: %{ticket}." },
+          "placeholders": { "L": [ { "S": "ticket" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "ticket_created_failed" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I wasn’t able to create a ticket. Please try again later." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "clarify_generic" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Could you please clarify how I can help you?" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== PERFECTGYM – LISTA ZAJĘĆ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Available classes:\n{classes}\n\nPlease type the number of the class you choose (e.g. 1)." },
+          "placeholders": { "L": [ { "S": "classes" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_empty" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I can’t see any available classes in the schedule at the moment." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_capacity_no_limit" },
+          "language_code": { "S": "en" },
+          "body": { "S": "no limit on places" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_capacity_full" },
+          "language_code": { "S": "en" },
+          "body": { "S": "no places available (limit {limit})" },
+          "placeholders": { "L": [ { "S": "limit" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_capacity_free" },
+          "language_code": { "S": "en" },
+          "body": { "S": "{free} places available (limit {limit})" },
+          "placeholders": { "L": [ { "S": "free" }, { "S": "limit" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_item" },
+          "language_code": { "S": "en" },
+          "body": { "S": "{index}) {date} {time} – {name} {capacity}" },
+          "placeholders": {
+            "L": [
+              { "S": "index" },
+              { "S": "date" },
+              { "S": "time" },
+              { "S": "name" },
+              { "S": "capacity" }
+            ]
+          }
+        }
+      }
+    },
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_invalid_index" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I didn’t understand your choice. Please enter a class number from 1 to {max_index}." },
+          "placeholders": { "L": [ { "S": "max_index" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_no_today" },
+          "language_code": { "S": "en" },
+          "body": { "S": "There are no available classes today." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_today" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Today we have these classes:\n{classes}\n\nPlease type the number of the class you choose." },
+          "placeholders": { "L": [ { "S": "classes" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_no_classes_on_date" },
+          "language_code": { "S": "en" },
+          "body": { "S": "On {date} there are no available classes." },
+          "placeholders": { "L": [ { "S": "date" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_available_classes_select_by_number" },
+          "language_code": { "S": "en" },
+          "body": { "S": "There are several classes on that day. Please type the number of the class you’d like to book." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== PERFECTGYM – KONTRAKT / WERYFIKACJA ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_contract_ask_email" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Please provide the email address you use at the club so I can check the status of your membership." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_contract_not_found" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I can’t see any membership linked to the email {email} and phone number {phone}. Please make sure your details match those in PerfectGym." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_ask_dob" },
+          "language_code": { "S": "en" },
+          "body": { "S": "For verification, please provide your date of birth." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_success" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Your account has been successfully verified." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_contract_details" },
+          "language_code": { "S": "en" },
+          "body":          {"S": "Here are your membership details:\nPlan: {plan_name}\nStatus: {status}\nActive: {is_active, select, true{yes} false{no}}\nStart: {start_date}\nEnd: {end_date}\nMembership fee: {membership_fee}\nCurrent balance: {current_balance}\nPrepaid balance: {prepaid_balance}\nBonus balance: {prepaid_bonus_balance}\nIn debt since: {negative_balance_since}"},
+		"placeholders":  {
+			  "L": [
+				{ "S": "plan_name" },
+				{ "S": "status" },
+				{ "S": "is_active" },
+				{ "S": "start_date" },
+				{ "S": "end_date" },
+				{ "S": "membership_fee" },
+				{ "S": "current_balance" },
+				{ "S": "prepaid_balance" },
+				{ "S": "prepaid_bonus_balance" },
+				{ "S": "negative_balance_since" }
+			  ]
+          }
+        }
+      }
+    },
+
+    // ========== REZERWACJE ZAJĘĆ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirmed" },
+          "language_code": { "S": "en" },
+          "body": { "S": "{class_name} has been booked for {class_date} at {class_time}. See you then!" },
+          "placeholders": {
+            "L": [
+              { "S": "class_name" },
+              { "S": "class_date" },
+              { "S": "class_time" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_failed" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I couldn’t complete the booking. Please try again later." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_declined" },
+          "language_code": { "S": "en" },
+          "body": { "S": "The booking has been cancelled. Let me know if you’d like to book another class." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirm" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Do you confirm the booking for class {class_id}? Please reply: YES or NO." },
+          "placeholders": { "L": [ { "S": "class_id" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_missing_id" },
+          "language_code": { "S": "en" },
+          "body": { "S": "I wasn’t able to identify which class to book. Please try again." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // słowa potwierdzenia / odmowy
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirm_words" },
+          "language_code": { "S": "en" },
+          "body": {
+            "S": "yes,yes.,confirm,I confirm,ok,okay,sure,of course,certainly,no problem,all good"
+          },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_decline_words" },
+          "language_code": { "S": "en" },
+          "body": {
+            "S": "no,no.,cancel,I cancel,abort,I don’t want,I do not want"
+          },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== WERYFIKACJA WWW / FAQ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_not_verified" },
+          "language_code": { "S": "en" },
+          "body": { "S": "No active verification was found for this code." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_user_not_found" },
+          "language_code": { "S": "en" },
+          "body": { "S": "No membership linked to this number was found." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_verified" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Your account has been verified. You can now return to the web chat." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_web_verification_required" },
+          "language_code": { "S": "en" },
+          "body": {
+            "S": "To continue, we need to confirm your identity.\n\nIf you are using the web chat, click the link below to open WhatsApp and send the verification code.\nIf you are already in WhatsApp, simply send the code below.\n\nCode: {{verification_code}}\nLink: {{whatsapp_link}}\n\nAfter sending the code, return to this conversation – we will verify your account and unlock access to your PerfectGym data."
+          },
+          "placeholders": {
+            "L": [
+              { "S": "verification_code" },
+              { "S": "whatsapp_link" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "faq_no_info" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Sorry, I don’t have information about that. Can I help you with anything else?" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== POWITANIE ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "greeting" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Hi! I’m the virtual assistant of the fitness club. Tell me how I can help you." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_retry" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Verification failed. Please try again." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "pg_challenge_fail_handover" },
+          "language_code": { "S": "en" },
+          "body": { "S": "Unfortunately, verification was not successful. Please try again another time." },
+          "placeholders": { "L": [] }
+        }
+      }
+    }
+  ]
+}

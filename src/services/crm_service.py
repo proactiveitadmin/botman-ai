@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from typing import Optional, Dict, Any
+from typing import Optional
 from datetime import datetime
-import re
-import requests
 
 from ..adapters.perfectgym_client import PerfectGymClient
-from ..repos.members_index_repo import MembersIndexRepo
 from ..common.logging import logger
 
 
@@ -21,6 +18,10 @@ class CRMService:
     def __init__(self, client: Optional[PerfectGymClient] = None) -> None:
         self.client = client or PerfectGymClient()
 
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #
+
     @staticmethod
     def _normalize_phone(phone: str) -> str:
         """
@@ -34,16 +35,19 @@ class CRMService:
             phone = phone.split(":", 1)[1]
         return phone
 
+    # ------------------------------------------------------------------ #
+    # Metody delegujące do PerfectGymClient
+    # ------------------------------------------------------------------ #
+
     def get_member_by_phone(self, tenant_id: str, phone: str) -> dict:
         """
         Prosty wrapper na PerfectGymClient.get_member_by_phone.
 
         Normalizuje numer (usuwa prefix 'whatsapp:').
         """
-        if phone.startswith("whatsapp:"):
-            phone = phone.split(":", 1)[1]
-        return self.client.get_member_by_phone(phone=phone)
-        
+        norm_phone = self._normalize_phone(phone)
+        return self.client.get_member_by_phone(phone=norm_phone)
+
     def get_available_classes(
         self,
         tenant_id: str,
@@ -53,7 +57,10 @@ class CRMService:
         member_id: int | None = None,
         fields: list[str] | None = None,
         top: int | None = None,
-    ) -> list[dict]:
+    ) -> dict:
+        """
+        Zwraca raw JSON z PG (dict z kluczem 'value').
+        """
         return self.client.get_available_classes(
             club_id=club_id,
             from_iso=from_iso,
@@ -73,23 +80,49 @@ class CRMService:
             email=email,
             phone_number=phone_number,
         )
-    
+
     def get_contracts_by_member_id(
-        self, 
-        tenant_id: str, 
-        member_id: str
+        self,
+        tenant_id: str,
+        member_id: str,
     ) -> dict:
-        return self.client.get_contracts_by_member_id(
-            member_id=member_id,
-        )
-        
-        
+        """
+        Zwraca raw JSON z PG (dict z 'value').
+        """
+        return self.client.get_contracts_by_member_id(member_id=member_id)
+
     def get_member_balance(
         self,
         tenant_id: str,
         member_id: int,
     ) -> dict:
         return self.client.get_member_balance(member_id=member_id)
+
+    def reserve_class(
+        self,
+        tenant_id: str,
+        member_id: str,
+        class_id: str | int,
+        idempotency_key: str | None = None,
+        comments: str | None = None,
+        allow_overlap: bool = False,
+    ) -> dict:
+        """
+        Rezerwacja zajęć w CRM – zawija PerfectGymClient.reserve_class.
+        RoutingService oczekuje, że zwrócony dict będzie miał pole "ok" (True/False).
+        """
+        return self.client.reserve_class(
+            member_id=member_id,
+            class_id=class_id,
+            idempotency_key=idempotency_key,
+            comments=comments,
+            allow_overlap=allow_overlap,
+        )
+
+    # ------------------------------------------------------------------ #
+    # verify_member_challenge – prawdziwa logika
+    # ------------------------------------------------------------------ #
+
 
     def verify_member_challenge(
         self,
@@ -138,8 +171,6 @@ class CRMService:
             if not dob_raw:
                 return False
 
-            from datetime import datetime
-
             try:
                 dob = datetime.fromisoformat(dob_raw[:10])
             except Exception:
@@ -167,69 +198,3 @@ class CRMService:
 
         # inne typy challenge na razie nieobsługiwane
         return False
-
-    def reserve_class(
-        self,
-        tenant_id: str,
-        member_id: str,
-        class_id: str | int,
-        idempotency_key: str | None = None,
-        comments: str | None = None,
-        allow_overlap: bool = False,
-    ) -> dict:
-        """
-        Rezerwacja zajęć w PerfectGym – nowy endpoint:
-        POST /api/v2.2/ClassBooking/BookClass
-        """
-
-        url = f"{self.base_url}/ClassBooking/BookClass"
-
-        payload = {
-            "memberId": int(member_id),
-            "classId": int(class_id),
-            "bookDespiteOtherBookingsAtTheSameTime": bool(allow_overlap),
-            "comments": comments or "booked by Botman WhatsApp",
-        }
-
-        headers = self._build_pg_headers(tenant_id)
-        headers["Content-Type"] = "application/json"
-
-        # Idempotencja (zgodnie z dokumentacją systemu):contentReference[oaicite:1]{index=1}
-        if idempotency_key:
-            headers["Idempotency-Key"] = idempotency_key
-
-        resp = self.session.post(url, json=payload, headers=headers, timeout=10)
-
-        try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
-            # logowanie + zwrot struktury, którą oczekuje RoutingService
-            return {
-                "ok": False,
-                "status_code": resp.status_code,
-                "error": str(e),
-                "body": resp.text,
-            }
-
-        data = None
-        try:
-            data = resp.json()
-        except ValueError:
-            data = None
-
-        return {
-            "ok": True,
-            "status_code": resp.status_code,
-            "data": data,
-        }
-
-    def _build_pg_headers(self, tenant_id: str) -> dict:
-        """
-        Helper: buduje nagłówki dla PerfectGym.
-        Jeśli masz multi-tenant, tutaj możesz wstrzyknąć inne client-id/secret na tenant.
-        """
-        return {
-            "X-Client-id": settings.pg_client_id,
-            "X-Client-Secret": settings.pg_client_secret,
-            # plus ew. Authorization, jeśli używacie tokenów
-        }

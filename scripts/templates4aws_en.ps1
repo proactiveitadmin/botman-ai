@@ -1,17 +1,17 @@
-# ==== KONFIGURACJA ====
-$tableName = "Templates-botman-stage"   # <- PODMIEŃ NA SWOJĄ NAZWĘ TABELI
-$region   = "eu-central-1"              # <- jeśli używasz innego, zmień
+# ==== CONFIG ====
+$tableName = "Templates-botman-stage"   # <- change to your table name if needed
+$region   = "eu-central-1"              # <- change if you use a different region
 
 # ==== 1. handover_to_staff ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#handover_to_staff#pl"},
+    "pk":            {"S": "default#handover_to_staff#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "handover_to_staff"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I am connecting you with a club staff member (you will be switched over shortly)."},
     "placeholders":  {"L": []}
   }'
 
@@ -20,11 +20,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#ticket_summary#pl"},
+    "pk":            {"S": "default#ticket_summary#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "ticket_summary"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Zgłoszenie klienta"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Customer ticket"},
     "placeholders":  {"L": []}
   }'
 
@@ -33,11 +33,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#ticket_created_ok#pl"},
+    "pk":            {"S": "default#ticket_created_ok#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "ticket_created_ok"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Utworzyłem zgłoszenie. Numer: %{ticket}."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I have created a ticket for you. Number: %{ticket}."},
     "placeholders":  {"L": [ { "S": "ticket" } ]}
   }'
 
@@ -46,11 +46,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#ticket_created_failed#pl"},
+    "pk":            {"S": "default#ticket_created_failed#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "ticket_created_failed"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie udało się utworzyć zgłoszenia. Spróbuj później."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I was not able to create a ticket. Please try again later."},
     "placeholders":  {"L": []}
   }'
 
@@ -59,28 +59,26 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#clarify_generic#pl"},
+    "pk":            {"S": "default#clarify_generic#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "clarify_generic"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Czy możesz doprecyzować, w czym pomóc?"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Could you please clarify how I can help you?"},
     "placeholders":  {"L": []}
   }'
 
-# =========================
-#      PERFECTGYM – LISTA ZAJĘĆ
-# =========================
+# ========== PERFECTGYM – LISTA ZAJĘĆ ==========
 
 # ==== 6. pg_available_classes ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes#pl"},
+    "pk":            {"S": "default#pg_available_classes#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Dostępne zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć (np. 1)."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Available classes:\n{classes}\n\nPlease type the number of the class you choose (e.g. 1)."},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -89,11 +87,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_empty#pl"},
+    "pk":            {"S": "default#pg_available_classes_empty#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_empty"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Aktualnie nie widzę dostępnych zajęć w grafiku."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I cannot see any available classes in the schedule at the moment."},
     "placeholders":  {"L": []}
   }'
 
@@ -102,11 +100,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_capacity_no_limit#pl"},
+    "pk":            {"S": "default#pg_available_classes_capacity_no_limit#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_capacity_no_limit"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "bez limitu miejsc"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "no limit on places"},
     "placeholders":  {"L": []}
   }'
 
@@ -115,11 +113,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_capacity_full#pl"},
+    "pk":            {"S": "default#pg_available_classes_capacity_full#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_capacity_full"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "brak wolnych miejsc (limit {limit})"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "no places available (limit {limit})"},
     "placeholders":  {"L": [ { "S": "limit" } ]}
   }'
 
@@ -128,11 +126,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_capacity_free#pl"},
+    "pk":            {"S": "default#pg_available_classes_capacity_free#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_capacity_free"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "{free} wolnych miejsc (limit {limit})"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "{free} places available (limit {limit})"},
     "placeholders":  {"L": [ { "S": "free" }, { "S": "limit" } ]}
   }'
 
@@ -141,10 +139,10 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_item#pl"},
+    "pk":            {"S": "default#pg_available_classes_item#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_item"},
-    "language_code": {"S": "pl"},
+    "language_code": {"S": "en"},
     "body":          {"S": "{index}) {date} {time} – {name} {capacity}"},
     "placeholders":  {
       "L": [
@@ -162,11 +160,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_invalid_index#pl"},
+    "pk":            {"S": "default#pg_available_classes_invalid_index#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_invalid_index"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie rozumiem wyboru. Podaj numer zajęć od 1 do {max_index}."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I did not understand your choice. Please enter a class number from 1 to {max_index}."},
     "placeholders":  {"L": [ { "S": "max_index" } ]}
   }'
 
@@ -175,11 +173,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_no_today#pl"},
+    "pk":            {"S": "default#pg_available_classes_no_today#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_no_today"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Dzisiaj nie mamy żadnych dostępnych zajęć."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "There are no available classes today."},
     "placeholders":  {"L": []}
   }'
 
@@ -188,11 +186,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_today#pl"},
+    "pk":            {"S": "default#pg_available_classes_today#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_today"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Dzisiaj mamy takie zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Today we have these classes:\n{classes}\n\nPlease type the number of the class you choose."},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -201,11 +199,11 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_no_classes_on_date#pl"},
+    "pk":            {"S": "default#pg_available_classes_no_classes_on_date#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_no_classes_on_date"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "W dniu {date} nie mamy żadnych dostępnych zajęć."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "On {date} there are no available classes."},
     "placeholders":  {"L": [ { "S": "date" } ]}
   }'
 
@@ -214,28 +212,26 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_select_by_number#pl"},
+    "pk":            {"S": "default#pg_available_classes_select_by_number#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_available_classes_select_by_number"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Tego dnia są różne zajęcia. Napisz numer zajęć, które chcesz zarezerwować."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "There are several classes on that day. Please type the number of the class you would like to book."},
     "placeholders":  {"L": []}
   }'
 
-# =========================
-#      PERFECTGYM – KONTRAKT / WERYFIKACJA
-# =========================
+# ========== PERFECTGYM – KONTRAKT / WERYFIKACJA ==========
 
 # ==== 17. pg_contract_ask_email ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_contract_ask_email#pl"},
+    "pk":            {"S": "default#pg_contract_ask_email#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_contract_ask_email"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Podaj proszę adres e-mail użyty w klubie, żebym mógł sprawdzić status Twojej umowy."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Please provide the email address you use at the club so I can check the status of your membership."},
     "placeholders":  {"L": []}
   }'
 
@@ -244,49 +240,50 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_contract_not_found#pl"},
+    "pk":            {"S": "default#pg_contract_not_found#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_contract_not_found"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie widzę żadnej umowy powiązanej z adresem {email} i numerem {phone}. Upewnij się proszę, że dane są zgodne z PerfectGym."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I cannot see any membership linked to the email {email} and phone number {phone}. Please make sure your details match those in PerfectGym."},
     "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
   }'
-  
-# ==== 18.a pg_challenge_ask_dob ====
+
+# ==== 19. pg_challenge_ask_dob ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_ask_dob#pl"},
+    "pk":            {"S": "default#pg_challenge_ask_dob#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_challenge_ask_dob"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "W celu weryfikacji podaj swoją datę urodzenia."},
-    "placeholders":  {"L": []}
+    "language_code": {"S": "en"},
+    "body":          {"S": "For verification, please provide your date of birth."},
+    "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
   }'
-  
-# ==== 18.b pg_challenge_success ====
+
+# ==== 20. pg_challenge_success ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_success#pl"},
+    "pk":            {"S": "default#pg_challenge_success#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_challenge_success"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Zweryfikowaliśmy Twoje konto."},
-    "placeholders":  {"L": []}
+    "language_code": {"S": "en"},
+    "body":          {"S": "Your account has been successfully verified."},
+    "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
   }'
-# ==== 19. pg_contract_details ====
+
+# ==== 21. pg_contract_details ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_contract_details#pl"},
+    "pk":            {"S": "default#pg_contract_details#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_contract_details"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Szczegóły Twojej umowy:\nPlan: {plan_name}\nStatus: {status}\nAktywna: {is_active, select, true{tak} false{nie}}\nStart: {start_date}\nKoniec: {end_date}\nOpłata członkowska: {membership_fee}\nBieżące saldo: {current_balance}\nŚrodki przedpłacone: {prepaid_balance}\nŚrodki bonusowe: {prepaid_bonus_balance}\nZadłużenie od: {negative_balance_since}"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Here are your membership details:\nPlan: {plan_name}\nStatus: {status}\nActive: {is_active, select, true{yes} false{no}}\nStart: {start_date}\nEnd: {end_date}\nMembership fee: {membership_fee}\nCurrent balance: {current_balance}\nPrepaid balance: {prepaid_balance}\nBonus balance: {prepaid_bonus_balance}\nIn debt since: {negative_balance_since}"},
     "placeholders":  {
       "L": [
         { "S": "plan_name" },
@@ -303,159 +300,156 @@ aws dynamodb put-item `
     }
   }'
 
-# =========================
-#      REZERWACJE ZAJĘĆ
-# =========================
+# ========== REZERWACJE ZAJĘĆ ==========
 
-# ==== 20. reserve_class_confirmed ====
+# ==== 22. reserve_class_confirmed ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_confirmed#pl"},
+    "pk":            {"S": "default#reserve_class_confirmed#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirmed"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Zarezerwowano {class_name} w dniu {class_date} o {class_time}. Do zobaczenia!"},
-    "placeholders":  {"L": [ 
-		{ "S": "class_name" },
+    "language_code": {"S": "en"},
+    "body":          {"S": "{class_name} has been booked for {class_date} at {class_time}. See you then!"},
+    "placeholders":  {
+      "L": [
+        { "S": "class_name" },
         { "S": "class_date" },
-        { "S": "class_time" } 
-	  ]
-	}
+        { "S": "class_time" }
+      ]
+    }
   }'
 
-# ==== 21. reserve_class_failed ====
+# ==== 23. reserve_class_failed ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_failed#pl"},
+    "pk":            {"S": "default#reserve_class_failed#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_failed"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie udało się zarezerwować. Spróbuj ponownie później."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I could not complete the booking. Please try again later."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 22. reserve_class_declined ====
+# ==== 24. reserve_class_declined ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_declined#pl"},
+    "pk":            {"S": "default#reserve_class_declined#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_declined"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Anulowano rezerwację. Daj znać, jeżeli będziesz chciał/chciała zarezerwować inne zajęcia."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "The booking has been cancelled. Let me know if you would like to book another class."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 23. reserve_class_confirm ====
+# ==== 25. reserve_class_confirm ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_confirm#pl"},
+    "pk":            {"S": "default#reserve_class_confirm#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirm"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Czy potwierdzasz rezerwację zajęć {class_id}? Odpowiedz: TAK lub NIE."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Do you confirm the booking for class {class_id}? Please reply: YES or NO."},
     "placeholders":  {"L": [ { "S": "class_id" } ]}
   }'
 
-# ==== 24. reserve_class_missing_id ====
+# ==== 26. reserve_class_missing_id ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_missing_id#pl"},
+    "pk":            {"S": "default#reserve_class_missing_id#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_missing_id"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie udało się zidentyfikować zajęć do rezerwacji. Spróbuj jeszcze raz."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "I was not able to identify which class to book. Please try again."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 25. reserve_class_confirm_words (lista słów TAK) ====
+# ==== 27. reserve_class_confirm_words ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_confirm_words#pl"},
+    "pk":            {"S": "default#reserve_class_confirm_words#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirm_words"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "tak,tak.,potwierdzam,ok,zgadzam się,zgadzam sie,oczywiście,oczywiscie,pewnie,jasne"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "yes,yes.,confirm,I confirm,ok,okay,sure,of course,certainly,no problem,all good"},
     "placeholders":  {"L": []}
   }'
 
-# ==== 26. reserve_class_decline_words (lista słów NIE) ====
+# ==== 28. reserve_class_decline_words ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#reserve_class_decline_words#pl"},
+    "pk":            {"S": "default#reserve_class_decline_words#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_decline_words"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "nie,nie.,anuluj,rezygnuję,rezygnuje,nie chcę,nie chce"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "no,no.,cancel,I cancel,abort,I do not want"},
     "placeholders":  {"L": []}
   }'
 
-# =========================
-#      WERYFIKACJA WWW / FAQ
-# =========================
+# ========== WERYFIKACJA WWW / FAQ ==========
 
-# ==== 27. www_not_verified ====
+# ==== 29. www_not_verified ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#www_not_verified#pl"},
+    "pk":            {"S": "default#www_not_verified#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "www_not_verified"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie znaleziono aktywnej weryfikacji dla tego kodu."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "No active verification was found for this code."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 28. www_user_not_found ====
+# ==== 30. www_user_not_found ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#www_user_not_found#pl"},
+    "pk":            {"S": "default#www_user_not_found#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "www_user_not_found"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Nie znaleziono członkostwa powiązanego z tym numerem."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "No membership linked to this number was found."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 29. www_verified ====
+# ==== 31. www_verified ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#www_verified#pl"},
+    "pk":            {"S": "default#www_verified#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "www_verified"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Twoje konto zostało zweryfikowane. Możesz wrócić do czatu WWW."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Your account has been verified. You can now return to the web chat."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 30. pg_web_verification_required ====
+# ==== 32. pg_web_verification_required ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_web_verification_required#pl"},
+    "pk":            {"S": "default#pg_web_verification_required#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_web_verification_required"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\nJeśli korzystasz z czatu WWW, kliknij poniższy link, aby otworzyć WhatsApp i wysłać kod weryfikacyjny.\nJeśli jesteś już w WhatsApp, wystarczy że wyślesz poniższy kod.\n\nKod: {{verification_code}}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć do rozmowy – zweryfikujemy Twoje konto i odblokujemy dostęp do danych PerfectGym."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "To continue, we need to confirm your identity.\n\nIf you are using the web chat, click the link below to open WhatsApp and send the verification code.\nIf you are already in WhatsApp, simply send the code below.\n\nCode: {{verification_code}}\nLink: {{whatsapp_link}}\n\nAfter sending the code, return to this conversation – we will verify your account and unlock access to your PerfectGym data."},
     "placeholders":  {
       "L": [
         { "S": "verification_code" },
@@ -464,56 +458,56 @@ aws dynamodb put-item `
     }
   }'
 
-# ==== 31. faq_no_info ====
+# ==== 33. faq_no_info ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#faq_no_info#pl"},
+    "pk":            {"S": "default#faq_no_info#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "faq_no_info"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Przepraszam, nie mam informacji. . Czy mogę jeszcze w czymś pomóc?"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Sorry, I do not have information about that. Can I help you with anything else?"},
     "placeholders":  {"L": []}
   }'
 
-# =========================
-#      POWITANIE
-# =========================
+# ========== POWITANIE ==========
 
-# ==== 32. greeting ====
+# ==== 34. greeting ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#greeting#pl"},
+    "pk":            {"S": "default#greeting#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "greeting"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Cześć! Jestem wirtualnym asystentem klubu fitness. Napisz, w czym mogę pomóc."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Hi! I am the virtual assistant of the fitness club. Tell me how I can help you."},
     "placeholders":  {"L": []}
   }'
-# ==== 33. pg_challenge_retry ====
+
+# ==== 35. pg_challenge_retry ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_retry#pl"},
+    "pk":            {"S": "default#pg_challenge_retry#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_challenge_retry"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Weryfikacja nie powiodła się. Sprobuj jeszcze raz"},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Verification failed. Please try again."},
     "placeholders":  {"L": []}
   }'
-# ==== 34. pg_challenge_fail_handover ====
+
+# ==== 36. pg_challenge_fail_handover ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_fail_handover#pl"},
+    "pk":            {"S": "default#pg_challenge_fail_handover#en"},
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_challenge_fail_handover"},
-    "language_code": {"S": "pl"},
-    "body":          {"S": "Niestety weryfikacja nie powiodła się. Spróbuj innym razem."},
+    "language_code": {"S": "en"},
+    "body":          {"S": "Unfortunately, verification was not successful. Please try again another time."},
     "placeholders":  {"L": []}
   }'

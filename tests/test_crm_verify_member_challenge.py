@@ -1,16 +1,46 @@
 
 from src.services.crm_service import CRMService
-
-
+       
 class DummyPGClient:
     def __init__(self, member_payload: dict):
         self.member_payload = member_payload
         self.calls: list[str] = []
-       
-        
+        self.challenge_calls: list[tuple[str, str, str, str]] = []
+
     def get_member_by_phone(self, phone: str) -> dict:
         self.calls.append(phone)
         return {"value": self.member_payload}
+
+    def verify_member_challenge(
+        self,
+        tenant_id: str,
+        phone: str,
+        challenge_type: str,
+        answer: str,
+    ) -> bool:
+        """
+        Używane przez RoutingService._verify_challenge_answer.
+
+        W testach chcemy, żeby challenge DOB przeszedł, jeśli użytkownik poda
+        konkretną datę, np. 01-05-1990 (z różnymi separatorami).
+        """
+        self.challenge_calls.append((tenant_id, phone, challenge_type, answer))
+
+        if challenge_type not in ("dob", "email"):
+            return False
+
+        norm = (answer or "").strip().replace(".", "-").replace("/", "-").lower()
+
+        # DOB – akceptujemy dokładnie 01-05-1990 po normalizacji
+        if challenge_type == "dob":
+            return norm == "01-05-1990"
+
+        # EMAIL – akceptujemy user@example.com w dowolnym case
+        if challenge_type == "email":
+            return "user@example.com" in norm
+
+        return False
+
 
 
 class DummyMembersIndex:

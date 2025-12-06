@@ -1,22 +1,50 @@
 {
   "hours": "Klub jest otwarty od poniedziałku do piątku w godzinach 6:00–22:00, a w weekendy 8:00–20:00.",
-  "pool_hours": "Basen jest dostępny codziennie od 6:00 do 21:30. Ostatnie wejście na 45 minut przed zamknięciem.",
-  "sauna_hours": "Strefa saun jest czynna od 14:00 do 22:00 w dni powszednie i od 10:00 do 20:00 w weekendy.",
-  "kids_zone": "Strefa Kids Zone działa w soboty i niedziele w godzinach 10:00–18:00.",
-  "membership_price": "Cena karnetu miesięcznego zaczyna się od 139 zł. Dostępne są również plany kwartalne i roczne.",
-  "classes_booking": "Zajęcia grupowe można rezerwować przez naszą aplikację lub kontaktując się z recepcją.",
-  "classes_cancellation": "Zajęcia można odwołać najpóźniej 2 godziny przed rozpoczęciem. Po tym czasie naliczana jest opłata.",
-  "parking": "Dla klubowiczów mamy 2 godziny bezpłatnego parkingu. Pobierz bilet przy wjeździe.",
-  "personal_trainer": "Możesz umówić trening personalny w recepcji lub bezpośrednio u wybranego trenera.",
-  "contract_freeze": "Umowę można zamrozić raz na rok, maksymalnie na 30 dni. Koszt zamrożenia to 29 zł.",
+  "pool_hours": "Basen jest dostępny codziennie od 6:00 do 21:30. Ostatnie wejście możliwe jest 45 minut przed zamknięciem.",
+  "sauna_hours": "Strefa saun jest czynna od 14:00 do 22:00 w dni powszednie oraz od 10:00 do 20:00 w weekendy.",
+  "kids_zone": "Strefa Kids Zone działa w soboty i niedziele w godzinach 10:00–18:00. Dzieci muszą przebywać pod opieką osoby dorosłej.",
+  
+  "membership_price": "Cena karnetu miesięcznego zaczyna się od 139 zł. Dostępne są również plany kwartalne i roczne, a także zniżki dla studentów i seniorów.",
+  "membership_types": "Oferujemy karnety: Open, Off-Peak, Basen+Siłownia, oraz Family. Szczegóły dostępne w recepcji i na stronie www.",
+  "entry_policy": "Wejście do klubu odbywa się za pomocą aplikacji lub karty klubowej. Każde wejście jest rejestrowane w systemie.",
+  
+  "classes_booking": "Zajęcia grupowe można rezerwować przez aplikację mobilną lub kontaktując się z recepcją.",
+  "classes_cancellation": "Zajęcia można odwołać najpóźniej 2 godziny przed rozpoczęciem. Po tym czasie naliczana jest opłata zgodna z cennikiem.",
+  "classes_limit": "Liczba miejsc na zajęciach jest ograniczona. Rezerwacje realizowane są według kolejności zgłoszeń.",
+  "instructors": "Informacje o trenerach prowadzących zajęcia znajdziesz w aplikacji lub na tablicy przy sali fitness.",
+  
+  "parking": "Dla klubowiczów dostępne są 2 godziny bezpłatnego parkingu. Pobierz bilet przy wjeździe i zachowaj go do wyjazdu.",
+  "bike_racks": "Przed klubem znajdują się stojaki rowerowe. Prosimy o zabezpieczanie rowerów własnym zapięciem.",
+  
+  "personal_trainer": "Trening personalny można umówić w recepcji lub kontaktując się bezpośrednio z wybranym trenerem.",
+  "personal_trainer_prices": "Ceny treningów personalnych zaczynają się od 120 zł za sesję. Dostępne są pakiety w niższej cenie.",
+  
+  "contract_freeze": "Umowę można zamrozić raz w roku, maksymalnie na 30 dni. Koszt zamrożenia to 29 zł.",
   "contract_termination": "Rozwiązanie umowy wymaga podpisania formularza w recepcji. Okres wypowiedzenia wynosi 1 miesiąc.",
+  "contract_transfer": "Karnet można przepisać na inną osobę za opłatą administracyjną wynoszącą 39 zł.",
+  
   "wifi": "Darmowe Wi-Fi jest dostępne na terenie całego klubu. Nazwa sieci: FITNESS_WIFI, hasło: trening2024.",
-  "towels": "Ręczniki są dostępne w recepcji za dodatkową opłatą 5 zł.",
+  
+  "towels": "Ręczniki dostępne są w recepcji za dodatkową opłatą 5 zł. Zalecamy korzystanie z ręcznika podczas ćwiczeń.",
+  "equipment_rules": "Prosimy o odkładanie sprzętu na miejsce po zakończonym treningu oraz o dezynfekcję maszyn po użyciu.",
+  
   "locker_room": "Szafki działają na kod PIN. Jeśli zapomniałeś kodu — zgłoś się do recepcji.",
+  "showers": "Prysznice są dostępne bez ograniczeń. Prosimy o korzystanie z własnych klapek.",
+  
   "lost_items": "Zgubione rzeczy można odebrać w recepcji. Przechowujemy je przez 30 dni.",
+  "age_policy": "Osoby poniżej 16. roku życia mogą korzystać z klubu wyłącznie pod opieką dorosłych lub trenera.",
+  
   "rules": "Regulamin klubu dostępny jest na naszej stronie internetowej oraz w recepcji.",
-  "app_help": "Jeśli masz problem z aplikacją mobilną, spróbuj zaktualizować ją do najnowszej wersji lub skontaktuj się z recepcją.",
-  "payments": "W klubie akceptujemy płatności kartą, BLIKIEM oraz płatności cykliczne.",
-  "maintenance": "Aktualne prace serwisowe i wyłączenia stref znajdziesz na tablicy informacyjnej przy wejściu i w aplikacji.",
+  
+  "app_help": "Jeśli masz problem z aplikacją, spróbuj zaktualizować ją do najnowszej wersji lub skontaktuj się z recepcją.",
+  
+  "payments": "Akceptujemy płatności kartą, BLIKIEM oraz płatności cykliczne.",
+  "invoices": "Fakturę za karnet możesz otrzymać w recepcji lub mailowo po zgłoszeniu takiej potrzeby.",
+  
+  "maintenance": "Aktualne prace serwisowe i wyłączenia stref znajdziesz na tablicy informacyjnej przy wejściu oraz w aplikacji.",
+  "cleaning_breaks": "Strefy mogą być czasowo wyłączone na potrzeby sprzątania. Informacja pojawia się z wyprzedzeniem.",
+  
+  "safety": "W razie złego samopoczucia lub kontuzji zgłoś się natychmiast do personelu. Defibrylator AED znajduje się przy recepcji.",
+  
   "faq_no_info": "Niestety nie znalazłem odpowiedzi na to pytanie. Czy mogę pomóc w czymś innym?"
 }

@@ -1,22 +1,50 @@
 {
-  "hours": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
-  "pool_hours": "The pool is available daily from 6:00 AM to 9:30 PM. Last entry is 45 minutes before closing.",
-  "sauna_hours": "The sauna area is open from 2:00 PM to 10:00 PM on weekdays and from 10:00 AM to 8:00 PM on weekends.",
-  "kids_zone": "The Kids Zone is open on Saturdays and Sundays from 10:00 AM to 6:00 PM.",
-  "membership_price": "Monthly membership starts at 139 PLN. Quarterly and annual plans are also available.",
-  "classes_booking": "Group classes can be booked through our app or by contacting the front desk.",
-  "classes_cancellation": "Classes can be cancelled no later than 2 hours before they start. After that, a fee applies.",
-  "parking": "Members get 2 hours of free parking. Please take a ticket at the entrance.",
-  "personal_trainer": "You can schedule a personal training session at the front desk or directly with your chosen trainer.",
-  "contract_freeze": "The contract can be frozen once a year for up to 30 days. The cost of freezing is 29 PLN.",
-  "contract_termination": "Contract termination requires signing a form at the front desk. The notice period is 1 month.",
-  "wifi": "Free Wi-Fi is available throughout the club. Network name: FITNESS_WIFI, password: trening2024.",
-  "towels": "Towels are available at the front desk for an additional fee of 5 PLN.",
-  "locker_room": "Lockers operate with a PIN code. If you forget your code, please contact the front desk.",
-  "lost_items": "Lost items can be collected at the front desk. We keep them for 30 days.",
-  "rules": "The club's rules are available on our website and at the front desk.",
-  "app_help": "If you're having issues with the mobile app, try updating it to the latest version or contact the front desk.",
-  "payments": "We accept card payments, BLIK, and recurring payments.",
-  "maintenance": "Current maintenance and area closures are posted on the information board at the entrance and in the app.",
-  "faq_no_info": "Unfortunately, I couldn't find an answer to that question. Can I help you with something else?"
+  "hours": "The club is open Monday to Friday from 6:00 to 22:00, and weekends from 8:00 to 20:00.",
+  "pool_hours": "The swimming pool is available daily from 6:00 to 21:30. Last entry is 45 minutes before closing.",
+  "sauna_hours": "The sauna area is open from 14:00 to 22:00 on weekdays and from 10:00 to 20:00 at weekends.",
+  "kids_zone": "The Kids Zone operates on Saturdays and Sundays from 10:00 to 18:00. Children must be supervised by an adult.",
+  
+  "membership_price": "Monthly memberships start from £29. We also offer quarterly and annual plans, as well as discounts for students and seniors.",
+  "membership_types": "We offer membership types including: Open, Off-Peak, Pool & Gym, and Family. Full details are available at reception or on our website.",
+  "entry_policy": "Access to the club is via the mobile app or your membership card. Every visit is registered in our system.",
+  
+  "classes_booking": "Group classes can be booked through our mobile app or by contacting reception.",
+  "classes_cancellation": "Classes can be cancelled up to 2 hours before the start time. Late cancellations are subject to a fee according to our price list.",
+  "classes_limit": "Class sizes are limited. Bookings are handled on a first-come, first-served basis.",
+  "instructors": "Information about class instructors is available in the app or on the notice board outside the fitness studio.",
+  
+  "parking": "Members are entitled to 2 hours of free parking. Please collect a ticket on entry and keep it for exit.",
+  "bike_racks": "Bike racks are available outside the club. Please secure your bicycle with your own lock.",
+  
+  "personal_trainer": "You can book a personal training session at reception or directly with your chosen trainer.",
+  "personal_trainer_prices": "Personal training sessions start from £25. Discounted multi-session packages are also available.",
+  
+  "contract_freeze": "Memberships can be frozen once per year for up to 30 days. The freeze fee is £5.",
+  "contract_termination": "To cancel your membership, please complete a cancellation form at reception. A 30-day notice period applies.",
+  "contract_transfer": "Memberships can be transferred to another person for an administrative fee of £7.",
+  
+  "wifi": "Free Wi-Fi is available throughout the club. Network name: FITNESS_WIFI, password: training2024.",
+  
+  "towels": "Towels can be rented at reception for £1. We recommend using a towel during your workout.",
+  "equipment_rules": "Please return equipment to its designated place after use and wipe down machines once you finish.",
+  
+  "locker_room": "Lockers operate with a PIN code. If you forget your code, please speak to reception.",
+  "showers": "Showers are available at all times. We recommend wearing flip-flops for hygiene reasons.",
+  
+  "lost_items": "Lost property can be collected from reception. Items are stored for 30 days.",
+  "age_policy": "Members under 16 must be accompanied by an adult or a qualified trainer to use the facilities.",
+  
+  "rules": "The full club rules are available on our website and at reception.",
+  
+  "app_help": "If you experience issues with the mobile app, please ensure it is updated to the latest version or contact reception for assistance.",
+  
+  "payments": "We accept card payments, contactless payments, and recurring direct debit options.",
+  "invoices": "If you require a VAT invoice for your membership, please request one at reception or via email.",
+  
+  "maintenance": "Current maintenance works and temporarily closed areas are listed on the notice board at the entrance and in the mobile app.",
+  "cleaning_breaks": "Some areas may be temporarily closed for cleaning. Notifications are posted in advance whenever possible.",
+  
+  "safety": "If you feel unwell or injure yourself, please notify a member of staff immediately. An AED defibrillator is located at reception.",
+  
+  "faq_no_info": "Sorry, I couldn’t find an answer to that question. Is there anything else I can help with?"
 }

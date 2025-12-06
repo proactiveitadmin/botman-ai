@@ -35,10 +35,18 @@ Intent rules:
 - "pg_contract_status": user asks about membership/contract/account status.
 - "ticket": user reports a problem or asks for staff help.
 - "handover": user explicitly wants to speak to a human.
-- "clarify": message is unclear or does not fit any other intent.
+
+🔧 SPECIAL RULES:
+- If the message is only a number or short numeric selection (e.g. "1", "2", "nr 3", "option 1"), 
+  treat it as: 
+    { "intent": "clarify", "confidence": 0.01, "slots": {} }
+  This is NOT a class reservation request. Selections are processed by state machine, not NLU.
+
+- If the message is unclear or does not fit any other intent → "clarify".
 
 Always respond with one minimal json object and nothing else.
 """
+
 
 
 

@@ -322,7 +322,6 @@ class RoutingService:
             )
             return [self._reply(msg, lang, body)]
 
-        # NOWA METODA w CRM: get_contracts_by_member_id
         contracts_resp = self.crm.get_contracts_by_member_id(
             tenant_id=msg.tenant_id,
             member_id=member_id,
@@ -334,7 +333,10 @@ class RoutingService:
                 msg.tenant_id,
                 "pg_contract_not_found",
                 lang,
-                {},
+                {
+                    "email": slots.get("email", ""),
+                    "phone": slots.get("phone", ""),
+                },
             )
             return [self._reply(msg, lang, body)]
 
@@ -353,6 +355,14 @@ class RoutingService:
         plan_name = payment_plan.get("name") or ""
         membership_fee = payment_plan.get("membershipFee") or {}
         membership_fee_gross = membership_fee.get("gross")
+        balance_resp = self.crm.get_member_balance(
+            tenant_id=msg.tenant_id,
+            member_id=int(member_id) if str(member_id).isdigit() else member_id,
+        )
+        current_balance = balance_resp.get("currentBalance")
+        prepaid_balance = balance_resp.get("prepaidBalance")
+        prepaid_bonus_balance = balance_resp.get("prepaidBonusBalance")
+        negative_since = balance_resp.get("negativeBalanceSince")
 
         context = {
             "plan_name": plan_name,
@@ -360,9 +370,12 @@ class RoutingService:
             "is_active": is_active,
             "start_date": start_date,
             "end_date": end_date or "",
+            "membership_fee": membership_fee_gross,
+            "current_balance": current_balance,
+            "prepaid_balance": prepaid_balance,
+            "prepaid_bonus_balance": prepaid_bonus_balance,
+            "negative_balance_since": negative_since
         }
-        if membership_fee_gross is not None:
-            context["membership_fee"] = membership_fee_gross
 
         body = self.tpl.render_named(
             msg.tenant_id,
@@ -1302,6 +1315,15 @@ class RoutingService:
 
             # brak class_id → najpierw lista zajęć
             if not class_id:
+                # tu ustawiamy stan ręcznie
+                self.conv.upsert_conversation(
+                    tenant_id=msg.tenant_id,
+                    channel=msg.channel or "whatsapp",
+                    channel_user_id=msg.channel_user_id or msg.from_phone,
+                    last_intent=intent,
+                    state_machine_status=STATE_AWAITING_CLASS_SELECTION,
+                    language_code=lang,
+                )
                 return self._build_available_classes_response(msg, lang)
 
             # mamy class_id → standardowy flow z weryfikacją PG i pending
