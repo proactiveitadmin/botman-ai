@@ -283,18 +283,14 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_contract_details"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "تفاصيل عضويتك:\nالباقة: {plan_name}\nالحالة:\n{status}\nنشطة: {is_active, select, true{نعم} false{لا}}\nتاريخ البداية: {start_date}\nتاريخ الانتهاء: {end_date}\nرسوم العضوية: {membership_fee}\nالرصيد الحالي: {current_balance}\nرصيد الدفعات المسبقة: {prepaid_balance}\nرصيد المكافآت: {prepaid_bonus_balance}\nفي حالة الدين منذ: {negative_balance_since}"},
+    "body":          {"S": "تفاصيل عضويتك:\nالباقة: {plan_name}\nالحالة:\n{status}\nتاريخ البداية: {start_date}\nتاريخ الانتهاء: {end_date}\nالرصيد الحالي: {current_balance}\nفي حالة الدين منذ: {negative_balance_since}"},
     "placeholders":  {
       "L": [
         { "S": "plan_name" },
         { "S": "status" },
-        { "S": "is_active" },
         { "S": "start_date" },
         { "S": "end_date" },
-        { "S": "membership_fee" },
         { "S": "current_balance" },
-        { "S": "prepaid_balance" },
-        { "S": "prepaid_bonus_balance" },
         { "S": "negative_balance_since" }
       ]
     }
@@ -356,9 +352,14 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirm"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "هل تؤكد حجز الحصة {class_id}؟ يرجى الرد: نعم أو لا."},
-    "placeholders":  {"L": [ { "S": "class_id" } ]}
+    "body":          {"S": "هل تؤكد حجز الحصة {class_name} بتاريخ {class_date} في الساعة {class_time}؟  يرجى الرد: نعم أو لا."},
+    "placeholders":  {"L": [
+      { "S": "class_name" },
+      { "S": "class_date" },
+      { "S": "class_time" }
+    ]}
   }'
+
 
 # ==== 26. reserve_class_missing_id ====
 aws dynamodb put-item `

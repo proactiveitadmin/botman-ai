@@ -157,7 +157,7 @@ PHONE = "+48123123123"
 
 
 @pytest.fixture
-def routing_service():
+def routing_service(monkeypatch):
     nlu = FakeNLUService()
     crm = FakeCRMService()
     tpl = FakeTemplateService()
@@ -190,7 +190,7 @@ def routing_service():
         messages=FakeMessagesRepo(),
         members_index=FakeMembersIndexRepo(),
     )
-
+    monkeypatch.setattr(routing, "_detect_language", lambda text: "pl")
     # udostępniamy fakes na obiekcie do asercji
     routing._test_nlu = nlu
     routing._test_crm = crm

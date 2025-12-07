@@ -219,14 +219,15 @@ class FakeMembersIndex:
         return {"id": self.member_id}
 
 
-def _build_router() -> tuple[RoutingService, InMemoryConversations]:
+def _build_router(monkeypatch) -> tuple[RoutingService, InMemoryConversations]:
     router = RoutingService()
     conv = InMemoryConversations()
     router.conv = conv
     router.tenants = FakeTenantsRepo(lang="pl")
     router.tpl = FakeTemplateService()
     router.crm = FakeCRM()
-    router.members_index = FakeMembersIndex()
+    router.members_index = FakeMembersIndex()   
+    monkeypatch.setattr(router, "_detect_language", lambda text: "pl")
     return router, conv
 
 
@@ -237,7 +238,7 @@ def test_pg_available_classes_sets_state_and_pending(mock_ai, monkeypatch):
     - zapisuje listę w pending (DDB) pod kluczem pending#<phone>,
     - ustawia state_machine_status=awaiting_class_selection.
     """
-    router, conv = _build_router()
+    router, conv = _build_router(monkeypatch)
 
     msg = Message(
         tenant_id="tenantA",
@@ -269,13 +270,13 @@ def test_pg_available_classes_sets_state_and_pending(mock_ai, monkeypatch):
     assert stored_conv["state_machine_status"] == "awaiting_class_selection"
 
 
-def test_class_selection_creates_pending_reservation_without_challenge(mock_ai):
+def test_class_selection_creates_pending_reservation_without_challenge(monkeypatch,mock_ai):
     """
     Mając listę zajęć i zweryfikowane konto PG:
     - wybór numeru zajęć '1' tworzy pending rezerwację,
     - użytkownik dostaje prośbę o potwierdzenie.
     """
-    router, conv = _build_router()
+    router, conv = _build_router(monkeypatch)
 
     tenant_id = "tenantA"
     phone = "whatsapp:+48123123123"
@@ -335,14 +336,14 @@ def test_class_selection_creates_pending_reservation_without_challenge(mock_ai):
     assert stored_conv["last_intent"] == "reserve_class"
 
 
-def test_pending_reservation_confirmation_yes_triggers_crm_and_clears_pending(mock_ai):
+def test_pending_reservation_confirmation_yes_triggers_crm_and_clears_pending(monkeypatch,mock_ai):
     """
     Jeśli istnieje pending rezerwacja i użytkownik odpowie słowem z listy 'TAK':
     - RoutingService woła CRM.reserve_class,
     - pending zostaje usunięty,
     - użytkownik dostaje komunikat o potwierdzeniu.
     """
-    router, conv = _build_router()
+    router, conv = _build_router(monkeypatch)
     crm: FakeCRM = router.crm  # type: ignore[assignment]
 
     tenant_id = "tenantA"
@@ -397,7 +398,7 @@ def test_pg_challenge_success_clears_state_and_runs_post_intent(monkeypatch):
     - pola pg_challenge_type / pg_post_intent / pg_post_slots zostaną wyczyszczone
       przez clear_pg_challenge.
     """
-    router, conv = _build_router()
+    router, conv = _build_router(monkeypatch)
     crm: FakeCRM = router.crm  # type: ignore[assignment]
 
     # zamiast pełnej integracji verify_member_challenge, patchujemy helper w RoutingService

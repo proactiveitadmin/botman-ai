@@ -1,5 +1,6 @@
 import os, time
 from ..common.aws import ddb_resource
+from boto3.dynamodb.conditions import Key
 
 class MessagesRepo:
     def __init__(self):

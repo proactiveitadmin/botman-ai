@@ -286,18 +286,15 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_contract_details"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Szczegóły Twojej umowy:\nPlan: {plan_name}\nStatus: {status}\nAktywna: {is_active, select, true{tak} false{nie}}\nStart: {start_date}\nKoniec: {end_date}\nOpłata członkowska: {membership_fee}\nBieżące saldo: {current_balance}\nŚrodki przedpłacone: {prepaid_balance}\nŚrodki bonusowe: {prepaid_bonus_balance}\nZadłużenie od: {negative_balance_since}"},
+    "body":          {"S": "Szczegóły Twojej umowy:\nPlan: {plan_name}\nStatus: {status}\nStart: {start_date}\nKoniec: {end_date}\nBieżące saldo: {current_balance}\nZadłużenie od: {negative_balance_since}"},
     "placeholders":  {
       "L": [
         { "S": "plan_name" },
+        { "S": "plan_name" },
         { "S": "status" },
-        { "S": "is_active" },
         { "S": "start_date" },
         { "S": "end_date" },
-        { "S": "membership_fee" },
         { "S": "current_balance" },
-        { "S": "prepaid_balance" },
-        { "S": "prepaid_bonus_balance" },
         { "S": "negative_balance_since" }
       ]
     }
@@ -360,8 +357,11 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirm"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Czy potwierdzasz rezerwację zajęć {class_id}? Odpowiedz: TAK lub NIE."},
-    "placeholders":  {"L": [ { "S": "class_id" } ]}
+    "body":          {"S": "Czy potwierdzasz rezerwację zajęć {class_name}, {class_date} o godzinie {class_time}? Odpowiedz: TAK lub NIE."},
+    "placeholders":  {"L": [ { "S": "class_name" },
+							 { "S": "class_date" },
+							 { "S": "class_time" }
+						]}
   }'
 
 # ==== 24. reserve_class_missing_id ====

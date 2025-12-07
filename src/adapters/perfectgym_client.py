@@ -382,3 +382,57 @@ class PerfectGymClient:
                 "negativeBalanceSince": None,
                 "raw": {},
             }
+
+    # ------------------------------------------------------------------ #
+    # Classes – pojedyncza klasa po ID
+    # ------------------------------------------------------------------ #
+
+    def get_class(self, class_id: int | str) -> Dict[str, Any]:
+        """
+        Zwraca pojedyncze zajęcia (klasę) po ID.
+
+        GET /Classes({id})?$expand=classType
+        """
+        if not self._ensure_base_url():
+            # brak konfiguracji PG → zwracamy pusty obiekt, żeby nie wywalić flow
+            return {}
+
+        # dopuszczamy zarówno int, jak i str z cyframi
+        if isinstance(class_id, str) and class_id.isdigit():
+            cid = int(class_id)
+        else:
+            cid = class_id
+
+        url = f"{self.base_url}/Classes({cid})?$expand=classType"
+
+        try:
+            resp = requests.get(
+                url,
+                headers=self._headers(),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            # na wszelki wypadek – gdyby ktoś jednak zrobił redirect na kolekcję
+            if isinstance(data, dict) and "value" in data:
+                items = data.get("value") or []
+                data = items[0] if items else {}
+
+            self.logger.info(
+                {
+                    "pg": "get_class_ok",
+                    "class_id": cid,
+                }
+            )
+            return data
+
+        except requests.RequestException as e:
+            self.logger.error(
+                {
+                    "pg": "get_class_error",
+                    "class_id": cid,
+                    "error": str(e),
+                }
+            )
+            return {}

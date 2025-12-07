@@ -102,7 +102,9 @@ def test_pg_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
     router.conv = InMemoryConversations()
     router.tenants = FakeTenantsRepo(lang="en")
     router.tpl = FakeTemplateService(router.tenants)   # <-- KLUCZOWA LINIA
-
+    
+    monkeypatch.setattr(router, "_detect_language", lambda text: "pl")
+    
     msg = Message(
         tenant_id="tenantA",
         from_phone="whatsapp:+48123123123",

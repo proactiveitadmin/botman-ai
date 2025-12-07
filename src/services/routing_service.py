@@ -10,8 +10,12 @@ Na podstawie wyniku NLU decyduje, czy:
 
 import time
 import re
+import logging
+import os
+import boto3
 from datetime import datetime
 from typing import List, Optional
+from botocore.config import Config
 
 from ..domain.models import Message, Action
 from ..common.utils import new_id
@@ -32,9 +36,17 @@ STATE_AWAITING_VERIFICATION = "awaiting_verification"
 STATE_AWAITING_CHALLENGE = "awaiting_challenge"
 STATE_AWAITING_CLASS_SELECTION = "awaiting_class_selection"
 STATE_AWAITING_MESSAGE = "awaiting_message"
-
 SESSION_TIMEOUT_SECONDS = 120
 
+logger = logging.getLogger(__name__)
+
+COMPREHEND_REGION = os.getenv("COMPREHEND_REGION") or os.getenv("AWS_REGION") or "eu-central-1"
+
+comprehend = boto3.client(
+    "comprehend",
+    region_name=COMPREHEND_REGION,
+    config=Config(retries={"max_attempts": 2, "mode": "standard"}),
+)
 
 class RoutingService:
     """
@@ -94,6 +106,72 @@ class RoutingService:
             },
         )
    
+    def _detect_language(self, text: str) -> str | None:
+        """
+        Neutralna detekcja języka z użyciem Amazon Comprehend.
+
+        - nie ucina błędów po cichu (loguje),
+        - działa dla dowolnego języka obsługiwanego przez Comprehend,
+        - przyjmuje także krótkie teksty (bez ostrych progów).
+        """
+        t = (text or "").strip()
+        if not t:
+            logger.debug({"sender": "routing", "event": "lang_detect_empty_text"})
+            return None
+        
+        if len(t) < 2:
+            return None
+            
+        # nie odcinamy agresywnie krótkich tekstów – Comprehend sobie radzi,
+        # a Ty i tak masz fallback na język tenanta
+        sample = t[:4500]
+
+        try:
+            resp = comprehend.detect_dominant_language(Text=sample)
+        except Exception as e:
+            logger.error(
+                {
+                    "sender": "routing",
+                    "error": "comprehend_detect_failed",
+                    "details": str(e),
+                    "text_preview": sample[:40],
+                }
+            )
+            return None
+
+        langs = resp.get("Languages") or []
+        if not langs:
+            logger.warning(
+                {
+                    "sender": "routing",
+                    "event": "comprehend_no_languages",
+                    "text_preview": sample[:40],
+                }
+            )
+            return None
+
+        # bierzemy najwyższy score
+        top = max(langs, key=lambda x: x.get("Score", 0.0))
+        code = top.get("LanguageCode")
+        score = float(top.get("Score") or 0.0)
+
+        logger.info(
+            {
+                "sender": "routing",
+                "event": "language_detected",
+                "language_code": code,
+                "score": score,
+                "text_preview": sample[:40],
+            }
+        )
+
+        # neutralna logika: jeśli Comprehend jest bardzo niepewny, wracamy None,
+        # wtedy zadziała fallback: istniejąca konwersacja / tenant
+        if score < 0.5:
+            return None
+
+        return code or None
+     
     def _generate_verification_code(self, length: int = 6) -> str:
         """Generuje prosty kod weryfikacyjny używany w flow WWW -> WhatsApp."""
         import secrets
@@ -101,7 +179,7 @@ class RoutingService:
 
         alphabet = string.ascii_uppercase + string.digits
         return "".join(secrets.choice(alphabet) for _ in range(length))
-
+    
     def _whatsapp_wa_me_link(self, code: str) -> str:
         """Buduje link wa.me z predefiniowaną treścią zawierającą kod weryfikacyjny."""
         raw = settings.twilio_whatsapp_number  # np. "whatsapp:+48000000000"
@@ -143,13 +221,71 @@ class RoutingService:
 
     def _resolve_and_persist_language(self, msg: Message) -> str:
         """
-        Ustala język konwersacji (z wiadomości, z rozmowy, z tenant) i zapisuje go.
+        Ustala język konwersacji per numer:
+        - 1) explicit msg.language_code (np. z WWW),
+        - 2) wykryty język z treści (Comprehend),
+        - 3) language_code z istniejącej rozmowy,
+        - 4) language_code tenanta,
+        - 5) global default.
+
+        DLA ISTNIEJĄCEJ ROZMOWY:
+        - NIE nadpisuje state_machine_status ani last_intent.
         """
         channel = msg.channel or "whatsapp"
         channel_user_id = msg.channel_user_id or msg.from_phone
 
+        # 1) twarde override – jeśli kanał podał język
         if getattr(msg, "language_code", None):
             lang = msg.language_code
+            existing = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id)
+            # jeśli rozmowa istnieje – nie ruszamy stanu, tylko język
+            if existing:
+                self.conv.upsert_conversation(
+                    msg.tenant_id,
+                    channel,
+                    channel_user_id,
+                    language_code=lang,
+                )
+            else:
+                self.conv.upsert_conversation(
+                    msg.tenant_id,
+                    channel,
+                    channel_user_id,
+                    language_code=lang,
+                    last_intent=None,
+                    state_machine_status=STATE_AWAITING_MESSAGE,
+                )
+            return lang
+
+        # pobierz istniejącą rozmowę (jeśli jest)
+        existing = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id)
+        existing_lang = existing.get("language_code") if existing else None
+
+        # 2) detekcja języka
+        detected = self._detect_language(msg.body or "")
+
+        # 3) jeśli mamy już język konwersacji i detekcja nic nowego nie dała
+        if not detected and existing_lang:
+            return existing_lang
+
+        # 4) fallback – język tenanta / global default
+        tenant = self.tenants.get(msg.tenant_id) or {}
+        tenant_lang = tenant.get("language_code") or settings.get_default_language()
+
+        # finalny wybór – preferujemy wykryty
+        lang = detected or existing_lang or tenant_lang
+
+        # 5) zapis:
+        # - nowa rozmowa → ustawiamy stan początkowy,
+        # - istniejąca rozmowa → aktualizujemy TYLKO język.
+        if existing:
+            self.conv.upsert_conversation(
+                msg.tenant_id,
+                channel,
+                channel_user_id,
+                language_code=lang,
+            )
+        else:
             self.conv.upsert_conversation(
                 msg.tenant_id,
                 channel,
@@ -158,30 +294,8 @@ class RoutingService:
                 last_intent=None,
                 state_machine_status=STATE_AWAITING_MESSAGE,
             )
-            return lang
 
-        existing = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id)
-        if existing and existing.get("language_code"):
-            return existing["language_code"]
-
-        tenant = self.tenants.get(msg.tenant_id) or {}
-        lang = tenant.get("language_code") or settings.get_default_language()
-
-        self.conv.upsert_conversation(
-            msg.tenant_id,
-            channel,
-            channel_user_id,
-            language_code=lang,
-            last_intent=None,
-            state_machine_status=STATE_AWAITING_MESSAGE,
-        )
         return lang
-
-    def change_conversation_language(
-        self, tenant_id: str, phone: str, new_lang: str
-    ) -> dict:
-        """Metoda użyteczna na przyszłość (panel konsultanta)."""
-        return self.conv.set_language(tenant_id, phone, new_lang)
 
     # -------------------------------------------------------------------------
     #  Weryfikacja PerfectGym – wspólny helper
@@ -346,34 +460,27 @@ class RoutingService:
         )
 
         status = current.get("status") or "Unknown"
-        is_active = bool(current.get("isActive"))
         start_date = (current.get("startDate") or "")[:10]
         end_date_raw = current.get("endDate")
         end_date = (end_date_raw or "")[:10] if end_date_raw else ""
 
         payment_plan = current.get("paymentPlan") or {}
         plan_name = payment_plan.get("name") or ""
-        membership_fee = payment_plan.get("membershipFee") or {}
-        membership_fee_gross = membership_fee.get("gross")
         balance_resp = self.crm.get_member_balance(
             tenant_id=msg.tenant_id,
             member_id=int(member_id) if str(member_id).isdigit() else member_id,
         )
         current_balance = balance_resp.get("currentBalance")
-        prepaid_balance = balance_resp.get("prepaidBalance")
-        prepaid_bonus_balance = balance_resp.get("prepaidBonusBalance")
-        negative_since = balance_resp.get("negativeBalanceSince")
+        negative_raw = balance_resp.get("negativeBalanceSince")
+        negative_since = negative_raw[:10] if negative_raw else ""
+
 
         context = {
             "plan_name": plan_name,
             "status": status,
-            "is_active": is_active,
             "start_date": start_date,
             "end_date": end_date or "",
-            "membership_fee": membership_fee_gross,
             "current_balance": current_balance,
-            "prepaid_balance": prepaid_balance,
-            "prepaid_bonus_balance": prepaid_bonus_balance,
             "negative_balance_since": negative_since
         }
 
@@ -396,10 +503,40 @@ class RoutingService:
     ) -> List[Action]:
         """
         Tworzy pending rezerwację i wysyła prośbę o potwierdzenie.
-        class_meta – opcjonalnie: name, date, time.
+        class_meta – opcjonalnie: class_name, class_date, class_time.
+        Jeśli class_meta nie jest podane, spróbujemy dociągnąć dane z CRM.
         """
+        # 1) Jeśli nie mamy metadanych, dociągamy je z CRM (PerfectGym)
+        if class_meta is None:
+            details: dict = {}
+            try:
+                details = self.crm.get_class_by_id(
+                    tenant_id=msg.tenant_id,
+                    class_id=class_id,
+                ) or {}
+            except Exception:
+                details = {}
+
+            start = str(
+                details.get("startDate") or details.get("startdate") or ""
+            )
+            class_date = start[:10] if len(start) >= 10 else None
+            class_time = start[11:16] if len(start) >= 16 else None
+
+            class_type = None
+            class_type_raw = details.get("classType") or {}
+            if isinstance(class_type_raw, dict):
+                class_type = class_type_raw.get("name") or None
+
+            class_meta = {
+                "class_name": class_type,
+                "class_date": class_date,
+                "class_time": class_time,
+            }
+
         idem = new_id("idem-")
 
+        # 2) Zapis pending do DDB
         item = {
             "pk": self._pending_key(msg.from_phone),
             "sk": "pending",
@@ -413,7 +550,7 @@ class RoutingService:
 
         self.conv.put(item)
 
-        # ustaw stan na oczekiwanie potwierdzenia
+        # 3) Ustaw stan na oczekiwanie potwierdzenia
         self.conv.upsert_conversation(
             tenant_id=msg.tenant_id,
             channel=msg.channel or "whatsapp",
@@ -423,13 +560,22 @@ class RoutingService:
             language_code=lang,
         )
 
+        # 4) Pytanie o potwierdzenie – od razu używamy nazwy / daty / godziny
+        context = {
+            "class_id": class_id,
+            "class_name": item.get("class_name") or class_id,
+            "class_date": item.get("class_date"),
+            "class_time": item.get("class_time"),
+        }
+
         body = self.tpl.render_named(
             msg.tenant_id,
             "reserve_class_confirm",
             lang,
-            {"class_id": class_id},
+            context,
         )
         return [self._reply(msg, lang, body)]
+
 
     # -------------------------------------------------------------------------
     #  Weryfikacja challenge PG – prawdziwa implementacja (bez MVP bool(text))
@@ -890,6 +1036,32 @@ class RoutingService:
             class_date = pending.get("class_date")
             class_time = pending.get("class_time")
 
+            # Fallback: jeśli nadal nie mamy sensownych metadanych, spróbuj dociągnąć z CRM
+            if (not class_date or not class_time) or (class_name == class_id):
+                try:
+                    details = self.crm.get_class_by_id(
+                        tenant_id=msg.tenant_id,
+                        class_id=class_id,
+                    ) or {}
+                except Exception:
+                    details = {}
+
+                if details:
+                    start = str(
+                        details.get("startDate") or details.get("startdate") or ""
+                    )
+                    if (not class_date) and len(start) >= 10:
+                        class_date = start[:10]
+                    if (not class_time) and len(start) >= 16:
+                        class_time = start[11:16]
+
+                    if class_name == class_id:
+                        ct_raw = details.get("classType") or {}
+                        if isinstance(ct_raw, dict):
+                            ct_name = ct_raw.get("name")
+                            if ct_name:
+                                class_name = ct_name
+
             res = self.crm.reserve_class(
                 tenant_id=msg.tenant_id,
                 member_id=member_id,
@@ -897,6 +1069,7 @@ class RoutingService:
                 idempotency_key=idem,
                 comments="booked on whatsapp",
             )
+
 
             self.conv.delete(self._pending_key(msg.from_phone), "pending")
 
@@ -1239,6 +1412,20 @@ class RoutingService:
         # 4) NLU – klasyfikacja intencji
         intent, slots, _ = self._classify_intent(msg, lang)
 
+        # 4a) Kontekstowa poprawka: follow-up po FAQ
+        # Jeśli poprzednia intencja była "faq", sesja jest ciągle ta sama,
+        # a NLU zwróciło "clarify" (bo pytanie jest krótkie, typu "A w sobotę?"),
+        # to traktujemy to jako FAQ z kontekstem.
+        last_intent = conv.get("last_intent")
+        if (
+            not is_new_session
+            and last_intent == "faq"
+            and intent == "clarify"
+        ):
+            intent = "faq"
+            # Slots zwykle i tak nie są potrzebne dla AI-FAQ,
+            # więc nie musimy ich tu ruszać.
+            
         # 5) Zapis intentu / stanu
         self._update_conversation_state(msg, lang, intent, slots)
 
@@ -1259,6 +1446,7 @@ class RoutingService:
             conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
             chat_history: list[dict] = []
 
+            # historia potrzebna nam tylko jako fallback do answer_ai
             if not is_new_session and self.messages:
                 try:
                     history_items = self.messages.get_last_messages(
@@ -1266,7 +1454,12 @@ class RoutingService:
                         conv_key=conv_key,
                         limit=10,
                     ) or []
-                except Exception:
+                except Exception as e:
+                    logger.error({
+                        "sender": "routing",
+                        "error": "get_last_messages_failed",
+                        "err": str(e),
+                    })
                     history_items = []
                 else:
                     for item in reversed(history_items):
@@ -1284,6 +1477,41 @@ class RoutingService:
                             )
                     chat_history = chat_history[-6:]
 
+            # 1) próbujemy deterministycznie z FAQ na podstawie topic/tag z NLU
+            raw_topic = slots.get("topic")
+
+            # NLU może zwrócić np. ["opening_hours"] albo "opening_hours"
+            if isinstance(raw_topic, list):
+                raw_topic = raw_topic[0] if raw_topic else ""
+            elif raw_topic is None:
+                raw_topic = ""
+            else:
+                # na wszelki wypadek, jeśli to np. int / inny typ
+                raw_topic = str(raw_topic)
+
+            faq_tag = raw_topic.strip().lower()
+            base_answer: Optional[str] = None
+
+            if faq_tag:
+                base_answer = self.kb.answer(
+                    topic=faq_tag,
+                    tenant_id=msg.tenant_id,
+                    language_code=lang,
+                )
+
+            if base_answer:
+                # 2) mamy "fakty" z FAQ -> teraz stylizacja (drugie, lekkie AI)
+                styled = self.kb.stylize_answer(
+                    base_answer=base_answer,
+                    tenant_id=msg.tenant_id,
+                    language_code=lang,
+                    tag=faq_tag,
+                    last_user_message=msg.body,
+                )
+                return [self._reply(msg, lang, styled)]
+
+            # 3) Fallback – jeśli NLU nie podało topic albo FAQ nie ma wpisu,
+            #    używamy dotychczasowego AI-FAQ (answer_ai) z historią
             ai_body = self.kb.answer_ai(
                 question=msg.body,
                 tenant_id=msg.tenant_id,
@@ -1294,10 +1522,14 @@ class RoutingService:
             if ai_body:
                 body = ai_body
             else:
-                topic = slots.get("topic", "hours")
+                # ostateczny fallback: pojedynczy topic z NLU (jeśli jest),
+                # albo template "brak info"
+                topic = faq_tag or "hours"
                 body = (
                     self.kb.answer(
-                        topic, tenant_id=msg.tenant_id, language_code=lang
+                        topic,
+                        tenant_id=msg.tenant_id,
+                        language_code=lang,
                     )
                     or self.tpl.render_named(
                         msg.tenant_id,

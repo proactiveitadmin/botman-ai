@@ -70,6 +70,20 @@ class CRMService:
             top=top,
         )
 
+    def get_class_by_id(
+        self,
+        tenant_id: str,
+        class_id: str | int,
+    ) -> dict:
+        """
+        Zwraca pojedyncze zajęcia po ID.
+
+        tenant_id na razie jest ignorowany (konfiguracja PG jest globalna),
+        ale zostawiamy go w sygnaturze na przyszłość.
+        """
+        return self.client.get_class(class_id)
+
+
     def get_contracts_by_email_and_phone(
         self,
         tenant_id: str,

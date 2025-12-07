@@ -87,6 +87,9 @@ def _publish_actions(actions, original_body: dict):
             or original_body.get("channel_user_id")
             or original_body.get("from")
         )
+        
+        from_phone = payload.get("from") or original_body.get("to")
+        to_phone = payload.get("to") or original_body.get("from")
 
         # logujemy OUTBOUND do Messages (historia dla FAQ itd.)
         try:
@@ -98,7 +101,14 @@ def _publish_actions(actions, original_body: dict):
                 msg_id=new_id("out-"),
                 direction="outbound",
                 body=payload.get("body") or "",
-                channel=payload.get("channel") or original_body.get("channel", "whatsapp"),
+                from_phone=from_phone,
+                to_phone=to_phone,
+                template_id=payload.get("template_id"),
+                ai_confidence=None,
+                channel=payload.get("channel")
+                    or original_body.get("channel", "whatsapp"),
+                language_code=payload.get("language_code")
+                    or original_body.get("language_code"),
             )
         except Exception:
             pass
@@ -190,7 +200,10 @@ def lambda_handler(event, context):
                 msg_id=new_id("in-"),
                 direction="inbound",
                 body=msg.body or "",
+                from_phone=msg.from_phone,
+                to_phone=msg.to_phone,
                 channel=msg.channel or "whatsapp",
+                language_code=None,
             )
         except Exception:
             # nie blokujemy flow jeśli logowanie padnie

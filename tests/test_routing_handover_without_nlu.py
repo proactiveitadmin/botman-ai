@@ -69,6 +69,8 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     svc.kb = DummyKB()
     svc.tpl = DummyTpl()
     svc.tenants = DummyTenants()
+    
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
 
     msg = Message(
         tenant_id="t-1",

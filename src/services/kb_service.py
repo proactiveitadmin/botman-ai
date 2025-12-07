@@ -8,7 +8,9 @@ Odpowiada za pobieranie odpowiedzi FAQ dla danego tenanta:
 
 import json
 import re
-from typing import Dict, Optional
+import time  
+import random
+from typing import Dict, Optional, List
 
 from botocore.exceptions import ClientError
 
@@ -19,26 +21,44 @@ from ..common.config import settings
 from ..adapters.openai_client import OpenAIClient
 
 
-
 class KBService:
     """
     Prosty serwis FAQ z opcjonalnym wsparciem S3.
 
-    Przechowuje cache w pamięci (per proces Lambdy) dla zminimalizowania liczby odczytów z S3.
+    Przechowuje cache w pamięci (per proces Lambdy) dla zminimalizowania liczby odczytów z S3
+    oraz cache gotowych odpowiedzi na najczęściej powtarzające się pytania.
     """
 
     def __init__(
         self,
         bucket: Optional[str] = None,
         openai_client: Optional[OpenAIClient] = None,
+        qa_cache_ttl_seconds: int = 3600,
+        style_variants_per_answer: int = 3,
     ) -> None:
         # bucket z ENV / Settings
         self.bucket = bucket or settings.kb_bucket
-        self._cache: Dict[str, Dict[str, str]] = {}
 
+        # cache FAQ z S3: { "tenant#lang": {topic: answer, ...} }
+        self._cache: Dict[str, Dict[str, str] | None] = {}
+
+        # cache odpowiedzi Q->A
+        # klucz: tenant|lang|normalized_question -> (timestamp, answer)
+        self._answer_cache: Dict[str, tuple[float, str]] = {}
+        self._answer_cache_ttl = qa_cache_ttl_seconds
+
+        #cache wariantów stylizowanych odpowiedzi per (tenant, lang, tag)
+        # key: "tenant|lang|tag" -> ["wersja 1", "wersja 2", ...]
+        self._style_variants: Dict[str, List[str]] = {}
+        self._style_variants_per_answer = style_variants_per_answer
+        
         # klient OpenAI – opcjonalny, żeby w dev/offline dalej działało
-        self._client = openai_client or OpenAIClient() 
-    
+        self._client = openai_client or OpenAIClient()
+
+    # -------------------------------------------------------------------------
+    # Helpery cache
+    # -------------------------------------------------------------------------
+
     def _faq_key(self, tenant_id: str, language_code: str | None) -> str:
         # np. "tenantA/faq_pl.json" albo "tenantA/faq_en.json"
         lang = language_code or "en"
@@ -47,9 +67,124 @@ class KBService:
         return f"{tenant_id}/faq_{lang}.json"
 
     def _cache_key(self, tenant_id: str, language_code: str | None) -> str:
-        return f"{tenant_id}/{language_code or 'default'}"
-        
-    def _load_tenant_faq(self, tenant_id: str, language_code: str | None) -> Optional[Dict[str, str]]:
+        return f"{tenant_id}#{language_code or 'en'}"
+
+    # klucz do cache odpowiedzi
+    def _answer_cache_key(
+        self,
+        tenant_id: str,
+        language_code: Optional[str],
+        question: str,
+    ) -> str:
+        # mocno znormalizowane pytanie – żeby „Godziny otwarcia?” i „godziny  otwarcia”
+        # trafiały pod ten sam klucz
+        normalized = re.sub(r"\s+", " ", (question or "").strip().lower())
+        lang = (language_code or "unknown").lower()
+        return f"{tenant_id}|{lang}|{normalized}"
+
+    # pobranie z cache Q->A z TTL
+    def _get_cached_answer(
+        self,
+        tenant_id: str,
+        language_code: Optional[str],
+        question: str,
+    ) -> Optional[str]:
+        if not self._answer_cache_ttl:
+            return None
+
+        key = self._answer_cache_key(tenant_id, language_code, question)
+        item = self._answer_cache.get(key)
+        if not item:
+            return None
+
+        ts, answer = item
+        if ts + self._answer_cache_ttl < time.time():
+            # wygasło – czyścimy
+            self._answer_cache.pop(key, None)
+            return None
+
+        logger.debug(
+            {
+                "component": "kb_service",
+                "event": "qa_cache_hit",
+                "tenant_id": tenant_id,
+                "lang": language_code,
+            }
+        )
+        return answer
+
+    # zapis do cache Q->A
+    def _store_cached_answer(
+        self,
+        tenant_id: str,
+        language_code: Optional[str],
+        question: str,
+        answer: str,
+    ) -> None:
+        if not self._answer_cache_ttl or not answer:
+            return
+        key = self._answer_cache_key(tenant_id, language_code, question)
+        self._answer_cache[key] = (time.time(), answer)
+    # -------------------------------------------------------------------------
+    #  cache wariantów stylizowanych odpowiedzi
+    # -------------------------------------------------------------------------
+
+    def _variants_key(
+        self,
+        tenant_id: str,
+        language_code: Optional[str],
+        tag: Optional[str],
+    ) -> Optional[str]:
+        if not tag:
+            return None
+        lang = (language_code or "unknown").lower()
+        t = tag.strip().lower()
+        return f"{tenant_id}|{lang}|{t}"
+
+    def _get_style_variant(
+        self,
+        tenant_id: str,
+        language_code: Optional[str],
+        tag: Optional[str],
+    ) -> Optional[str]:
+        key = self._variants_key(tenant_id, language_code, tag)
+        if not key:
+            return None
+
+        variants = self._style_variants.get(key)
+        if not variants:
+            return None
+
+        # losujemy jedną wersję
+        return random.choice(variants)
+
+    def _store_style_variants(
+        self,
+        tenant_id: str,
+        language_code: Optional[str],
+        tag: Optional[str],
+        variants: List[str],
+    ) -> None:
+        key = self._variants_key(tenant_id, language_code, tag)
+        if not key or not variants:
+            return
+
+        clean_variants = [v.strip() for v in variants if isinstance(v, str) and v.strip()]
+        if not clean_variants:
+            return
+
+        # prosty limit globalny
+        if len(self._style_variants) > 500:
+            self._style_variants.clear()
+
+        self._style_variants[key] = clean_variants
+    # -------------------------------------------------------------------------
+    # FAQ z S3
+    # -------------------------------------------------------------------------
+
+    def _load_tenant_faq(
+        self, tenant_id: str, language_code: str | None
+    ) -> Optional[Dict[str, str]]:
         """
         Ładuje FAQ dla podanego tenanta z S3 (jeśli skonfigurowano bucket).
 
@@ -60,7 +195,7 @@ class KBService:
         if not self.bucket:
             return None
 
-        cache_key = f"{tenant_id}#{language_code or 'en'}"
+        cache_key = self._cache_key(tenant_id, language_code)
         if cache_key in self._cache:
             return self._cache[cache_key]
 
@@ -73,17 +208,26 @@ class KBService:
             if not isinstance(data, dict):
                 data = {}
             # normalizujemy klucze
-            normalized = { (k or "").strip().lower(): v for k, v in data.items() }
+            normalized = {(k or "").strip().lower(): v for k, v in data.items()}
             self._cache[cache_key] = normalized
             return normalized
         except ClientError as e:
             if e.response["Error"]["Code"] != "NoSuchKey":
                 logger.warning(
-                    {"kb_error": "s3_get_failed", "tenant_id": tenant_id, "key": key, "err": str(e)}
+                    {
+                        "kb_error": "s3_get_failed",
+                        "tenant_id": tenant_id,
+                        "key": key,
+                        "err": str(e),
+                    }
                 )
             self._cache[cache_key] = None
             return None
-            
+
+    # -------------------------------------------------------------------------
+    # Prosty retrieval po FAQ
+    # -------------------------------------------------------------------------
+
     def _select_relevant_faq_entries(
         self,
         question: str,
@@ -130,7 +274,13 @@ class KBService:
 
         return selected
 
-    def answer(self, topic: str, tenant_id: str, language_code: str | None = None) -> Optional[str]:
+    # -------------------------------------------------------------------------
+    # Publiczne API
+    # -------------------------------------------------------------------------
+
+    def answer(
+        self, topic: str, tenant_id: str, language_code: str | None = None
+    ) -> Optional[str]:
         """
         Zwraca odpowiedź FAQ dla danego tematu i tenanta.
 
@@ -149,7 +299,7 @@ class KBService:
 
         # fallback na domyślne (na razie bez wariantów językowych)
         return DEFAULT_FAQ.get(topic)
-        
+
     def answer_ai(
         self,
         *,
@@ -169,6 +319,11 @@ class KBService:
         question = (question or "").strip()
         if not question:
             return None
+
+        # NEW: szybka ścieżka — powtarzające się pytanie
+        cached = self._get_cached_answer(tenant_id, language_code, question)
+        if cached is not None:
+            return cached
 
         # 1) FAQ z S3 lub domyślne
         tenant_faq = self._load_tenant_faq(tenant_id, language_code)
@@ -202,7 +357,6 @@ class KBService:
             "You answer the user's question ONLY using the FAQ entries below.\n"
             "Always respond as a json object with a single key \"answer\".\n"
             "In the \"answer\" value, explain the information in your own words, "
-            "in the same language as the user's question.\n"
             "If the FAQ does not contain the information needed to answer the question,"
             "reply that you don't know AND ask the user if there is anything else you can help with.\n"
             "FAQ entries:\n"
@@ -214,9 +368,7 @@ class KBService:
                 f"\nAnswer in the language {language_code} (ISO language code)."
             )
         else:
-            system_prompt += (
-                "\nAnswer in the same language as the user's question."
-            )
+            system_prompt += "\nAnswer in the same language as the user's question."
 
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
@@ -237,9 +389,9 @@ class KBService:
             }
         )
 
-        # 6) Wołamy LLM – UWAGA: BEZ self.model
+        # 6) Wołamy LLM – max_tokens mniejsze niż wcześniej, żeby odpowiedź była szybsza
         try:
-            raw = self._client.chat(messages=messages, max_tokens=512)
+            raw = self._client.chat(messages=messages, max_tokens=256)  # było 512
         except Exception as e:
             logger.error(
                 {
@@ -260,11 +412,122 @@ class KBService:
             data = json.loads(raw)
             ans = data.get("answer")
             if isinstance(ans, str):
-                return ans.strip()
+                ans = ans.strip()
+                # NEW: zapisujemy do cache Q->A
+                self._store_cached_answer(tenant_id, language_code, question, ans)
+                return ans
         except Exception:
             pass
 
         # fallback: jeśli model jednak zwrócił czysty tekst
+        self._store_cached_answer(tenant_id, language_code, question, raw)
         return raw
+    # -------------------------------------------------------------------------
+    # stylizacja odpowiedzi (warstwa 2)
+    # -------------------------------------------------------------------------
 
+    def stylize_answer(
+        self,
+        *,
+        base_answer: str,
+        tenant_id: str,
+        language_code: Optional[str] = None,
+        tag: Optional[str] = None,
+        last_user_message: Optional[str] = None,
+    ) -> str:
+        """
+        Przyjmuje bazową odpowiedź z FAQ (faktycznie poprawną)
+        i zwraca wersję "ludzką", z lekką wariacją językową.
 
+        - jeśli mamy już zapisane warianty dla (tenant, lang, tag) → losujemy jeden,
+        - jeśli nie, wołamy raz LLM o kilka wariantów, zapisujemy i losujemy.
+        """
+        base_answer = (base_answer or "").strip()
+        if not base_answer:
+            return ""
+
+        # jeśli mamy wariant w cache – szybka ścieżka
+        variant = self._get_style_variant(tenant_id, language_code, tag)
+        if variant:
+            return variant
+
+        # tu faktycznie wołamy LLM (tylko gdy brakuje wariantów)
+        system_prompt = (
+            "Jesteś uprzejmym asystentem klubu fitness.\n"
+            "Masz gotową odpowiedź FACTS, której NIE WOLNO Ci zmieniać merytorycznie.\n"
+            "Twoim zadaniem jest przygotować kilka naturalnych, rozmownych wersji "
+            "tej odpowiedzi po polsku, używając synonimów i innego szyku zdań.\n"
+            "Nie dodawaj nowych informacji, których nie ma w FACTS.\n"
+            "Zwróć JSON {\"variants\": [\"wersja1\", \"wersja2\", ...]}.\n"
+        )
+
+        if language_code:
+            system_prompt += (
+                f"Odpowiadaj w języku: {language_code} (kod ISO). "
+                "Jeśli to polski, pisz naturalną polszczyzną, jak pracownik recepcji klubu.\n"
+            )
+
+        user_parts = [
+            "FACTS (oryginalna odpowiedź, nie zmieniaj faktów):",
+            base_answer,
+            "",
+            f"Wygeneruj proszę {self._style_variants_per_answer} różnych wersji "
+            "tej odpowiedzi po polsku. Nie dopisuj nic poza JSON-em.",
+        ]
+
+        if last_user_message:
+            user_parts.insert(
+                0,
+                f"To jest ostatnia wiadomość użytkownika (dla kontekstu, nie cytuj jej wprost): {last_user_message}",
+            )
+
+        user_content = "\n".join(user_parts)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ]
+
+        try:
+            raw = self._client.chat(
+                messages=messages,
+                max_tokens=256,
+                temperature=0.4,  # trochę kreatywności, ale nie za dużo
+            )
+        except Exception as e:
+            logger.error(
+                {
+                    "sender": "kb_style_failed",
+                    "tenant_id": tenant_id,
+                    "err": str(e),
+                }
+            )
+            # fallback: jak nie uda się wystylizować – zwróć bazową odpowiedź
+            return base_answer
+
+        if not raw:
+            return base_answer
+
+        raw = raw.strip()
+
+        variants: List[str] = []
+
+        # próbujemy sparsować JSON { "variants": ["...", "..."] }
+        try:
+            data = json.loads(raw)
+            maybe_variants = data.get("variants")
+            if isinstance(maybe_variants, list):
+                variants = [v for v in maybe_variants if isinstance(v, str)]
+        except Exception:
+            # jak nie JSON, to traktujemy cały output jako jeden wariant
+            variants = [raw]
+
+        if not variants:
+            return base_answer
+
+        # zapisujemy do cache, jeśli mamy tag
+        self._store_style_variants(tenant_id, language_code, tag, variants)
+
+        return random.choice(variants)
+        
+        

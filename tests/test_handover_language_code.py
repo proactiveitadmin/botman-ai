@@ -53,6 +53,8 @@ def test_handover_reply_contains_language_code(monkeypatch):
     svc.conv = DummyConvRepo()
     svc.tenants = DummyTenants()
 
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+     
     msg = Message(
         tenant_id="t-1",
         from_phone="+48123123123",

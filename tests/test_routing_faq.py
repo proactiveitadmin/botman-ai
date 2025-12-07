@@ -1,7 +1,7 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
 
-def test_faq_intent_uses_kb_service_answer():
+def test_faq_intent_uses_kb_service_answer(monkeypatch):
     class DummyNLU:
         def classify_intent(self, text: str, lang: str | None):
             return {
@@ -15,6 +15,9 @@ def test_faq_intent_uses_kb_service_answer():
             return " KB answer "
              
         def answer_ai(self, *args, **kwargs):
+            return " KB AI answer "
+            
+        def stylize_answer(self, *args, **kwargs):
             return " KB AI answer "
 
     class DummyTemplateService:
@@ -96,7 +99,8 @@ def test_faq_intent_uses_kb_service_answer():
     svc.messages = repos.messages
     svc.tenants = repos.tenants 
 
-
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+    
     msg = Message(
         tenant_id="t-1",
         from_phone="+48123123123",

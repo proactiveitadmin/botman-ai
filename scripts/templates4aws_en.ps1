@@ -283,18 +283,14 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "pg_contract_details"},
     "language_code": {"S": "en"},
-    "body":          {"S": "Here are your membership details:\nPlan: {plan_name}\nStatus: {status}\nActive: {is_active, select, true{yes} false{no}}\nStart: {start_date}\nEnd: {end_date}\nMembership fee: {membership_fee}\nCurrent balance: {current_balance}\nPrepaid balance: {prepaid_balance}\nBonus balance: {prepaid_bonus_balance}\nIn debt since: {negative_balance_since}"},
+    "body":          {"S": "Here are your membership details:\nPlan: {plan_name}\nStatus: {status}\nStart: {start_date}\nEnd: {end_date}\nCurrent balance: {current_balance}\nIn debt since: {negative_balance_since}"},
     "placeholders":  {
       "L": [
         { "S": "plan_name" },
         { "S": "status" },
-        { "S": "is_active" },
         { "S": "start_date" },
         { "S": "end_date" },
-        { "S": "membership_fee" },
         { "S": "current_balance" },
-        { "S": "prepaid_balance" },
-        { "S": "prepaid_bonus_balance" },
         { "S": "negative_balance_since" }
       ]
     }
@@ -356,8 +352,11 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_confirm"},
     "language_code": {"S": "en"},
-    "body":          {"S": "Do you confirm the booking for class {class_id}? Please reply: YES or NO."},
-    "placeholders":  {"L": [ { "S": "class_id" } ]}
+    "body":          {"S": "Do you confirm the booking for class {class_name} on {class_date} at {class_time}? Please reply: YES or NO."},
+    "placeholders":  {"L": [ { "S": "class_name" },
+							 { "S": "class_date" },
+							 { "S": "class_time" }
+						]}
   }'
 
 # ==== 26. reserve_class_missing_id ====

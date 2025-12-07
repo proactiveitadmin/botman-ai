@@ -340,9 +340,15 @@ Resources:
             TableName: !Ref MembersIndex
         - S3ReadPolicy:
             BucketName: !Ref KnowledgeBaseBucket
+        - Statement:
+          - Effect: Allow
+            Action:
+              - comprehend:DetectDominantLanguage
+            Resource: "*"
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue      
+          COMPREHEND_REGION: !Ref AWS::Region
       Events:
         SQSEvent:
           Type: SQS

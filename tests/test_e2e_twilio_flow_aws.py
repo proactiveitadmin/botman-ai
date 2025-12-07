@@ -164,6 +164,8 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
 
     router_handler.ROUTER = RoutingService()
     
+    monkeypatch.setattr(router_handler.ROUTER, "_detect_language", lambda text: "pl")
+    
     class FakeMessagesTable:
         def get_item(self, **kwargs):
             return {}  # brak duplikatu eventu

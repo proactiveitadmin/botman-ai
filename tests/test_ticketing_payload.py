@@ -74,7 +74,9 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     svc.ticketing = DummyTicketing()
     svc.conv = DummyConvRepo()
     svc.tenants = DummyTenants()
-
+    
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+    
     msg = Message(
         tenant_id="t-1",
         from_phone="+48123123123",

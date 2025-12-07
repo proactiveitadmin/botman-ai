@@ -3,107 +3,108 @@ from src.domain.models import Message
 
 
 class DummyNLU:
-    def __init__(self, result):
+    """
+    Bardzo prosty NLU – zawsze zwraca to, co dostanie w konstruktorze.
+    """
+    def __init__(self, result: dict):
         self._result = result
+        self.calls: list[tuple[str, str | None]] = []
 
     def classify_intent(self, text: str, lang: str | None):
+        # logujemy wywołania na wszelki wypadek
+        self.calls.append((text, lang))
         return self._result
 
 
 class DummyKB:
+    """
+    KB nie jest tu używane – ale RoutingService wymaga instancji.
+    """
     def answer(self, *args, **kwargs):
-        return " KB answer "
-        
+        return "KB answer"
+
     def answer_ai(self, *args, **kwargs):
-        return " KB AI answer "
+        return None
+
+    def stylize_answer(self, base_answer, *args, **kwargs):
+        return base_answer
 
 
-class DummyTemplateService:
+class DummyTpl:
     """
-    Dummy szablonów na potrzeby testów routingu.
-    Nie korzysta z żadnego DDB – tylko stałe stringi.
+    Zastępujemy TemplateService – nie korzystamy z DDB/Templates.
     """
-
-    def render(self, template: str, context: dict):
-        # Używane przy CONFIRM_TEMPLATE: np. "Potwierdź rezerwację %{class_id}"
-        text = template
-        for k, v in (context or {}).items():
-            placeholder = f"%{{{k}}}"
-            text = text.replace(placeholder, str(v))
-        return text
-
-    def render_named(self, tenant_id: str, name: str, language_code: str, context: dict):
-        # Szablony, których używa RoutingService
-        if name == "clarify_generic":
+    def render_named(self, tenant_id: str, template_name: str, lang: str, ctx: dict):
+        # Interesuje nas tylko clarify_generic – resztę możemy zwrócić "po nazwie".
+        if template_name == "clarify_generic":
+            # tekst jak w realnym szablonie (zawiera "doprec")
             return "Czy możesz doprecyzować, w czym pomóc?"
-
-        if name == "handover_to_staff":
-            return "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)."
-
-        if name == "ticket_summary":
-            return "Zgłoszenie klienta"
-
-        if name == "ticket_created_ok":
-            ticket = context.get("ticket", "XXX")
-            return f"Utworzyłem zgłoszenie. Numer: {ticket}."
-
-        if name == "ticket_created_failed":
-            return "Nie udało się utworzyć zgłoszenia. Spróbuj później."
-
-        # Fallback – przydatny w debugowaniu
-        return name
+        return template_name
 
 
-class DummyRepos:
-    class DummyConversations:
-        def __init__(self):
-            self._store = {}
-
-        def upsert_conversation(self, *a, **k):
-            return {}
-
-        def get_conversation(self, tenant_id, channel, channel_user_id):
-            return None
-
-        def get(self, pk, sk):
-            return self._store.get(pk)
-
-        def put(self, item):
-            pk = item.get("pk")
-            if pk:
-                self._store[pk] = item
-
-    class DummyMessages:
-        def save_inbound(self, *args, **kwargs):
-            return {}
-            
-    class DummyTenants:
-        def get(self, tenant_id: str):
-            # w tym teście nie interesują nas ustawienia tenanta
-            # zwracamy pusty dict, żeby _resolve_and_persist_language się nie wywalił
-            return {}
+class DummyConv:
+    """
+    In-memory ConversationsRepo – minimalna implementacja do tego testu.
+    """
     def __init__(self):
-        self.conversations = self.DummyConversations()
-        self.messages = self.DummyMessages()
-        self.tenants = self.DummyTenants()
-        
-def make_routing_service(nlu_result):
-    repos = DummyRepos()
+        self.data = {}
+
+    def get_conversation(self, tenant_id: str, channel: str, channel_user_id: str):
+        key = (tenant_id, channel, channel_user_id)
+        return self.data.get(key)
+
+    def upsert_conversation(self, tenant_id: str, channel: str, channel_user_id: str, **kwargs):
+        key = (tenant_id, channel, channel_user_id)
+        existing = self.data.get(key, {})
+        existing.update(kwargs)
+        self.data[key] = existing
+
+    # używane w innych ścieżkach, ale w tym teście nic tam nie ma
+    def get(self, pk: str, sk: str):
+        return None
+
+    def put(self, item: dict):
+        pass
+
+    def delete(self, pk: str, sk: str):
+        pass
+
+    def find_by_verification_code(self, tenant_id: str, verification_code: str):
+        return None
+
+
+class DummyTenants:
+    """
+    Prosty zamiennik TenantsRepo – zwraca fixed language_code.
+    """
+    def __init__(self, default_lang: str = "pl"):
+        self.default_lang = default_lang
+
+    def get(self, tenant_id: str):
+        return {
+            "tenant_id": tenant_id,
+            "language_code": self.default_lang,
+        }
+
+
+def make_routing_service(nlu_result: dict) -> RoutingService:
+    """
+    Buduje RoutingService z podanym wynikiem NLU i w pełni lokalnymi dummy serwisami.
+    """
     nlu = DummyNLU(nlu_result)
     kb = DummyKB()
-    templates = DummyTemplateService()
+    tpl = DummyTpl()
+    conv = DummyConv()
+    tenants = DummyTenants(default_lang="pl")
 
-    svc = RoutingService()
-    svc.nlu = nlu
-    svc.kb = kb
-    svc.tpl = templates
-    svc.conv = repos.conversations
-    svc.messages = repos.messages
-    svc.tenants = repos.tenants 
+    svc = RoutingService(nlu=nlu, kb=kb, tpl=tpl, conv=conv, tenants=tenants)
+    # helper do ewentualnych asercji (tu niekoniecznie potrzebny, ale nie szkodzi)
+    svc._test_nlu = nlu   # type: ignore[attr-defined]
+    svc._test_conv = conv # type: ignore[attr-defined]
     return svc
 
 
-def test_low_confidence_triggers_clarify():
+def test_low_confidence_triggers_clarify(monkeypatch):
     msg = Message(
         tenant_id="t-1",
         from_phone="+48123123123",
@@ -119,9 +120,15 @@ def test_low_confidence_triggers_clarify():
         }
     )
 
+    # wyłączamy prawdziwą detekcję języka, żeby test nie dotykał Comprehend
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+
     actions = svc.handle(msg)
 
     assert len(actions) == 1
     action = actions[0]
     assert action.type == "reply"
-    assert "doprec" in action.payload["body"].lower()
+
+    body = action.payload["body"].lower()
+    # DummyTpl zwraca "Czy możesz doprecyzować, w czym pomóc?"
+    assert "doprec" in body

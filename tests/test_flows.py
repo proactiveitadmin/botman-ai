@@ -330,7 +330,8 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
 
     dummy_crm = DummyCRM()
     monkeypatch.setattr(router_handler.ROUTER, "crm", dummy_crm, raising=False)
-
+    monkeypatch.setattr(router_handler.ROUTER, "_detect_language", lambda text: "pl")
+    
     # 1. Wiadomość "chcę się zapisać"
     event1 = {
         "Records": [

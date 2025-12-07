@@ -2,7 +2,7 @@
   "hours": "Klub jest otwarty od poniedziałku do piątku w godzinach 6:00–22:00, a w weekendy 8:00–20:00.",
   "pool_hours": "Basen jest dostępny codziennie od 6:00 do 21:30. Ostatnie wejście możliwe jest 45 minut przed zamknięciem.",
   "sauna_hours": "Strefa saun jest czynna od 14:00 do 22:00 w dni powszednie oraz od 10:00 do 20:00 w weekendy.",
-  "kids_zone": "Strefa Kids Zone działa w soboty i niedziele w godzinach 10:00–18:00. Dzieci muszą przebywać pod opieką osoby dorosłej.",
+  "kids_zone": "Strefa dla dzieci/kącik zabaw/Kids Zone działa w soboty i niedziele w godzinach 10:00–18:00. Dzieci muszą przebywać pod opieką osoby dorosłej.",
   
   "membership_price": "Cena karnetu miesięcznego zaczyna się od 139 zł. Dostępne są również plany kwartalne i roczne, a także zniżki dla studentów i seniorów.",
   "membership_types": "Oferujemy karnety: Open, Off-Peak, Basen+Siłownia, oraz Family. Szczegóły dostępne w recepcji i na stronie www.",
@@ -44,7 +44,5 @@
   "maintenance": "Aktualne prace serwisowe i wyłączenia stref znajdziesz na tablicy informacyjnej przy wejściu oraz w aplikacji.",
   "cleaning_breaks": "Strefy mogą być czasowo wyłączone na potrzeby sprzątania. Informacja pojawia się z wyprzedzeniem.",
   
-  "safety": "W razie złego samopoczucia lub kontuzji zgłoś się natychmiast do personelu. Defibrylator AED znajduje się przy recepcji.",
-  
-  "faq_no_info": "Niestety nie znalazłem odpowiedzi na to pytanie. Czy mogę pomóc w czymś innym?"
-}
+  "safety": "W razie złego samopoczucia lub kontuzji zgłoś się natychmiast do personelu. Defibrylator AED znajduje się przy recepcji."
+  }

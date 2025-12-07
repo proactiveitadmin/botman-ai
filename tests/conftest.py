@@ -337,6 +337,10 @@ def aws_stack(monkeypatch):
         router_handler.ROUTER = RoutingService()
         # świeży MessagesRepo, też na Moto
         router_handler.MESSAGES = MessagesRepo()
+        
+        # po inicjalizacji ROUTER – stubujemy detekcję języka,
+        # żeby testy e2e nie wołały AWS Comprehend
+        router_handler.ROUTER._detect_language = lambda text: "pl"
 
         yield {
             "inbound": inbound["QueueUrl"],
