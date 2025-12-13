@@ -47,15 +47,15 @@ class ConversationsRepo:
         language_code: str | None = None,
         last_intent: str | None = None,
         state_machine_status: str | None = None,
-        pg_member_id: str | None = None,
-        pg_verification_level: str | None = None,
-        pg_verified_until: int | None = None,
+        crm_member_id: str | None = None,
+        crm_verification_level: str | None = None,
+        crm_verified_until: int | None = None,
         verification_code: str | None = None,
-        pg_challenge_type: str | None = None,
-        pg_challenge_attempts: int | None = None,
+        crm_challenge_type: str | None = None,
+        crm_challenge_attempts: int | None = None,
         assigned_agent: str | None = None,
-        pg_post_intent: str | None = None,
-        pg_post_slots: dict | None = None,
+        crm_post_intent: str | None = None,
+        crm_post_slots: dict | None = None,
     ):
         """
         Upsert rozmowy – tylko pola, które nie są None, są aktualizowane.
@@ -78,24 +78,24 @@ class ConversationsRepo:
             set_field("last_intent", last_intent)
         if state_machine_status is not None:
             set_field("state_machine_status", state_machine_status)
-        if pg_member_id is not None:
-            set_field("pg_member_id", pg_member_id)
-        if pg_verification_level is not None:
-            set_field("pg_verification_level", pg_verification_level)
-        if pg_verified_until is not None:
-            set_field("pg_verified_until", pg_verified_until)
+        if crm_member_id is not None:
+            set_field("crm_member_id", crm_member_id)
+        if crm_verification_level is not None:
+            set_field("crm_verification_level", crm_verification_level)
+        if crm_verified_until is not None:
+            set_field("crm_verified_until", crm_verified_until)
         if verification_code is not None:
             set_field("verification_code", verification_code)
-        if pg_challenge_type is not None:
-            set_field("pg_challenge_type", pg_challenge_type)
-        if pg_challenge_attempts is not None:
-            set_field("pg_challenge_attempts", pg_challenge_attempts)
+        if crm_challenge_type is not None:
+            set_field("crm_challenge_type", crm_challenge_type)
+        if crm_challenge_attempts is not None:
+            set_field("crm_challenge_attempts", crm_challenge_attempts)
         if assigned_agent is not None:
             set_field("assigned_agent", assigned_agent)
-        if pg_post_intent is not None:
-            set_field("pg_post_intent", pg_post_intent)
-        if pg_post_slots is not None:
-            set_field("pg_post_slots", pg_post_slots)
+        if crm_post_intent is not None:
+            set_field("crm_post_intent", crm_post_intent)
+        if crm_post_slots is not None:
+            set_field("crm_post_slots", crm_post_slots)
             
         if not update_expr_parts:
             return
@@ -108,7 +108,7 @@ class ConversationsRepo:
             ExpressionAttributeValues=expr_vals,
         )
 
-    def clear_pg_challenge(self, tenant_id: str, channel: str, channel_user_id: str) -> None:
+    def clear_crm_challenge(self, tenant_id: str, channel: str, channel_user_id: str) -> None:
         """
         Usuwa pola związane z challenge PG i post-intentem z rekordu rozmowy.
         """
@@ -116,8 +116,8 @@ class ConversationsRepo:
         self.table.update_item(
             Key=key,
             UpdateExpression=(
-                "REMOVE pg_challenge_type, pg_challenge_attempts, "
-                "pg_post_intent, pg_post_slots"
+                "REMOVE crm_challenge_type, crm_challenge_attempts, "
+                "crm_post_intent, crm_post_slots"
             ),
         )
         

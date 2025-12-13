@@ -1,5 +1,6 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
+from tests.conftest import wire_subservices
 
 
 def test_ticket_payload_contains_history_and_meta(monkeypatch):
@@ -74,8 +75,9 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     svc.ticketing = DummyTicketing()
     svc.conv = DummyConvRepo()
     svc.tenants = DummyTenants()
+    wire_subservices(svc)
     
-    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+    monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
     
     msg = Message(
         tenant_id="t-1",

@@ -49,7 +49,7 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai):
     bodies = [json.loads(m["Body"]) for m in outbound_msgs]
 
     assert any(
-        b.get("body") == "pg_challenge_ask_dob"
+        b.get("body") == "crm_challenge_ask_dob"
         for b in bodies
     ), f"Nie znaleziono wiadomosci z prośbą o weryfikację: {[b.get('body') for b in bodies]}"
 
@@ -164,7 +164,7 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
 
     router_handler.ROUTER = RoutingService()
     
-    monkeypatch.setattr(router_handler.ROUTER, "_detect_language", lambda text: "pl")
+    monkeypatch.setattr(router_handler.ROUTER.language, "_detect_language", lambda text: "pl")
     
     class FakeMessagesTable:
         def get_item(self, **kwargs):
@@ -213,7 +213,7 @@ def test_e2e_twilio_to_outbound_queue(monkeypatch, mock_ai):
     assert any(
         (
             "urodzenia" in b.get("body", "").lower()
-            or "pg_challenge_ask_dob" in b.get("body", "")
+            or "crm_challenge_ask_dob" in b.get("body", "")
         )
         for b in bodies
     ), f"Nie znaleziono wiadomości z prośbą o weryfikację (challenge PG).\n Bodies: {[b.get('body') for b in bodies]}"

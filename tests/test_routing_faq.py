@@ -1,5 +1,6 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
+from tests.conftest import wire_subservices
 
 def test_faq_intent_uses_kb_service_answer(monkeypatch):
     class DummyNLU:
@@ -98,8 +99,10 @@ def test_faq_intent_uses_kb_service_answer(monkeypatch):
     svc.conv = repos.conversations
     svc.messages = repos.messages
     svc.tenants = repos.tenants 
+    wire_subservices(svc)
 
-    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+
+    monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
     
     msg = Message(
         tenant_id="t-1",

@@ -1,5 +1,6 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
+from tests.conftest import wire_subservices
 
 
 def test_handover_reply_contains_language_code(monkeypatch):
@@ -52,8 +53,10 @@ def test_handover_reply_contains_language_code(monkeypatch):
     svc.tpl = DummyTpl()
     svc.conv = DummyConvRepo()
     svc.tenants = DummyTenants()
+    wire_subservices(svc)
 
-    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+
+    monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
      
     msg = Message(
         tenant_id="t-1",

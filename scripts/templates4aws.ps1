@@ -71,79 +71,79 @@ aws dynamodb put-item `
 #      PERFECTGYM – LISTA ZAJĘĆ
 # =========================
 
-# ==== 6. pg_available_classes ====
+# ==== 6. crm_available_classes ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes#pl"},
+    "pk":            {"S": "default#crm_available_classes#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes"},
+    "template_code": {"S": "crm_available_classes"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Dostępne zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć (np. 1)."},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
-# ==== 7. pg_available_classes_empty ====
+# ==== 7. crm_available_classes_empty ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_empty#pl"},
+    "pk":            {"S": "default#crm_available_classes_empty#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_empty"},
+    "template_code": {"S": "crm_available_classes_empty"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Aktualnie nie widzę dostępnych zajęć w grafiku."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 8. pg_available_classes_capacity_no_limit ====
+# ==== 8. crm_available_classes_capacity_no_limit ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_capacity_no_limit#pl"},
+    "pk":            {"S": "default#crm_available_classes_capacity_no_limit#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_capacity_no_limit"},
+    "template_code": {"S": "crm_available_classes_capacity_no_limit"},
     "language_code": {"S": "pl"},
     "body":          {"S": "bez limitu miejsc"},
     "placeholders":  {"L": []}
   }'
 
-# ==== 9. pg_available_classes_capacity_full ====
+# ==== 9. crm_available_classes_capacity_full ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_capacity_full#pl"},
+    "pk":            {"S": "default#crm_available_classes_capacity_full#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_capacity_full"},
+    "template_code": {"S": "crm_available_classes_capacity_full"},
     "language_code": {"S": "pl"},
     "body":          {"S": "brak wolnych miejsc (limit {limit})"},
     "placeholders":  {"L": [ { "S": "limit" } ]}
   }'
 
-# ==== 10. pg_available_classes_capacity_free ====
+# ==== 10. crm_available_classes_capacity_free ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_capacity_free#pl"},
+    "pk":            {"S": "default#crm_available_classes_capacity_free#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_capacity_free"},
+    "template_code": {"S": "crm_available_classes_capacity_free"},
     "language_code": {"S": "pl"},
     "body":          {"S": "{free} wolnych miejsc (limit {limit})"},
     "placeholders":  {"L": [ { "S": "free" }, { "S": "limit" } ]}
   }'
 
-# ==== 11. pg_available_classes_item ====
+# ==== 11. crm_available_classes_item ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_item#pl"},
+    "pk":            {"S": "default#crm_available_classes_item#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_item"},
+    "template_code": {"S": "crm_available_classes_item"},
     "language_code": {"S": "pl"},
     "body":          {"S": "{index}) {date} {time} – {name} {capacity}"},
     "placeholders":  {
@@ -157,66 +157,66 @@ aws dynamodb put-item `
     }
   }'
 
-# ==== 12. pg_available_classes_invalid_index ====
+# ==== 12. crm_available_classes_invalid_index ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_invalid_index#pl"},
+    "pk":            {"S": "default#crm_available_classes_invalid_index#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_invalid_index"},
+    "template_code": {"S": "crm_available_classes_invalid_index"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Nie rozumiem wyboru. Podaj numer zajęć od 1 do {max_index}."},
     "placeholders":  {"L": [ { "S": "max_index" } ]}
   }'
 
-# ==== 13. pg_available_classes_no_today ====
+# ==== 13. crm_available_classes_no_today ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_no_today#pl"},
+    "pk":            {"S": "default#crm_available_classes_no_today#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_no_today"},
+    "template_code": {"S": "crm_available_classes_no_today"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Dzisiaj nie mamy żadnych dostępnych zajęć."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 14. pg_available_classes_today ====
+# ==== 14. crm_available_classes_today ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_today#pl"},
+    "pk":            {"S": "default#crm_available_classes_today#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_today"},
+    "template_code": {"S": "crm_available_classes_today"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Dzisiaj mamy takie zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć."},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
-# ==== 15. pg_available_classes_no_classes_on_date ====
+# ==== 15. crm_available_classes_no_classes_on_date ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_no_classes_on_date#pl"},
+    "pk":            {"S": "default#crm_available_classes_no_classes_on_date#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_no_classes_on_date"},
+    "template_code": {"S": "crm_available_classes_no_classes_on_date"},
     "language_code": {"S": "pl"},
     "body":          {"S": "W dniu {date} nie mamy żadnych dostępnych zajęć."},
     "placeholders":  {"L": [ { "S": "date" } ]}
   }'
 
-# ==== 16. pg_available_classes_select_by_number ====
+# ==== 16. crm_available_classes_select_by_number ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_available_classes_select_by_number#pl"},
+    "pk":            {"S": "default#crm_available_classes_select_by_number#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_available_classes_select_by_number"},
+    "template_code": {"S": "crm_available_classes_select_by_number"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Tego dnia są różne zajęcia. Napisz numer zajęć, które chcesz zarezerwować."},
     "placeholders":  {"L": []}
@@ -226,65 +226,65 @@ aws dynamodb put-item `
 #      PERFECTGYM – KONTRAKT / WERYFIKACJA
 # =========================
 
-# ==== 17. pg_contract_ask_email ====
+# ==== 17. crm_contract_ask_email ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_contract_ask_email#pl"},
+    "pk":            {"S": "default#crm_contract_ask_email#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_contract_ask_email"},
+    "template_code": {"S": "crm_contract_ask_email"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Podaj proszę adres e-mail użyty w klubie, żebym mógł sprawdzić status Twojej umowy."},
     "placeholders":  {"L": []}
   }'
 
-# ==== 18. pg_contract_not_found ====
+# ==== 18. crm_contract_not_found ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_contract_not_found#pl"},
+    "pk":            {"S": "default#crm_contract_not_found#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_contract_not_found"},
+    "template_code": {"S": "crm_contract_not_found"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Nie widzę żadnej umowy powiązanej z adresem {email} i numerem {phone}. Upewnij się proszę, że dane są zgodne z PerfectGym."},
     "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
   }'
   
-# ==== 18.a pg_challenge_ask_dob ====
+# ==== 18.a crm_challenge_ask_dob ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_ask_dob#pl"},
+    "pk":            {"S": "default#crm_challenge_ask_dob#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_challenge_ask_dob"},
+    "template_code": {"S": "crm_challenge_ask_dob"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "W celu weryfikacji podaj swoją datę urodzenia."},
+    "body":          {"S": "W celu weryfikacji podaj swoją datę urodzenia(weryfikacja tymczasowa)."},
     "placeholders":  {"L": []}
   }'
   
-# ==== 18.b pg_challenge_success ====
+# ==== 18.b crm_challenge_success ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_success#pl"},
+    "pk":            {"S": "default#crm_challenge_success#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_challenge_success"},
+    "template_code": {"S": "crm_challenge_success"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Zweryfikowaliśmy Twoje konto."},
     "placeholders":  {"L": []}
   }'
-# ==== 19. pg_contract_details ====
+# ==== 19. crm_contract_details ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_contract_details#pl"},
+    "pk":            {"S": "default#crm_contract_details#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_contract_details"},
+    "template_code": {"S": "crm_contract_details"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Szczegóły Twojej umowy:\nPlan: {plan_name}\nStatus: {status}\nStart: {start_date}\nKoniec: {end_date}\nBieżące saldo: {current_balance}\nZadłużenie od: {negative_balance_since}"},
     "placeholders":  {
@@ -446,14 +446,14 @@ aws dynamodb put-item `
     "placeholders":  {"L": []}
   }'
 
-# ==== 30. pg_web_verification_required ====
+# ==== 30. crm_web_verification_required ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_web_verification_required#pl"},
+    "pk":            {"S": "default#crm_web_verification_required#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_web_verification_required"},
+    "template_code": {"S": "crm_web_verification_required"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\nJeśli korzystasz z czatu WWW, kliknij poniższy link, aby otworzyć WhatsApp i wysłać kod weryfikacyjny.\nJeśli jesteś już w WhatsApp, wystarczy że wyślesz poniższy kod.\n\nKod: {{verification_code}}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć do rozmowy – zweryfikujemy Twoje konto i odblokujemy dostęp do danych PerfectGym."},
     "placeholders":  {
@@ -493,26 +493,26 @@ aws dynamodb put-item `
     "body":          {"S": "Cześć! Jestem wirtualnym asystentem klubu fitness. Napisz, w czym mogę pomóc."},
     "placeholders":  {"L": []}
   }'
-# ==== 33. pg_challenge_retry ====
+# ==== 33. crm_challenge_retry ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_retry#pl"},
+    "pk":            {"S": "default#crm_challenge_retry#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_challenge_retry"},
+    "template_code": {"S": "crm_challenge_retry"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Weryfikacja nie powiodła się. Sprobuj jeszcze raz"},
     "placeholders":  {"L": []}
   }'
-# ==== 34. pg_challenge_fail_handover ====
+# ==== 34. crm_challenge_fail_handover ====
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item '{
-    "pk":            {"S": "default#pg_challenge_fail_handover#pl"},
+    "pk":            {"S": "default#crm_challenge_fail_handover#pl"},
     "tenant_id":     {"S": "default"},
-    "template_code": {"S": "pg_challenge_fail_handover"},
+    "template_code": {"S": "crm_challenge_fail_handover"},
     "language_code": {"S": "pl"},
     "body":          {"S": "Niestety weryfikacja nie powiodła się. Spróbuj innym razem."},
     "placeholders":  {"L": []}

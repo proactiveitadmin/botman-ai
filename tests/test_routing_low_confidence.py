@@ -1,5 +1,6 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
+from tests.conftest import wire_subservices
 
 
 class DummyNLU:
@@ -96,11 +97,9 @@ def make_routing_service(nlu_result: dict) -> RoutingService:
     tpl = DummyTpl()
     conv = DummyConv()
     tenants = DummyTenants(default_lang="pl")
-
     svc = RoutingService(nlu=nlu, kb=kb, tpl=tpl, conv=conv, tenants=tenants)
-    # helper do ewentualnych asercji (tu niekoniecznie potrzebny, ale nie szkodzi)
-    svc._test_nlu = nlu   # type: ignore[attr-defined]
-    svc._test_conv = conv # type: ignore[attr-defined]
+    wire_subservices(svc)
+
     return svc
 
 
@@ -119,9 +118,10 @@ def test_low_confidence_triggers_clarify(monkeypatch):
             "slots": {},
         }
     )
+    wire_subservices(svc)
 
     # wyłączamy prawdziwą detekcję języka, żeby test nie dotykał Comprehend
-    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+    monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
 
     actions = svc.handle(msg)
 

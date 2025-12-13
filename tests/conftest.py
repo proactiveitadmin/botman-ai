@@ -28,7 +28,7 @@ def mock_ai(monkeypatch):
             }
         if "dostępne" in t or "zajęć" in t or "zajęcia" in t:
             return {
-                "intent": "pg_available_classes",
+                "intent": "crm_available_classes",
                 "confidence": 0.95,
                 "slots": {},
             }
@@ -340,7 +340,7 @@ def aws_stack(monkeypatch):
         
         # po inicjalizacji ROUTER – stubujemy detekcję języka,
         # żeby testy e2e nie wołały AWS Comprehend
-        router_handler.ROUTER._detect_language = lambda text: "pl"
+        router_handler.ROUTER.language._detect_language = lambda text: "pl"
 
         yield {
             "inbound": inbound["QueueUrl"],
@@ -383,3 +383,21 @@ def requests_mock(monkeypatch):
     mock = _RequestsMock()
     monkeypatch.setattr("requests.get", mock._fake_get)
     return mock
+    
+def wire_subservices(svc):
+    """
+    Przepiecie też svc.language i svc.crm_flow, inaczej testy lecą do DDB.
+    """
+    # language
+    if getattr(svc, "language", None):
+        svc.language.conv = getattr(svc, "conv", None)
+        svc.language.tenants = getattr(svc, "tenants", None)
+
+    # crm_flow
+    if getattr(svc, "crm_flow", None):
+        svc.crm_flow.conv = getattr(svc, "conv", None)
+        svc.crm_flow.tpl = getattr(svc, "tpl", None)
+        svc.crm_flow.crm = getattr(svc, "crm", None)
+        svc.crm_flow.members_index = getattr(svc, "members_index", None)
+
+    return svc

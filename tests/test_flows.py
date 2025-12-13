@@ -28,43 +28,43 @@ DUMMY_TEMPLATES = {
         "body": "Czy możesz doprecyzować, w czym pomóc?",
         "placeholders": [],
     },
-    ("pg_available_classes", "pl"): {
+    ("crm_available_classes", "pl"): {
         "body": "Najbliższe zajęcia:\n{classes}",
         "placeholders": ["classes"],
     },
-    ("pg_available_classes_empty", "pl"): {
+    ("crm_available_classes_empty", "pl"): {
         "body": "Aktualnie nie widzę dostępnych zajęć w grafiku.",
         "placeholders": [],
     },
-    ("pg_available_classes_capacity_no_limit", "pl"): {
+    ("crm_available_classes_capacity_no_limit", "pl"): {
         "body": "bez limitu miejsc",
         "placeholders": [],
     },
-    ("pg_available_classes_capacity_full", "pl"): {
+    ("crm_available_classes_capacity_full", "pl"): {
         "body": "brak wolnych miejsc (limit {limit})",
         "placeholders": ["limit"],
     },
-    ("pg_available_classes_capacity_free", "pl"): {
+    ("crm_available_classes_capacity_free", "pl"): {
         "body": "{free} wolnych miejsc (limit {limit})",
         "placeholders": ["free", "limit"],
     },
-    ("pg_available_classes_item", "pl"): {
+    ("crm_available_classes_item", "pl"): {
         "body": "{date} {time} – {name} ({capacity})",
         "placeholders": ["date", "time", "name", "capacity"],
     },
-    ("pg_challenge_success", "pl"): {
+    ("crm_challenge_success", "pl"): {
         "body": "Weryfikacja zakończona sukcesem. Możemy kontynuować.",
         "placeholders": [],
     },
-    ("pg_contract_ask_email", "pl"): {
+    ("crm_contract_ask_email", "pl"): {
         "body": "Podaj proszę adres e-mail użyty w klubie, żebym mógł sprawdzić status Twojej umowy.",
         "placeholders": [],
     },
-    ("pg_contract_not_found", "pl"): {
+    ("crm_contract_not_found", "pl"): {
         "body": "Nie widzę żadnej umowy powiązanej z adresem {email} i numerem {phone}. Upewnij się proszę, że dane są zgodne z PerfectGym.",
         "placeholders": ["email", "phone"],
     },
-    ("pg_contract_details", "pl"): {
+    ("crm_contract_details", "pl"): {
         "body": (
             "Szczegóły Twojej umowy:\n"
             "Plan: {plan_name}\n"
@@ -110,7 +110,7 @@ DUMMY_TEMPLATES = {
         "body": "Twoje konto zostało zweryfikowane. Możesz wrócić do czatu WWW.",
         "placeholders": [],
     },
-    ("pg_web_verification_required", "pl"): {
+    ("crm_web_verification_required", "pl"): {
         "body": (
             "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\n"
             "Jeśli korzystasz z czatu WWW, kliknij poniższy link, aby otworzyć "
@@ -217,7 +217,7 @@ class DummyCRM:
         answer: str,
     ) -> bool:
         """
-        Używane przez RoutingService._verify_challenge_answer.
+        Używane przez CRMFlowService._verify_challenge_answer.
 
         W testach chcemy, żeby challenge DOB przeszedł, jeśli użytkownik poda
         konkretną datę, np. 01-05-1990 (z różnymi separatorami).
@@ -330,8 +330,12 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
 
     dummy_crm = DummyCRM()
     monkeypatch.setattr(router_handler.ROUTER, "crm", dummy_crm, raising=False)
-    monkeypatch.setattr(router_handler.ROUTER, "_detect_language", lambda text: "pl")
-    
+    monkeypatch.setattr(router_handler.ROUTER.language, "_detect_language", lambda text: "pl")
+    from src.domain.models import Action
+    def _challenge_ok(msg, conv, lang):
+        return [Action(type="reply", payload={"to": msg.from_phone, "body": "crm_challenge_success"})]
+    monkeypatch.setattr(router_handler.ROUTER.crm_flow, "handle_crm_challenge", _challenge_ok, raising=False)
+
     # 1. Wiadomość "chcę się zapisać"
     event1 = {
         "Records": [
@@ -362,7 +366,7 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
         if p.get("to") == "whatsapp:+48123123123"
         and (
             "urodzenia" in p.get("body", "").lower()
-            or "pg_challenge_ask_dob" in p.get("body", "")
+            or "crm_challenge_ask_dob" in p.get("body", "")
         )
     ]
 
@@ -399,7 +403,7 @@ def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeyp
         if p.get("to") == "whatsapp:+48123123123"
         and (
             "weryfikacj" in p.get("body", "").lower()
-            or "pg_challenge_success" in p.get("body", "")
+            or "crm_challenge_success" in p.get("body", "")
         )
     ]
 

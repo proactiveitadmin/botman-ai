@@ -1,82 +1,98 @@
+from __future__ import annotations
+
 from src.domain.models import Message
-from src.services.routing_service import RoutingService
+from src.services.language_service import LanguageService
+
+from tests.fakes_routing import InMemoryConversations, FakeTenantsRepo
 
 
-class DummyConvRepo:
-    def __init__(self, existing=None):
-        self._existing = existing
-        self.last_upsert = None
-
-    def get_conversation(self, tenant_id: str, channel: str, channel_user_id: str):
-        return self._existing
-
-    def upsert_conversation(self, tenant_id: str, channel: str, channel_user_id: str, **kwargs):
-        self.last_upsert = {
-            "tenant_id": tenant_id,
-            "channel": channel,
-            "channel_user_id": channel_user_id,
-            **kwargs,
-        }
-
-
-class DummyTenantsRepo:
-    def __init__(self, lang: str = "pl"):
-        self._lang = lang
-
-    def get(self, tenant_id: str):
-        return {"tenant_id": tenant_id, "language_code": self._lang}
-
-
-def _build_msg(body: str = "hello") -> Message:
+def _build_msg(body: str, tenant_id: str = "tenant-1", phone: str = "+48123123123", lang: str | None = None):
     return Message(
-        tenant_id="t-1",
-        from_phone="whatsapp:+48123123123",
-        to_phone="whatsapp:+48000000000",
+        tenant_id=tenant_id,
+        from_phone=phone,
+        to_phone="bot",
         body=body,
         channel="whatsapp",
+        channel_user_id=phone,
+        language_code=lang,
     )
 
 
 def test_resolve_language_uses_detected_language(monkeypatch):
-    svc = RoutingService()
-    svc.conv = DummyConvRepo(existing=None)
-    svc.tenants = DummyTenantsRepo(lang="pl")
+    conv = InMemoryConversations()
+    tenants = FakeTenantsRepo(lang="pl")
+    svc = LanguageService(conv=conv, tenants=tenants)
 
-    # stub Comprehend-owej detekcji
     monkeypatch.setattr(svc, "_detect_language", lambda text: "de")
 
-    lang = svc._resolve_and_persist_language(_build_msg("Hallo, ich habe eine Frage."))
-
+    lang = svc.resolve_and_persist_language(_build_msg("Hallo, ich habe eine Frage."))
     assert lang == "de"
-    assert svc.conv.last_upsert is not None
-    assert svc.conv.last_upsert.get("language_code") == "de"
 
 
 def test_resolve_language_uses_existing_conversation_when_detection_none(monkeypatch):
-    existing_conv = {"language_code": "fr"}
-    svc = RoutingService()
-    svc.conv = DummyConvRepo(existing=existing_conv)
-    svc.tenants = DummyTenantsRepo(lang="pl")
+    conv = InMemoryConversations()
+    tenants = FakeTenantsRepo(lang="pl")
+    svc = LanguageService(conv=conv, tenants=tenants)
+
+    # istniejąca rozmowa ma już język
+    conv.upsert_conversation("tenant-1", "whatsapp", "+48123123123", language_code="en")
 
     monkeypatch.setattr(svc, "_detect_language", lambda text: None)
 
-    lang = svc._resolve_and_persist_language(_build_msg("ok"))
-
-    # powinien zostać język z istniejącej rozmowy
-    assert lang == "fr"
-    # albo w ogóle brak nowego upsertu, albo upsert nie zmieni języka
-    assert svc.conv.last_upsert is None or svc.conv.last_upsert.get("language_code") == "fr"
+    lang = svc.resolve_and_persist_language(_build_msg("ok"))
+    assert lang == "en"
 
 
 def test_resolve_language_uses_tenant_language_when_no_detection_and_no_existing(monkeypatch):
-    svc = RoutingService()
-    svc.conv = DummyConvRepo(existing=None)
-    svc.tenants = DummyTenantsRepo(lang="es")  # język tenanta to hiszpański
+    conv = InMemoryConversations()
+    tenants = FakeTenantsRepo(lang="es")
+    svc = LanguageService(conv=conv, tenants=tenants)
 
     monkeypatch.setattr(svc, "_detect_language", lambda text: None)
 
-    lang = svc._resolve_and_persist_language(_build_msg("Hola"))
-
+    lang = svc.resolve_and_persist_language(_build_msg("Hola"))
     assert lang == "es"
-    assert svc.conv.last_upsert is not None
-    assert svc.conv.last_upsert.get("language_code") == "es"
+
+
+def test_resolve_language_persists_in_conversation(monkeypatch):
+    conv = InMemoryConversations()
+    tenants = FakeTenantsRepo(lang="pl")
+    svc = LanguageService(conv=conv, tenants=tenants)
+
+    calls: list[str] = []
+
+    def fake_detect(text: str):
+        calls.append(text)
+        return "pl" if len(calls) == 1 else "en"
+
+    monkeypatch.setattr(svc, "_detect_language", fake_detect)
+
+    msg1 = _build_msg("Cześć")
+    lang1 = svc.resolve_and_persist_language(msg1)
+    assert lang1 == "pl"
+
+    key1 = conv.conversation_pk(msg1.tenant_id, msg1.channel, msg1.channel_user_id)
+    assert conv.data[key1]["language_code"] == "pl"
+
+    msg2 = _build_msg("Hi")
+    lang2 = svc.resolve_and_persist_language(msg2)
+    assert lang2 == "en"
+
+    key2 = conv.conversation_pk(msg2.tenant_id, msg2.channel, msg2.channel_user_id)
+    assert conv.data[key2]["language_code"] == "en"
+
+
+def test_explicit_language_code_from_message_overrides(monkeypatch):
+    conv = InMemoryConversations()
+    tenants = FakeTenantsRepo(lang="pl")
+    svc = LanguageService(conv=conv, tenants=tenants)
+
+    # nawet gdyby detekcja zwróciła coś innego, źródłem prawdy jest msg.language_code
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "de")
+
+    msg = _build_msg("Hallo", lang="fr")
+    lang = svc.resolve_and_persist_language(msg)
+    assert lang == "fr"
+
+    key = conv.conversation_pk(msg.tenant_id, msg.channel, msg.channel_user_id)
+    assert conv.data[key]["language_code"] == "fr"

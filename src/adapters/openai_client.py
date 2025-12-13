@@ -23,7 +23,7 @@ from ..common.logging import logger
 SYSTEM_PROMPT = """
 You are an intent classifier for a fitness club. 
 Return exactly one valid json object with keys:
-- "intent": one of ["reserve_class", "faq", "handover", "clarify", "ticket", "pg_available_classes", "pg_contract_status", "greeting"]
+- "intent": one of ["reserve_class", "faq", "handover", "clarify", "ticket", "crm_available_classes", "crm_contract_status", "greeting"]
 - "confidence": float 0..1
 - "slots": object with extracted parameters.
 
@@ -31,8 +31,8 @@ Intent rules:
 - "greeting": message is only a greeting/polite phrase in any language and contains no request.
 - "faq": user asks for general information on topics [hours price location contact schedule classes trainers membership equipment parking rules facilities age_limit guest_pass lost_and_found cancellation opening_soon].
 - "reserve_class": user wants to sign up/reserve a class (extract class_id, member_id if present).
-- "pg_available_classes": user asks what classes are available.
-- "pg_contract_status": user asks about membership/contract/account status.
+- "crm_available_classes": user asks what classes are available.
+- "crm_contract_status": user asks about membership/contract/account status.
 - "ticket": user reports a problem or asks for staff help.
 - "handover": user explicitly wants to speak to a human.
 
@@ -52,7 +52,7 @@ Always respond with one minimal json object and nothing else.
 
 _VALID_INTENTS = {
     "reserve_class", "faq", "handover", "clarify", "ticket",
-    "pg_available_classes", "pg_contract_status", "greeting",
+    "crm_available_classes", "crm_contract_status", "greeting",
 }
 
 

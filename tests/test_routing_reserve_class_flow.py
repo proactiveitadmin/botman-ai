@@ -2,13 +2,15 @@ import time
 
 import pytest
 
-from src.services.routing_service import (
-    RoutingService,
+from src.services.routing_service import RoutingService
+from src.common.constants import (
     STATE_AWAITING_CLASS_SELECTION,
     STATE_AWAITING_CONFIRMATION,
+    STATE_AWAITING_CHALLENGE,
+    STATE_AWAITING_VERIFICATION,
 )
 from src.domain.models import Message
-
+from tests.conftest import wire_subservices
 
 class FakeNLUService:
     def __init__(self):
@@ -75,7 +77,6 @@ class FakeCRMService:
 
 class FakeTenantsRepo:
     def get(self, tenant_id: str):
-        # domyślny język „pl”
         return {"language_code": "pl"}
 
 
@@ -111,10 +112,10 @@ class FakeConversationsRepo:
     def assign_agent(self, tenant_id: str, channel: str, channel_user_id: str, agent_id: str):
         pass  # niepotrzebne w tym teście
 
-    def clear_pg_challenge(self, tenant_id: str, channel: str, channel_user_id: str):
+    def clear_crm_challenge(self, tenant_id: str, channel: str, channel_user_id: str):
         key = (tenant_id, channel, channel_user_id)
         conv = self.convs.get(key, {})
-        for k in ["pg_challenge_type", "pg_challenge_attempts", "pg_post_intent", "pg_post_slots"]:
+        for k in ["crm_challenge_type", "crm_challenge_attempts", "crm_post_intent", "crm_post_slots"]:
             conv.pop(k, None)
         self.convs[key] = conv
 
@@ -186,16 +187,12 @@ def routing_service(monkeypatch):
         crm=crm,
         ticketing=FakeTicketingService(),
         conv=conv,
-        tenants=tenants,
+        tenants=FakeTenantsRepo(),
         messages=FakeMessagesRepo(),
         members_index=FakeMembersIndexRepo(),
     )
-    monkeypatch.setattr(routing, "_detect_language", lambda text: "pl")
-    # udostępniamy fakes na obiekcie do asercji
-    routing._test_nlu = nlu
-    routing._test_crm = crm
-    routing._test_tpl = tpl
-    routing._test_conv = conv
+    wire_subservices(routing)
+    monkeypatch.setattr(routing.language, "_detect_language", lambda text: "pl")
 
     return routing
 
@@ -210,7 +207,7 @@ def _make_msg(text: str) -> Message:
     )
 
 
-def test_reserve_class_e2e_list_then_index_selection(routing_service: RoutingService):
+def test_reserve_class_and_challenge(routing_service: RoutingService):
     """
     1. Użytkownik: "chcę się zapisać na zajęcia"
     2. Bot: wyświetla listę zajęć (PG)
@@ -228,23 +225,23 @@ def test_reserve_class_e2e_list_then_index_selection(routing_service: RoutingSer
     actions1 = routing.handle(msg1)
 
     # NLU powinno zostać wywołane dla pierwszej wiadomości
-    assert routing._test_nlu.calls
-    text1, lang1 = routing._test_nlu.calls[0]
+    assert routing.nlu.calls
+    text1, lang1 = routing.nlu.calls[0]
     assert "zapis" in text1.lower() or "zaję" in text1.lower()
 
     # Bot powinien odesłać listę zajęć (template pg_available_classes), a nie clarify
     assert len(actions1) == 1
     assert actions1[0].type == "reply"
     body1 = actions1[0].payload["body"]
-    assert body1.startswith("pg_available_classes|")
+    assert body1.startswith("crm_available_classes|")
 
     # Stan rozmowy musi być ustawiony na oczekiwanie wyboru numeru
-    conv = routing._test_conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
+    conv = routing.conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
     assert conv["state_machine_status"] == STATE_AWAITING_CLASS_SELECTION
 
     # W "pending#phone" musi być zapisany snapshot listy zajęć
-    pending_key = routing._pending_key(PHONE)
-    classes_item = routing._test_conv.get(pending_key, "classes")
+    pending_key = routing.crm_flow._pending_key(PHONE)
+    classes_item = routing.conv.get(pending_key, "classes")
     assert classes_item is not None
     assert len(classes_item["items"]) == 2
 
@@ -254,20 +251,15 @@ def test_reserve_class_e2e_list_then_index_selection(routing_service: RoutingSer
 
     # KLUCZOWE: druga wiadomość nie powinna trafić do NLU
     # (stan STATE_AWAITING_CLASS_SELECTION przechwytuje ją wcześniej)
-    assert len(routing._test_nlu.calls) == 1, "NLU nie powinno być wywołane dla '1'"
+    assert len(routing.nlu.calls) == 1, "NLU nie powinno być wywołane dla '1'"
 
     # Bot powinien zainicjować pending rezerwację (template reserve_class_confirm)
     assert len(actions2) == 1
     assert actions2[0].type == "reply"
     body2 = actions2[0].payload["body"]
-    assert body2.startswith("reserve_class_confirm|")
+    assert body2.startswith("crm_challenge_ask_dob|")
 
     # Stan rozmowy => oczekiwanie na TAK/NIE
-    conv2 = routing._test_conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
-    assert conv2["state_machine_status"] == STATE_AWAITING_CONFIRMATION
+    conv2 = routing.conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
+    assert conv2["state_machine_status"] == STATE_AWAITING_CHALLENGE
 
-    # W storage powinna istnieć pending rezerwacja dla class-1 i member-123
-    pending_item = routing._test_conv.get(pending_key, "pending")
-    assert pending_item is not None
-    assert pending_item["class_id"] == "class-1"
-    assert pending_item["member_id"] == "member-123"

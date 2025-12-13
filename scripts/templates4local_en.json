@@ -62,7 +62,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes" },
+          "template_code": { "S": "crm_available_classes" },
           "language_code": { "S": "en" },
           "body": { "S": "Available classes:\n{classes}\n\nPlease type the number of the class you choose (e.g. 1)." },
           "placeholders": { "L": [ { "S": "classes" } ] }
@@ -73,7 +73,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_empty" },
+          "template_code": { "S": "crm_available_classes_empty" },
           "language_code": { "S": "en" },
           "body": { "S": "I can’t see any available classes in the schedule at the moment." },
           "placeholders": { "L": [] }
@@ -84,7 +84,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_no_limit" },
+          "template_code": { "S": "crm_available_classes_capacity_no_limit" },
           "language_code": { "S": "en" },
           "body": { "S": "no limit on places" },
           "placeholders": { "L": [] }
@@ -95,7 +95,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_full" },
+          "template_code": { "S": "crm_available_classes_capacity_full" },
           "language_code": { "S": "en" },
           "body": { "S": "no places available (limit {limit})" },
           "placeholders": { "L": [ { "S": "limit" } ] }
@@ -106,7 +106,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_free" },
+          "template_code": { "S": "crm_available_classes_capacity_free" },
           "language_code": { "S": "en" },
           "body": { "S": "{free} places available (limit {limit})" },
           "placeholders": { "L": [ { "S": "free" }, { "S": "limit" } ] }
@@ -117,7 +117,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_item" },
+          "template_code": { "S": "crm_available_classes_item" },
           "language_code": { "S": "en" },
           "body": { "S": "{index}) {date} {time} – {name} {capacity}" },
           "placeholders": {
@@ -137,7 +137,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_invalid_index" },
+          "template_code": { "S": "crm_available_classes_invalid_index" },
           "language_code": { "S": "en" },
           "body": { "S": "I didn’t understand your choice. Please enter a class number from 1 to {max_index}." },
           "placeholders": { "L": [ { "S": "max_index" } ] }
@@ -148,7 +148,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_no_today" },
+          "template_code": { "S": "crm_available_classes_no_today" },
           "language_code": { "S": "en" },
           "body": { "S": "There are no available classes today." },
           "placeholders": { "L": [] }
@@ -159,7 +159,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_today" },
+          "template_code": { "S": "crm_available_classes_today" },
           "language_code": { "S": "en" },
           "body": { "S": "Today we have these classes:\n{classes}\n\nPlease type the number of the class you choose." },
           "placeholders": { "L": [ { "S": "classes" } ] }
@@ -170,7 +170,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_no_classes_on_date" },
+          "template_code": { "S": "crm_available_classes_no_classes_on_date" },
           "language_code": { "S": "en" },
           "body": { "S": "On {date} there are no available classes." },
           "placeholders": { "L": [ { "S": "date" } ] }
@@ -181,7 +181,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_select_by_number" },
+          "template_code": { "S": "crm_available_classes_select_by_number" },
           "language_code": { "S": "en" },
           "body": { "S": "There are several classes on that day. Please type the number of the class you’d like to book." },
           "placeholders": { "L": [] }
@@ -195,7 +195,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_contract_ask_email" },
+          "template_code": { "S": "crm_contract_ask_email" },
           "language_code": { "S": "en" },
           "body": { "S": "Please provide the email address you use at the club so I can check the status of your membership." },
           "placeholders": { "L": [] }
@@ -206,7 +206,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_contract_not_found" },
+          "template_code": { "S": "crm_contract_not_found" },
           "language_code": { "S": "en" },
           "body": { "S": "I can’t see any membership linked to the email {email} and phone number {phone}. Please make sure your details match those in PerfectGym." },
           "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
@@ -217,7 +217,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_ask_dob" },
+          "template_code": { "S": "crm_challenge_ask_dob" },
           "language_code": { "S": "en" },
           "body": { "S": "For verification, please provide your date of birth." },
           "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
@@ -228,7 +228,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_success" },
+          "template_code": { "S": "crm_challenge_success" },
           "language_code": { "S": "en" },
           "body": { "S": "Your account has been successfully verified." },
           "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
@@ -239,7 +239,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_contract_details" },
+          "template_code": { "S": "crm_contract_details" },
           "language_code": { "S": "en" },
           "body":          {"S": "Here are your membership details:\nPlan: {plan_name}\nStatus: {status}\nActive: {is_active, select, true{yes} false{no}}\nStart: {start_date}\nEnd: {end_date}\nMembership fee: {membership_fee}\nCurrent balance: {current_balance}\nPrepaid balance: {prepaid_balance}\nBonus balance: {prepaid_bonus_balance}\nIn debt since: {negative_balance_since}"},
 		"placeholders":  {
@@ -392,7 +392,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_web_verification_required" },
+          "template_code": { "S": "crm_web_verification_required" },
           "language_code": { "S": "en" },
           "body": {
             "S": "To continue, we need to confirm your identity.\n\nIf you are using the web chat, click the link below to open WhatsApp and send the verification code.\nIf you are already in WhatsApp, simply send the code below.\n\nCode: {{verification_code}}\nLink: {{whatsapp_link}}\n\nAfter sending the code, return to this conversation – we will verify your account and unlock access to your PerfectGym data."
@@ -435,7 +435,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_retry" },
+          "template_code": { "S": "crm_challenge_retry" },
           "language_code": { "S": "en" },
           "body": { "S": "Verification failed. Please try again." },
           "placeholders": { "L": [] }
@@ -446,7 +446,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_fail_handover" },
+          "template_code": { "S": "crm_challenge_fail_handover" },
           "language_code": { "S": "en" },
           "body": { "S": "Unfortunately, verification was not successful. Please try again another time." },
           "placeholders": { "L": [] }

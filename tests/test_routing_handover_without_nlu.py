@@ -1,5 +1,6 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message, Action
+from tests.conftest import wire_subservices
 
 
 def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
@@ -69,8 +70,10 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     svc.kb = DummyKB()
     svc.tpl = DummyTpl()
     svc.tenants = DummyTenants()
+    wire_subservices(svc)
+
     
-    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+    monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
 
     msg = Message(
         tenant_id="t-1",

@@ -62,7 +62,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes" },
+          "template_code": { "S": "crm_available_classes" },
           "language_code": { "S": "ar" },
           "body": { "S": "الحصص المتاحة:\n{classes}\n\nاكتب رقم الحصة التي تختارها (مثلاً 1)." },
           "placeholders": { "L": [ { "S": "classes" } ] }
@@ -73,7 +73,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_empty" },
+          "template_code": { "S": "crm_available_classes_empty" },
           "language_code": { "S": "ar" },
           "body": { "S": "حالياً لا توجد أي حصص متاحة في الجدول." },
           "placeholders": { "L": [] }
@@ -84,7 +84,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_no_limit" },
+          "template_code": { "S": "crm_available_classes_capacity_no_limit" },
           "language_code": { "S": "ar" },
           "body": { "S": "دون حد لعدد الأماكن" },
           "placeholders": { "L": [] }
@@ -95,7 +95,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_full" },
+          "template_code": { "S": "crm_available_classes_capacity_full" },
           "language_code": { "S": "ar" },
           "body": { "S": "لا توجد أماكن شاغرة (الحد {limit})" },
           "placeholders": { "L": [ { "S": "limit" } ] }
@@ -106,7 +106,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_free" },
+          "template_code": { "S": "crm_available_classes_capacity_free" },
           "language_code": { "S": "ar" },
           "body": { "S": "{free} أماكن شاغرة (الحد {limit})" },
           "placeholders": { "L": [ { "S": "free" }, { "S": "limit" } ] }
@@ -117,7 +117,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_item" },
+          "template_code": { "S": "crm_available_classes_item" },
           "language_code": { "S": "ar" },
           "body": { "S": "{index}) {date} {time} – {name} {capacity}" },
           "placeholders": {
@@ -137,7 +137,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_invalid_index" },
+          "template_code": { "S": "crm_available_classes_invalid_index" },
           "language_code": { "S": "ar" },
           "body": { "S": "لم أفهم اختيارك. يرجى إدخال رقم الحصة من 1 إلى {max_index}." },
           "placeholders": { "L": [ { "S": "max_index" } ] }
@@ -148,7 +148,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_no_today" },
+          "template_code": { "S": "crm_available_classes_no_today" },
           "language_code": { "S": "ar" },
           "body": { "S": "لا توجد أي حصص متاحة اليوم." },
           "placeholders": { "L": [] }
@@ -159,7 +159,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_today" },
+          "template_code": { "S": "crm_available_classes_today" },
           "language_code": { "S": "ar" },
           "body": { "S": "لدينا اليوم الحصص التالية:\n{classes}\n\nاكتب رقم الحصة التي تريدها." },
           "placeholders": { "L": [ { "S": "classes" } ] }
@@ -170,7 +170,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_no_classes_on_date" },
+          "template_code": { "S": "crm_available_classes_no_classes_on_date" },
           "language_code": { "S": "ar" },
           "body": { "S": "في تاريخ {date} لا توجد أي حصص متاحة." },
           "placeholders": { "L": [ { "S": "date" } ] }
@@ -181,7 +181,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_available_classes_select_by_number" },
+          "template_code": { "S": "crm_available_classes_select_by_number" },
           "language_code": { "S": "ar" },
           "body": { "S": "هناك عدة حصص في ذلك اليوم. يرجى كتابة رقم الحصة التي تود حجزها." },
           "placeholders": { "L": [] }
@@ -195,7 +195,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_contract_ask_email" },
+          "template_code": { "S": "crm_contract_ask_email" },
           "language_code": { "S": "ar" },
           "body": { "S": "يرجى تزويدي بعنوان البريد الإلكتروني المستخدم في النادي حتى أتمكّن من التحقق من حالة عضويتك." },
           "placeholders": { "L": [] }
@@ -206,7 +206,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_contract_not_found" },
+          "template_code": { "S": "crm_contract_not_found" },
           "language_code": { "S": "ar" },
           "body": { "S": "لا أرى أي عضوية مرتبطة بالبريد الإلكتروني {email} ورقم الهاتف {phone}. يرجى التأكد من أن البيانات مطابقة لتلك المسجلة في PerfectGym." },
           "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
@@ -217,7 +217,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_ask_dob" },
+          "template_code": { "S": "crm_challenge_ask_dob" },
           "language_code": { "S": "ar" },
           "body": { "S": "لأغراض التحقق، يرجى تزويدي بتاريخ ميلادك." },
           "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
@@ -228,7 +228,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_success" },
+          "template_code": { "S": "crm_challenge_success" },
           "language_code": { "S": "ar" },
           "body": { "S": "تمّ التحقق من حسابك بنجاح." },
           "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
@@ -239,7 +239,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_contract_details" },
+          "template_code": { "S": "crm_contract_details" },
           "language_code": { "S": "ar" },
           "body": {
             "S": "تفاصيل عضويتك:\nالباقة: {plan_name}\nالحالة:\n{status}\nنشطة: {is_active, select, true{نعم} false{لا}}\nتاريخ البداية: {start_date}\nتاريخ الانتهاء: {end_date}\nرسوم العضوية: {membership_fee}"
@@ -390,7 +390,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_web_verification_required" },
+          "template_code": { "S": "crm_web_verification_required" },
           "language_code": { "S": "ar" },
           "body": {
             "S": "لمتابعة العملية، نحتاج أولاً إلى تأكيد هويتك.\n\nإذا كنت تستخدم محادثة الويب، اضغط على الرابط أدناه لفتح واتساب وإرسال رمز التحقق.\nوإذا كنت بالفعل داخل واتساب، فقط أرسل الرمز الموضح أدناه.\n\nالرمز: {{verification_code}}\nالرابط: {{whatsapp_link}}\n\nبعد إرسال الرمز، عُد إلى هذه المحادثة – سنقوم بالتحقق من حسابك وفتح الوصول إلى بياناتك في PerfectGym."
@@ -433,7 +433,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_retry" },
+          "template_code": { "S": "crm_challenge_retry" },
           "language_code": { "S": "ar" },
           "body": { "S": "فشل التحقق. يرجى المحاولة مرة أخرى." },
           "placeholders": { "L": [] }
@@ -444,7 +444,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "pg_challenge_fail_handover" },
+          "template_code": { "S": "crm_challenge_fail_handover" },
           "language_code": { "S": "ar" },
           "body": { "S": "للأسف لم تنجح عملية التحقق. يرجى المحاولة مرة أخرى في وقت لاحق." },
           "placeholders": { "L": [] }
