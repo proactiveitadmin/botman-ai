@@ -116,6 +116,8 @@ def lambda_handler(event, context):
 
         tenant_id = "default"  # TODO: w przyszłości mapowanie po numerze / endpointcie
         from_phone = params.get("From")
+        channel_user_id = from_phone
+        conv_id = f"conv#whatsapp#{channel_user_id}"
 
         # --- SPAM / RATE LIMIT ---
         if spam_service.is_blocked(tenant_id=tenant_id, phone=from_phone):
@@ -139,11 +141,17 @@ def lambda_handler(event, context):
             "message_sid": params.get("MessageSid"),
             "channel": "whatsapp",
             "channel_user_id": from_phone,
+            "conversation_id": conv_id,
         }
 
 
         queue_url = resolve_queue_url("InboundEventsQueueUrl")
-        sqs_client().send_message(QueueUrl=queue_url, MessageBody=json.dumps(msg))
+        sqs_client().send_message(
+            QueueUrl=queue_url, 
+            MessageBody=json.dumps(msg),            
+            MessageGroupId=msg.get('conversation_id') or 'default',
+            MessageDeduplicationId=msg.get('event_id') or new_id('dedup-'),
+        )
 
         logger.info({
             "webhook": "ok",

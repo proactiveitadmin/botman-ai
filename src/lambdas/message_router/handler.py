@@ -49,7 +49,7 @@ def _build_message(body: dict) -> Message:
         from_phone=body.get("from"),
         to_phone=body.get("to"),
         body=body.get("body", ""),
-        conversation_id=body.get("event_id"),
+        conversation_id=body.get("conversation_id") or body.get("event_id"),
         channel=body.get("channel", "whatsapp"),
         channel_user_id=body.get("channel_user_id") or body.get("from"),
         language_code=body.get("language_code"),

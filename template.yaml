@@ -97,7 +97,9 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      QueueName: !Sub 'inbound-events-${AWS::StackName}'
+      QueueName: !Sub 'inbound-events-${AWS::StackName}.fifo'
+      FifoQueue: true
+      ContentBasedDeduplication: false
       VisibilityTimeout: 60
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt InboundDLQ.Arn
@@ -108,6 +110,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'inbound-events-${AWS::StackName}-dlq'
+      FifoQueue: true
+      ContentBasedDeduplication: false
 
   OutboundQueue:
     Type: AWS::SQS::Queue
