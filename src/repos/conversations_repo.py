@@ -2,6 +2,11 @@ import os, time
 from ..common.aws import ddb_resource
 from boto3.dynamodb.conditions import Key
 
+
+# Sentinel pozwalający odróżnić: "parametr nie podany" od "parametr ustawiony na None".
+# Dzięki temu możemy wspierać kasowanie pól (REMOVE) bez psucia istniejących wywołań.
+_UNSET = object()
+
 class ConversationsRepo:
     def __init__(self):
         self.table = ddb_resource().Table(
@@ -44,63 +49,77 @@ class ConversationsRepo:
         channel: str,
         channel_user_id: str,
         *,
-        language_code: str | None = None,
-        last_intent: str | None = None,
-        state_machine_status: str | None = None,
-        crm_member_id: str | None = None,
-        crm_verification_level: str | None = None,
-        crm_verified_until: int | None = None,
-        verification_code: str | None = None,
-        crm_challenge_type: str | None = None,
-        crm_challenge_attempts: int | None = None,
-        assigned_agent: str | None = None,
-        crm_post_intent: str | None = None,
-        crm_post_slots: dict | None = None,
+        language_code=_UNSET,
+        last_intent=_UNSET,
+        state_machine_status=_UNSET,
+        crm_member_id=_UNSET,
+        crm_verification_level=_UNSET,
+        crm_verified_until=_UNSET,
+        verification_code=_UNSET,
+        crm_challenge_type=_UNSET,
+        crm_challenge_attempts=_UNSET,
+        crm_otp_hash=_UNSET,
+        crm_otp_expires_at=_UNSET,
+        crm_otp_attempts_left=_UNSET,
+        crm_otp_last_sent_at=_UNSET,
+        crm_otp_email=_UNSET,
+        assigned_agent=_UNSET,
+        crm_post_intent=_UNSET,
+        crm_post_slots=_UNSET,
+        crm_verification_blocked_until=_UNSET,
     ):
-        """
-        Upsert rozmowy – tylko pola, które nie są None, są aktualizowane.
+        """Upsert rozmowy.
+
+        - pola z wartością `_UNSET` są ignorowane (nie aktualizujemy),
+        - pola ustawione na `None` są usuwane (REMOVE),
+        - pozostałe pola są ustawiane (SET).
         """
         key = self.conversation_pk(tenant_id, channel, channel_user_id)
 
-        update_expr_parts = []
-        expr_vals = {}
+        set_parts: list[str] = []
+        remove_parts: list[str] = []
+        expr_vals: dict = {}
 
         def set_field(field_name: str, value):
-            update_expr_parts.append(f"{field_name} = :{field_name}")
+            set_parts.append(f"{field_name} = :{field_name}")
             expr_vals[f":{field_name}"] = value
+
+        def maybe_set_or_remove(field_name: str, value):
+            if value is _UNSET:
+                return
+            if value is None:
+                remove_parts.append(field_name)
+                return
+            set_field(field_name, value)
 
         now_ts = int(time.time())
         set_field("updated_at", now_ts)
 
-        if language_code is not None:
-            set_field("language_code", language_code)
-        if last_intent is not None:
-            set_field("last_intent", last_intent)
-        if state_machine_status is not None:
-            set_field("state_machine_status", state_machine_status)
-        if crm_member_id is not None:
-            set_field("crm_member_id", crm_member_id)
-        if crm_verification_level is not None:
-            set_field("crm_verification_level", crm_verification_level)
-        if crm_verified_until is not None:
-            set_field("crm_verified_until", crm_verified_until)
-        if verification_code is not None:
-            set_field("verification_code", verification_code)
-        if crm_challenge_type is not None:
-            set_field("crm_challenge_type", crm_challenge_type)
-        if crm_challenge_attempts is not None:
-            set_field("crm_challenge_attempts", crm_challenge_attempts)
-        if assigned_agent is not None:
-            set_field("assigned_agent", assigned_agent)
-        if crm_post_intent is not None:
-            set_field("crm_post_intent", crm_post_intent)
-        if crm_post_slots is not None:
-            set_field("crm_post_slots", crm_post_slots)
-            
-        if not update_expr_parts:
+        maybe_set_or_remove("language_code", language_code)
+        maybe_set_or_remove("last_intent", last_intent)
+        maybe_set_or_remove("state_machine_status", state_machine_status)
+        maybe_set_or_remove("crm_member_id", crm_member_id)
+        maybe_set_or_remove("crm_verification_level", crm_verification_level)
+        maybe_set_or_remove("crm_verified_until", crm_verified_until)
+        maybe_set_or_remove("verification_code", verification_code)
+        maybe_set_or_remove("crm_challenge_type", crm_challenge_type)
+        maybe_set_or_remove("crm_challenge_attempts", crm_challenge_attempts)
+        maybe_set_or_remove("crm_otp_hash", crm_otp_hash)
+        maybe_set_or_remove("crm_otp_expires_at", crm_otp_expires_at)
+        maybe_set_or_remove("crm_otp_attempts_left", crm_otp_attempts_left)
+        maybe_set_or_remove("crm_otp_last_sent_at", crm_otp_last_sent_at)
+        maybe_set_or_remove("crm_otp_email", crm_otp_email)
+        maybe_set_or_remove("assigned_agent", assigned_agent)
+        maybe_set_or_remove("crm_post_intent", crm_post_intent)
+        maybe_set_or_remove("crm_post_slots", crm_post_slots)
+        maybe_set_or_remove("crm_verification_blocked_until", crm_verification_blocked_until)
+
+        if not set_parts and not remove_parts:
             return
 
-        update_expr = "SET " + ", ".join(update_expr_parts)
+        update_expr = "SET " + ", ".join(set_parts)
+        if remove_parts:
+            update_expr += " REMOVE " + ", ".join(remove_parts)
 
         self.table.update_item(
             Key=key,
@@ -116,8 +135,7 @@ class ConversationsRepo:
         self.table.update_item(
             Key=key,
             UpdateExpression=(
-                "REMOVE crm_challenge_type, crm_challenge_attempts, "
-                "crm_post_intent, crm_post_slots"
+                "REMOVE crm_challenge_type, crm_challenge_attempts, crm_post_intent, crm_post_slots, crm_otp_hash, crm_otp_expires_at, crm_otp_attempts_left, crm_otp_last_sent_at, crm_otp_email"
             ),
         )
         

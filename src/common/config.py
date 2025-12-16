@@ -4,6 +4,7 @@ Udostępnia dataclass Settings jako pojedyncze źródło prawdy.
 """
 
 import os
+import boto3
 from dataclasses import dataclass
 
 from dotenv import load_dotenv, find_dotenv
@@ -19,10 +20,38 @@ class Settings:
 
     Pola są zgrupowane logicznie (Twilio, OpenAI, PerfectGym, Jira, KB, kolejki).
     """
+    
+    #helper - ladowanie parametrow z ssm
+    def ssm_param(env_key: str) -> str:
+        """
+        env_key: nazwa zmiennej środowiskowej, która trzyma nazwę parametru w SSM,
+        np. env_key="PHONE_HASH_PEPPER", a ENV ma wartość "/botman/prod/phone_hash_pepper".
+        """
+        
+        _ssm = boto3.client("ssm")
+        name = os.getenv(env_key)
+        if not name:
+            raise RuntimeError(f"Missing env var: {env_key}")
 
+        resp = _ssm.get_parameter(Name=name, WithDecryption=True)
+        return resp["Parameter"]["Value"]
+    
     # tryb deweloperski
     dev_mode: bool = os.getenv("DEV_MODE", "false").lower() == "true"
     tenant_default_lang: str = os.getenv("TENANT_DEFAULT_LANG", "pl")
+
+    #hash keys
+    if dev_mode:
+        phone_hash_pepper = os.getenv("PHONE_HASH_PEPPER", "dev-phone")
+        user_hash_pepper  = os.getenv("USER_HASH_PEPPER", "dev-user")
+        otp_hash_pepper   = os.getenv("OTP_HASH_PEPPER", "dev-otp")
+    else:
+        phone_hash_pepper = ssm_param("PHONE_HASH_PEPPER")
+        user_hash_pepper  = ssm_param("USER_HASH_PEPPER")
+        otp_hash_pepper = ssm_param("OTP_HASH_PEPPER")
+
+    #code sender email
+    ses_from_email = os.getenv("SES_FROM_EMAIL")
 
     # Twilio
     twilio_account_sid: str = os.getenv("TWILIO_ACCOUNT_SID", "")

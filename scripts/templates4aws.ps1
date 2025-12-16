@@ -80,7 +80,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_available_classes"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Dostępne zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć (np. 1)."},
+    "body":          {"S": "Dostępne zajęcia:\n\n{classes}\n\nNapisz numer wybranych zajęć (np. 1)."},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -132,7 +132,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_available_classes_capacity_free"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "{free} wolnych miejsc (limit {limit})"},
+    "body":          {"S": "*{free}* wolnych miejsc (limit {limit})"},
     "placeholders":  {"L": [ { "S": "free" }, { "S": "limit" } ]}
   }'
 
@@ -145,7 +145,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_available_classes_item"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "{index}) {date} {time} – {name} {capacity}"},
+    "body":          {"S": "{index}) *{date}* {time} – {name} {capacity}"},
     "placeholders":  {
       "L": [
         { "S": "index" },
@@ -344,7 +344,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_declined"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Anulowano rezerwację. Daj znać, jeżeli będziesz chciał/chciała zarezerwować inne zajęcia."},
+    "body":          {"S": "Rezerwacja odrzucona. Daj znać, jeżeli będziesz chciał/chciała zarezerwować inne zajęcia."},
     "placeholders":  {"L": []}
   }'
 
@@ -514,6 +514,46 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_challenge_fail_handover"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Niestety weryfikacja nie powiodła się. Spróbuj innym razem."},
+    "body":          {"S": "Weryfikacja zostala tymczasowo zablokowana. Sprobuj jeszcze raz za 15 minut lub skontaktuj sie z obsługą klienta."},
     "placeholders":  {"L": []}
   }'
+
+# ==== CRM: crm_challenge_ask_email_code ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#crm_challenge_ask_email_code#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "crm_challenge_ask_email_code"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "Wysłaliśmy kod weryfikacyjny na adres {{email}}. Wpisz go tutaj, aby kontynuować."},
+    "placeholders":  {"L": [{"S": "email"}]}
+  }'
+
+# ==== CRM: crm_code_via_email ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#crm_code_via_email#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "crm_code_via_email"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "Twój kod weryfikacyjny to: {{verification_code}}\n\nKod jest ważny przez {{ttl_minutes}} minut.\n\nJeśli to nie Ty inicjowałeś weryfikację, zignoruj tę wiadomość."},
+    "placeholders":  {"L": [{"S": "verification_code"}, {"S": "ttl_minutes"}]}
+  }'
+
+# ==== CRM: crm_challenge_expired ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#crm_challenge_expired#pl"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "crm_challenge_expired"},
+    "language_code": {"S": "pl"},
+    "body":          {"S": "Weryfikacja wygasła. Poproś o nowy kod, aby kontynuować."},
+    "placeholders":  {"L": []}
+  }'
+

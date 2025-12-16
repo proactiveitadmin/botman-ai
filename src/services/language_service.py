@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import boto3, re
+from botocore.config import Config
 from typing import Optional
 from datetime import datetime
-import boto3
-from botocore.config import Config
 
 from ..common.config import settings
 from ..common.logging import logger
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..domain.models import Message
+
+from ..common.constants import (
+    STATE_AWAITING_VERIFICATION,
+    STATE_AWAITING_CHALLENGE,
+)
 
 
 class LanguageService:
@@ -74,6 +79,15 @@ class LanguageService:
         # 2) pobierz istniejącą rozmowę (jeśli jest)
         existing = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id)
         existing_lang = existing.get("language_code") if existing else None
+        existing_state = (existing or {}).get("state_machine_status")
+
+        if existing_lang and existing_state in (STATE_AWAITING_VERIFICATION, STATE_AWAITING_CHALLENGE):
+            if self._looks_like_verification_code(msg.body or ""):
+                return existing_lang
+
+        if existing_lang and (msg.body or "").strip().upper().startswith("KOD:"):
+            if self._looks_like_verification_code(msg.body or ""):
+                return existing_lang
 
         # 3) spróbuj wykryć język z treści
         detected = self._detect_language(msg.body or "")
@@ -171,3 +185,21 @@ class LanguageService:
             return None
 
         return code or None
+    
+    def _looks_like_verification_code(self, text: str) -> bool:
+        t = (text or "").strip()
+        if not t:
+            return False
+
+        tu = t.upper()
+        if tu.startswith("KOD:"):
+            code = tu.split("KOD:", 1)[1].strip()
+            return bool(re.fullmatch(r"[A-Z0-9]{4,12}", code))
+
+        if re.fullmatch(r"\d{4,8}", t):
+            return True
+
+        if re.fullmatch(r"[A-Za-z0-9]{4,12}", t) and re.search(r"\d", t):
+            return True
+
+        return False

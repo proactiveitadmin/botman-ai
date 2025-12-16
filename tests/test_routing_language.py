@@ -96,3 +96,12 @@ def test_explicit_language_code_from_message_overrides(monkeypatch):
 
     key = conv.conversation_pk(msg.tenant_id, msg.channel, msg.channel_user_id)
     assert conv.data[key]["language_code"] == "fr"
+
+def test_does_not_override_language_on_verification_code(monkeypatch):
+    conv = InMemoryConversations()
+    tenants = FakeTenantsRepo(lang="pl")
+    svc = LanguageService(conv=conv, tenants=tenants)
+    conv.upsert_conversation("tenant-1", "whatsapp", "+48123123123", language_code="pl", state_machine_status="awaiting_verification")
+    monkeypatch.setattr(svc, "_detect_language", lambda text: "pl")
+    lang = svc.resolve_and_persist_language(_build_msg("KOD:ABC123"))
+    assert lang == "pl"

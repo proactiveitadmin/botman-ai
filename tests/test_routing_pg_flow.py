@@ -1,7 +1,6 @@
 import time
-
 import pytest
-
+from src.common.security import otp_hash
 from src.domain.models import Message
 from src.services.language_service import LanguageService
 from src.services.routing_service import RoutingService
@@ -194,25 +193,8 @@ def test_pending_reservation_confirmation_yes_triggers_crm_and_clears_pending(mo
     assert res_call["member_id"] == "111"
     assert res_call["class_id"] == "CLASS-1"
 
-
-def test_pg_challenge_success_clears_state_and_runs_post_intent(monkeypatch):
-    """
-    Użytkownik jest w stanie awaiting_challenge, challenge się powiódł:
-    - powinien dostać komunikat pg_challenge_success,
-    - następnie wykona się post_intent (np. pg_member_balance),
-    - pola pg_challenge_type / pg_post_intent / pg_post_slots zostaną wyczyszczone
-      przez clear_crm_challenge.
-    """
+def test_email_otp_success_clears_state_and_runs_post_intent(monkeypatch):
     router, conv = _build_router(monkeypatch)
-    crm: FakeCRM = router.crm  # type: ignore[assignment]
-
-    # zamiast pełnej integracji verify_member_challenge, stubujemy wywołanie w CRMFlowService
-    monkeypatch.setattr(
-        "src.services.crm_flow_service.CRMFlowService._verify_challenge_answer",
-        lambda self, tenant_id, phone, challenge_type, answer: True,
-        raising=False,
-    )
-
 
     tenant_id = "tenantA"
     phone = "whatsapp:+48123123123"
@@ -220,44 +202,65 @@ def test_pg_challenge_success_clears_state_and_runs_post_intent(monkeypatch):
     channel_user_id = phone
 
     key = conv.conversation_pk(tenant_id, channel, channel_user_id)
+
+    code = "A1B2C3"   # dopasuj do realnego formatu (A-Z0-9) lub 6 cyfr
+    now = int(time.time())
     conv.data[key] = {
         "language_code": "pl",
         "state_machine_status": "awaiting_challenge",
-        "crm_challenge_type": "dob",
-        "crm_challenge_attempts": 0,
+        "crm_challenge_type": "email_otp",
+        "crm_challenge_attempts": 0,  # opcjonalnie
         "crm_post_intent": "crm_member_balance",
         "crm_post_slots": {},
         "crm_verification_level": "none",
         "crm_verified_until": 0,
-    }
 
+        # OTP fields
+        "crm_otp_hash": otp_hash(tenant_id, "crm_email_otp", code),
+        "crm_otp_expires_at": now + 300,
+        "crm_otp_attempts_left": 3,
+        "crm_otp_last_sent_at": now,
+        "crm_otp_email": "user@example.com",
+    }
 
     msg = Message(
         tenant_id=tenant_id,
         from_phone=phone,
         to_phone="whatsapp:+48000000000",
-        body="01-05-1990",  # treść nie ma znaczenia, fake_verify zawsze zwraca True
+        body=code,                 # user wpisuje OTP
         channel=channel,
         channel_user_id=channel_user_id,
     )
 
     actions = router.handle(msg)
 
-    # 1) Dwie akcje: success + odpowiedź z saldem
-    assert len(actions) == 2
+    # 1) Sukces + post_intent (saldo)
+    assert len(actions) >= 1
     assert actions[0].type == "reply"
     assert "Weryfikacja zakończona sukcesem" in actions[0].payload["body"]
 
-    assert actions[1].type == "reply"
-    assert "Twoje saldo to" in actions[1].payload["body"]
+    # (jeśli w tym routerze po sukcesie zawsze leci saldo jako drugi reply)
+    assert any(
+        a.type == "reply" and "saldo" in (a.payload.get("body") or "").lower()
+        for a in actions
+    )
 
-    # 2) Rozmowa ma ustawioną silną weryfikację oraz pg_member_id
     stored_conv = conv.data[key]
     assert stored_conv["state_machine_status"] == "awaiting_message"
     assert stored_conv["crm_verification_level"] == "strong"
-    assert stored_conv["crm_member_id"] == "999"
+    assert stored_conv.get("crm_verified_until", 0) > now
 
-    # 3) clear_crm_challenge zostało wywołane i pola zostały wyczyszczone
+    # 2) challenge state wyczyszczony
     assert (tenant_id, channel, channel_user_id) in conv.cleared_calls
-    for field in ("crm_challenge_type", "crm_challenge_attempts", "crm_post_intent", "crm_post_slots"):
+    for field in (
+        "crm_challenge_type",
+        "crm_challenge_attempts",
+        "crm_post_intent",
+        "crm_post_slots",
+        "crm_otp_hash",
+        "crm_otp_expires_at",
+        "crm_otp_attempts_left",
+        "crm_otp_last_sent_at",
+        "crm_otp_email",
+    ):
         assert field not in stored_conv

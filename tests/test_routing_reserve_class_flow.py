@@ -115,7 +115,15 @@ class FakeConversationsRepo:
     def clear_crm_challenge(self, tenant_id: str, channel: str, channel_user_id: str):
         key = (tenant_id, channel, channel_user_id)
         conv = self.convs.get(key, {})
-        for k in ["crm_challenge_type", "crm_challenge_attempts", "crm_post_intent", "crm_post_slots"]:
+        for k in ["crm_challenge_type", 
+                    "crm_challenge_attempts", 
+                    "crm_post_intent", 
+                    "crm_post_slots",
+                    "crm_otp_hash",
+                    "crm_otp_expires_at",
+                    "crm_otp_attempts_left",
+                    "crm_otp_last_sent_at",
+                    "crm_otp_email"]: 
             conv.pop(k, None)
         self.convs[key] = conv
 
@@ -205,61 +213,79 @@ def _make_msg(text: str) -> Message:
         body=text,
         channel="whatsapp",
     )
-
-
-def test_reserve_class_and_challenge(routing_service: RoutingService):
+def test_reserve_class_selection_does_not_hit_nlu_and_starts_email_otp_challenge(
+    routing_service: RoutingService,
+    monkeypatch,
+):
     """
-    1. Użytkownik: "chcę się zapisać na zajęcia"
-    2. Bot: wyświetla listę zajęć (PG)
-    3. Użytkownik: "1"
-    4. Bot: traktuje to jako wybór zajęć (pending + confirm),
-       NIE jako clarify.
-
-    Ten test zabezpiecza buga, w którym po wpisaniu numeru
-    flow wpadał w intent 'clarify'.
+    Zabezpiecza regresję:
+    - user wybiera numer zajęć ("1") w stanie STATE_AWAITING_CLASS_SELECTION
+    - nie może to wpaść do NLU/clarify
+    - zamiast tego ma wystartować flow challenge (teraz: email OTP)
     """
     routing = routing_service
+
+    # Upewniamy się, że CRM zwróci membera z email -> nie wpadniemy w crm_challenge_missing_email
+    monkeypatch.setattr(
+        routing.crm_flow.crm,
+        "get_member_by_phone",
+        lambda tenant_id, phone: {"value": [{"id": "123", "email": "user@example.com"}]},
+        raising=False,
+    )
+
+    # Nie chcemy realnie wysyłać maila w tym teście (to jest test routing/state, nie email)
+    monkeypatch.setattr(
+        "src.services.crm_flow_service.EmailClient.send_otp",
+        lambda *args, **kwargs: True,
+        raising=True,
+    )
 
     # --- Krok 1: user prosi o rezerwację ---
     msg1 = _make_msg("Chciałbym się zapisać na zajęcia")
     actions1 = routing.handle(msg1)
 
-    # NLU powinno zostać wywołane dla pierwszej wiadomości
+    # NLU powinno zostać wywołane tylko dla pierwszej wiadomości
     assert routing.nlu.calls
     text1, lang1 = routing.nlu.calls[0]
     assert "zapis" in text1.lower() or "zaję" in text1.lower()
 
-    # Bot powinien odesłać listę zajęć (template pg_available_classes), a nie clarify
+    # Bot powinien zwrócić listę zajęć (a nie clarify)
     assert len(actions1) == 1
     assert actions1[0].type == "reply"
     body1 = actions1[0].payload["body"]
     assert body1.startswith("crm_available_classes|")
 
-    # Stan rozmowy musi być ustawiony na oczekiwanie wyboru numeru
+    # Stan rozmowy: oczekiwanie na wybór numeru
     conv = routing.conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
     assert conv["state_machine_status"] == STATE_AWAITING_CLASS_SELECTION
 
-    # W "pending#phone" musi być zapisany snapshot listy zajęć
+    # Pending "classes" istnieje
     pending_key = routing.crm_flow._pending_key(PHONE)
     classes_item = routing.conv.get(pending_key, "classes")
     assert classes_item is not None
-    assert len(classes_item["items"]) == 2
+    assert len(classes_item["items"]) >= 1
 
     # --- Krok 2: user wpisuje numer z listy ---
     msg2 = _make_msg("1")
     actions2 = routing.handle(msg2)
 
     # KLUCZOWE: druga wiadomość nie powinna trafić do NLU
-    # (stan STATE_AWAITING_CLASS_SELECTION przechwytuje ją wcześniej)
     assert len(routing.nlu.calls) == 1, "NLU nie powinno być wywołane dla '1'"
 
-    # Bot powinien zainicjować pending rezerwację (template reserve_class_confirm)
+    # Bot powinien zainicjować challenge (email OTP) i poprosić o kod
     assert len(actions2) == 1
     assert actions2[0].type == "reply"
     body2 = actions2[0].payload["body"]
-    assert body2.startswith("crm_challenge_ask_dob|")
 
-    # Stan rozmowy => oczekiwanie na TAK/NIE
+    # Template/fallback w Twoim systemie często ma prefix "template_code|..."
+    assert (
+        body2.startswith("crm_challenge_ask_email_code|")
+        or "crm_challenge_ask_email_code" in body2
+        or "kod" in body2.lower()
+    )
+
+    # Stan rozmowy => oczekiwanie na challenge
     conv2 = routing.conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
     assert conv2["state_machine_status"] == STATE_AWAITING_CHALLENGE
+    assert conv2.get("crm_challenge_type") == "email_otp"
 

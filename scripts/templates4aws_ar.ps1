@@ -78,7 +78,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_available_classes"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "الحصص المتاحة:\n{classes}\n\nاكتب رقم الحصة التي تختارها (مثلاً 1)."},
+    "body":          {"S": "الحصص المتاحة:\n\n{classes}\n\nاكتب رقم الحصة التي تختارها (مثلاً 1)."},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -130,7 +130,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_available_classes_capacity_free"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "{free} أماكن شاغرة (الحد {limit})"},
+    "body":          {"S": "*{free}* أماكن شاغرة (الحد {limit})"},
     "placeholders":  {"L": [ { "S": "free" }, { "S": "limit" } ]}
   }'
 
@@ -143,7 +143,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_available_classes_item"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "{index}) {date} {time} – {name} {capacity}"},
+    "body":          {"S": "{index}) *{date}* {time} – {name} {capacity}"},
     "placeholders":  {
       "L": [
         { "S": "index" },
@@ -339,7 +339,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "reserve_class_declined"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "تم إلغاء الحجز. أخبرني إذا رغبت في حجز حصة أخرى."},
+    "body":          {"S": "تم رفض الحجز. أخبرني إذا رغبت في حجز حصة أخرى."},
     "placeholders":  {"L": []}
   }'
 
@@ -509,6 +509,46 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "default"},
     "template_code": {"S": "crm_challenge_fail_handover"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "للأسف لم تنجح عملية التحقق. يرجى المحاولة مرة أخرى في وقت لاحق."},
+    "body":          {"S": "تم إيقاف عملية التحقق مؤقتًا. يرجى المحاولة مرة أخرى بعد 15 دقيقة أو التواصل مع خدمة العملاء."},
     "placeholders":  {"L": []}
   }'
+
+# ==== CRM: crm_challenge_ask_email_code ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#crm_challenge_ask_email_code#ar"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "crm_challenge_ask_email_code"},
+    "language_code": {"S": "ar"},
+    "body":          {"S": "لقد أرسلنا رمز التحقق إلى البريد الإلكتروني {{email}}. يرجى إدخال الرمز هنا للمتابعة."},
+    "placeholders":  {"L": [{"S": "email"}]}
+  }'
+
+# ==== CRM: crm_code_via_email ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#crm_code_via_email#ar"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "crm_code_via_email"},
+    "language_code": {"S": "ar"},
+    "body":          {"S": "رمز التحقق الخاص بك هو: {{verification_code}}\n\nالرمز صالح لمدة {{ttl_minutes}} دقيقة.\n\nإذا لم تقم بطلب هذا الرمز، يرجى تجاهل هذه الرسالة."},
+    "placeholders":  {"L": [{"S": "verification_code"}, {"S": "ttl_minutes"}]}
+  }'
+
+# ==== CRM: crm_challenge_expired ====
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item '{
+    "pk":            {"S": "default#crm_challenge_expired#ar"},
+    "tenant_id":     {"S": "default"},
+    "template_code": {"S": "crm_challenge_expired"},
+    "language_code": {"S": "ar"},
+    "body":          {"S": "انتهت صلاحية التحقق. يرجى طلب رمز جديد للمتابعة."},
+    "placeholders":  {"L": []}
+  }'
+

@@ -4,12 +4,15 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import time
 import re
+import hmac
 
 from ..common.logging import logger
 from ..common.utils import new_id, build_reply_action
 from ..domain.models import Message, Action
 from ..services.crm_service import CRMService
 from ..services.template_service import TemplateService
+from ..adapters.email_client import EmailClient
+from ..common.security import otp_hash
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.members_index_repo import MembersIndexRepo
 
@@ -146,22 +149,6 @@ class CRMFlowService:
         )
         return [self._reply(msg, lang, body)]
         
-    def _clear_crm_challenge_state(
-        self, tenant_id: str, channel: str, channel_user_id: str
-    ) -> None:
-        """
-        Czyści wszystkie pola związane z challenge PG i post-intent.
-
-        Wymaga dodania odpowiedniej metody w ConversationsRepo
-        (np. update z REMOVE crm_challenge_type, crm_challenge_attempts,
-        crm_post_intent, crm_post_slots).
-        """
-        try:
-            self.conv.clear_crm_challenge(tenant_id, channel, channel_user_id)
-        except AttributeError:
-            # fallback – jeśli clear_crm_challenge nie jest jeszcze zaimplementowane,
-            # nic nie robimy (ale warto je dopisać).
-            pass
 
     def _get_words_set(
         self,
@@ -215,6 +202,254 @@ class CRMFlowService:
         return f"https://wa.me/{phone}?text=KOD:{code}"
 
     
+    
+
+
+    def _render_first(
+        self,
+        tenant_id: str,
+        lang: str,
+        template_names: list[str],
+        context: dict | None = None,
+    ) -> str:
+        """Renderuje pierwszą dostępną templatkę z listy; fallback na prosty tekst."""
+        ctx = context or {}
+        for name in template_names:
+            try:
+                body = self.tpl.render_named(tenant_id, name, lang, ctx)
+            except Exception:
+                body = None
+            if body:
+                return body
+        # twardy fallback (nie powinien się zdarzyć, ale lepiej niż pustka)
+        minutes = ctx.get("minutes")
+        if minutes:
+            return f"Weryfikacja jest tymczasowo zablokowana na {minutes} min. Czy chcesz połączyć się z obsługą lub założyć zgłoszenie?"
+        return "Czy chcesz połączyć się z obsługą lub założyć zgłoszenie?"
+
+    def _block_verification_15m_and_offer_options(
+        self,
+        msg: Message,
+        conv: dict,
+        lang: str,
+    ) -> List[Action]:
+        """Blokuje możliwość kolejnych prób weryfikacji na 15 minut i pyta o połączenie / task."""
+        tenant_id = msg.tenant_id
+        channel = msg.channel or "whatsapp"
+        channel_user_id = msg.channel_user_id or msg.from_phone
+       
+        now_ts = int(time.time())
+        # Anti-bruteforce: globalna blokada weryfikacji (15 min po 3 błędach)
+        blocked_until = int(conv.get("crm_verification_blocked_until") or 0)
+        if blocked_until and now_ts < blocked_until:
+            body = self._render_first(
+                msg.tenant_id,
+                lang,
+                ["crm_challenge_blocked_connect_or_task", "crm_challenge_fail_connect_or_task", "crm_challenge_fail_handover"],
+                {"minutes": max(int((blocked_until - now_ts + 59) // 60), 1)},
+            )
+            return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+
+        blocked_until = now_ts + 15 * 60
+
+        self.conv.upsert_conversation(
+            tenant_id=tenant_id,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            crm_verification_blocked_until=blocked_until,
+            state_machine_status=STATE_AWAITING_MESSAGE,
+        )
+        self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+
+        body = self._render_first(
+            tenant_id,
+            lang,
+            ["crm_challenge_fail_connect_or_task", "crm_challenge_blocked_connect_or_task", "crm_challenge_fail_handover"],
+            {"minutes": 15},
+        )
+        return [self._reply(msg, lang, body)]
+
+    def _restart_email_otp_verification(
+        self,
+        msg: Message,
+        conv: dict,
+        lang: str,
+        reason: str,
+    ) -> List[Action]:
+        """Restartuje OTP (np. po wygaśnięciu lub rozjechaniu stanu) i wysyła nowy kod."""
+        tenant_id = msg.tenant_id
+        channel = msg.channel or "whatsapp"
+        channel_user_id = msg.channel_user_id or msg.from_phone
+
+        # jeżeli jesteśmy zablokowani – nie wysyłamy ponownie
+        now_ts = int(time.time())
+        blocked_until = int(conv.get("crm_verification_blocked_until") or 0)
+        if blocked_until and now_ts < blocked_until:
+            body = self._render_first(
+                tenant_id,
+                lang,
+                ["crm_challenge_blocked_connect_or_task", "crm_challenge_fail_connect_or_task", "crm_challenge_fail_handover"],
+                {"minutes": max(int((blocked_until - now_ts + 59) // 60), 1)},
+            )
+            self.conv.upsert_conversation(
+                tenant_id=tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+            )
+            self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+            return [self._reply(msg, lang, body)]
+
+        # email musi być znany (z poprzedniej próby) lub pobieramy z CRM
+        email = (conv.get("crm_otp_email") or "").strip()
+        if not email:
+            try:
+                members_resp = self.crm.get_member_by_phone(tenant_id, msg.from_phone)
+                items = (members_resp or {}).get("value") or []
+                if items:
+                    email = (items[0].get("email") or "").strip()
+            except Exception:
+                email = ""
+
+        if not email:
+            body = self.tpl.render_named(tenant_id, "crm_challenge_missing_email", lang, {})
+            # wychodzimy ze stanu challenge, żeby nie zapętlać kolejnych wiadomości
+            self.conv.upsert_conversation(
+                tenant_id=tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+            )
+            self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+            return [self._reply(msg, lang, body)]
+
+        # generujemy nowy OTP i wysyłamy email
+        verification_code = self._generate_verification_code(length=6)
+        expires_at = now_ts + 5 * 60
+        otp_h = otp_hash(tenant_id, "crm_email_otp", verification_code)
+
+        body_email = self.tpl.render_named(
+            tenant_id,
+            "crm_code_via_email",
+            lang,
+            {"verification_code": verification_code, "ttl_minutes": 5},
+        )
+
+        try:
+            EmailClient().send_otp(
+                tenant_id=tenant_id,
+                to_email=email,
+                subject="Verification code",
+                body_text=body_email,
+            )
+        except Exception as e:
+            logger.error({"sender": "crm_flow", "event": "send_otp_failed", "details": str(e)})
+            # nie zostawiamy usera w awaiting_challenge
+            self.conv.upsert_conversation(
+                tenant_id=tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+            )
+            self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+            body = self._render_first(
+                tenant_id,
+                lang,
+                ["crm_challenge_send_failed", "crm_challenge_fail_connect_or_task", "crm_challenge_fail_handover"],
+                {},
+            )
+            return [self._reply(msg, lang, body)]
+
+        # zapisujemy nowy stan OTP
+        self.conv.upsert_conversation(
+            tenant_id=tenant_id,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            crm_challenge_type="email_otp",
+            crm_otp_hash=otp_h,
+            crm_otp_expires_at=expires_at,
+            crm_otp_attempts_left=3,
+            crm_otp_last_sent_at=now_ts,
+            crm_otp_email=email,
+            state_machine_status=STATE_AWAITING_CHALLENGE,
+        )
+
+        # komunikat do usera – "ponawiamy"
+        intro = self._render_first(
+            tenant_id,
+            lang,
+            ["crm_challenge_restart_verification", "crm_challenge_retry"],
+            {"attempts_left": 3},
+        )
+        ask = self.tpl.render_named(tenant_id, "crm_challenge_ask_email_code", lang, {"email": email})
+        body = f"{intro}\n\n{ask}" if intro and ask else (ask or intro)
+        return [self._reply(msg, lang, body)]
+        
+    def _reply_verification_blocked(
+        self, msg: Message, lang: str, blocked_until_ts: int
+    ) -> List[Action]:
+        """Komunikat dla blokady weryfikacji (anty-atak / brute-force)."""
+        now_ts = int(time.time())
+        minutes = max(1, int((blocked_until_ts - now_ts) // 60))
+        body = self.tpl.render_named(
+            msg.tenant_id,
+            "crm_verification_blocked",
+            lang,
+            {"minutes": minutes},
+        )
+        return [
+            self._reply(
+                msg,
+                lang,
+                body,
+                channel=msg.channel,
+                channel_user_id=msg.channel_user_id or msg.from_phone,
+            )
+        ]
+
+    def _is_crm_verification_blocked(self, conv: dict) -> tuple[bool, int]:
+        """Zwraca (is_blocked, blocked_until_ts)."""
+        now_ts = int(time.time())
+        blocked_until = int(conv.get("crm_verification_blocked_until") or 0)
+        return (blocked_until > now_ts, blocked_until)
+
+    def _block_crm_verification_and_offer_options(
+        self,
+        msg: Message,
+        lang: str,
+        *,
+        reason: str = "too_many_attempts",
+        cooldown_seconds: int = 30 * 60,
+    ) -> List[Action]:
+        """Po 3 nieudanych próbach: blokujemy i pytamy o połączenie / task (bez handover)."""
+        now_ts = int(time.time())
+        tenant_id = msg.tenant_id
+        channel = msg.channel or "whatsapp"
+        channel_user_id = msg.channel_user_id or msg.from_phone
+
+        self.conv.upsert_conversation(
+            tenant_id=tenant_id,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            crm_verification_blocked_until=now_ts + cooldown_seconds,
+            crm_verification_block_reason=reason,
+            state_machine_status=STATE_AWAITING_MESSAGE,
+        )
+        # Czyścimy stan challenge, żeby nie dało się dalej brute-force na tym samym kontekście
+        self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+
+        body = self.tpl.render_named(tenant_id, "crm_challenge_fail_options", lang, {})
+        return [
+            self._reply(
+                msg,
+                lang,
+                body,
+                channel=msg.channel,
+                channel_user_id=msg.channel_user_id or msg.from_phone,
+            )
+        ]
+
+
     def ensure_crm_verification(
         self,
         msg: Message,
@@ -227,19 +462,42 @@ class CRMFlowService:
         Sprawdza, czy użytkownik ma ważną strong-verification dla PerfectGym.
         Jeśli nie:
          - na WWW: flow z kodem i linkiem wa.me (awaiting_verification),
-         - na WhatsApp: flow challenge PG (awaiting_challenge).
+         - na WhatsApp: flow challenge (email OTP).
 
         Zwraca:
          - None, jeśli wszystko OK i można kontynuować operację PG,
-         - listę akcji (reply/handover), jeśli flow weryfikacji został
-           zainicjowany/obsłużony i dalsze przetwarzanie należy wstrzymać.
+         - listę akcji (reply), jeśli flow weryfikacji został zainicjowany/obsłużony
+           i dalsze przetwarzanie należy wstrzymać.
+
+        WAŻNE: nie utrzymujemy użytkownika w STATE_AWAITING_CHALLENGE, jeżeli OTP wygasło
+        lub user został zablokowany – tak, aby mógł dalej korzystać z FAQ i innych flow.
         """
         now_ts = int(time.time())
+
         crm_level = conv.get("crm_verification_level") or "none"
-        crm_until = conv.get("crm_verified_until") or 0
+        crm_until = int(conv.get("crm_verified_until") or 0)
 
         channel = msg.channel or "whatsapp"
         channel_user_id = msg.channel_user_id or msg.from_phone
+
+        # 0) jeśli jest aktywna blokada weryfikacji – nie inicjujemy challenge (ochrona przed atakami)
+        blocked_until = int(conv.get("crm_verification_blocked_until") or 0)
+        if blocked_until and now_ts < blocked_until:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_challenge_fail_handover",
+                lang,
+                {},
+            )
+            # upewnij się, że nie tkwimy w awaiting_challenge (żeby FAQ działało)
+            self.conv.upsert_conversation(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+                language_code=lang,
+            )
+            return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
 
         # 1) strong + nieprzeterminowane → OK
         if crm_level == "strong" and crm_until >= now_ts:
@@ -261,6 +519,7 @@ class CRMFlowService:
                 state_machine_status=STATE_AWAITING_VERIFICATION,
                 crm_post_intent=post_intent,
                 crm_post_slots=post_slots or {},
+                language_code=lang,
             )
 
             body = self.tpl.render_named(
@@ -283,35 +542,126 @@ class CRMFlowService:
                 )
             ]
 
-        # 3) Kanał WhatsApp → flow challenge PG (np. DOB/email)
+        # 3) Kanał WhatsApp → flow email OTP.
+        # Uwaga: NIE ustawiamy STATE_AWAITING_CHALLENGE, dopóki nie mamy emaila
+        # i dopóki wysyłka OTP faktycznie się powiedzie.
         self.conv.upsert_conversation(
             tenant_id=msg.tenant_id,
             channel=channel,
             channel_user_id=channel_user_id,
-            state_machine_status=STATE_AWAITING_CHALLENGE,
-            crm_challenge_type="dob",  # domyślnie DOB (można rozszerzyć o email itd.)
-            crm_challenge_attempts=0,
             crm_post_intent=post_intent,
             crm_post_slots=post_slots or {},
+            language_code=lang,
+        )
+
+        # 3.1) pobierz membera z PerfectGym (po telefonie) i jego email
+        email: str | None = None
+        try:
+            members_resp = self.crm.get_member_by_phone(msg.tenant_id, msg.from_phone)
+            items = (members_resp or {}).get("value") or []
+            if items:
+                email = (items[0].get("email") or "").strip()
+        except Exception:
+            email = None
+
+        if not email:
+            # Nie blokujemy bota w awaiting_challenge – user może wrócić do FAQ.
+            self.conv.upsert_conversation(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+                language_code=lang,
+            )
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_challenge_missing_email",
+                lang,
+                {},
+            )
+            return [self._reply(msg, lang, body, channel="whatsapp", channel_user_id=channel_user_id)]
+
+        # 3.2) ochrona przed spamem resend (min 60s) – bazujemy na aktualnym conv (z DDB jeśli trzeba)
+        last_sent = int(conv.get("crm_otp_last_sent_at") or 0)
+        if now_ts - last_sent < 60:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_challenge_email_code_already_sent",
+                lang,
+                {},
+            )
+            # pozostajemy w aktualnym stanie (nie wymuszamy challenge)
+            return [self._reply(msg, lang, body, channel="whatsapp", channel_user_id=channel_user_id)]
+
+        # 3.3) wygeneruj OTP i wyślij na email
+        verification_code = self._generate_verification_code(length=6)
+        expires_at = now_ts + 5 * 60
+        otp_h = otp_hash(msg.tenant_id, "crm_email_otp", verification_code)
+
+        body_email = self.tpl.render_named(
+            msg.tenant_id,
+            "crm_code_via_email",
+            lang,
+            {"verification_code": verification_code, "ttl_minutes": 5},
+        )
+
+        sent_ok = False
+        try:
+            sent_ok = bool(
+                EmailClient().send_otp(
+                    tenant_id=msg.tenant_id,
+                    to_email=email,
+                    subject="Verification code",
+                    body_text=body_email,
+                )
+            )
+        except Exception:
+            sent_ok = False
+
+        if not sent_ok:
+            # Jeśli wysyłka nie wyszła, nie ustawiamy await_challenge – user nie powinien utknąć.
+            self.conv.upsert_conversation(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+                language_code=lang,
+            )
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_challenge_fail_handover",
+                lang,
+                {},
+            )
+            return [self._reply(msg, lang, body, channel="whatsapp", channel_user_id=channel_user_id)]
+
+        # 3.4) ustaw stan awaiting_challenge (email_otp)
+        self.conv.upsert_conversation(
+            tenant_id=msg.tenant_id,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            crm_challenge_type="email_otp",
+            crm_challenge_attempts=0,
+            crm_otp_hash=otp_h,
+            crm_otp_expires_at=expires_at,
+            crm_otp_attempts_left=3,
+            crm_otp_last_sent_at=now_ts,
+            crm_otp_email=email,
+            state_machine_status=STATE_AWAITING_CHALLENGE,
+            crm_post_intent=post_intent,
+            crm_post_slots=post_slots or {},
+            language_code=lang,
         )
 
         body = self.tpl.render_named(
             msg.tenant_id,
-            "crm_challenge_ask_dob",
+            "crm_challenge_ask_email_code",
             lang,
-            {},
+            {"email": email},
         )
 
-        return [
-            self._reply(
-                msg,
-                lang,
-                body,
-                channel="whatsapp",
-                channel_user_id=msg.channel_user_id,
-            )
-        ]
-        
+        return [self._reply(msg, lang, body, channel="whatsapp", channel_user_id=channel_user_id)]
+
     def handle_crm_challenge(
         self,
         msg: Message,
@@ -320,53 +670,146 @@ class CRMFlowService:
     ) -> List[Action]:
         """
         Użytkownik jest w stanie awaiting_challenge – traktujemy wiadomość
-        jako odpowiedź na challenge PG (np. data urodzenia / e-mail).
+        jako odpowiedź na challenge (OTP / DOB / inne).
+
+        Poprawki:
+        - "expired" nie zapętla bota: wychodzimy ze stanu challenge, user może używać FAQ.
+        - po 3 błędnych próbach: ustawiamy blokadę 15 minut (crm_verification_blocked_until),
+          wychodzimy ze stanu challenge i NIE robimy handover automatycznie.
+        - utrwalamy language_code, żeby wpisanie kodu nie przestawiało języka na EN.
         """
         text = (msg.body or "").strip()
         tenant_id = msg.tenant_id
         channel = msg.channel or "whatsapp"
         channel_user_id = msg.channel_user_id or msg.from_phone
 
+        now_ts = int(time.time())
         challenge_type = conv.get("crm_challenge_type") or "dob"
-        attempts = int(conv.get("crm_challenge_attempts") or 0)
 
-        is_correct = self._verify_challenge_answer(
-            tenant_id=tenant_id,
-            phone=msg.from_phone,
-            challenge_type=challenge_type,
-            answer=text,
-        )
+        # globalna blokada (anti-attack) – nie pozwalamy na weryfikację, ale nie blokujemy bota
+        blocked_until = int(conv.get("crm_verification_blocked_until") or 0)
+        if blocked_until and now_ts < blocked_until:
+            # upewnij się, że nie tkwimy w challenge
+            self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+            self.conv.upsert_conversation(
+                tenant_id=tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                state_machine_status=STATE_AWAITING_MESSAGE,
+                language_code=lang,
+            )
+            body = self.tpl.render_named(tenant_id, "crm_challenge_fail_handover", lang, {})
+            return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
 
-        if is_correct:
-            now_ts = int(time.time())
-            ttl = now_ts + 15 * 60  # 15 minut ważności weryfikacji
+        # ------------------------------------------------------------------
+        # Email OTP
+        # ------------------------------------------------------------------
+        if challenge_type == "email_otp":
+            expires_at = int(conv.get("crm_otp_expires_at") or 0)
+            attempts_left = int(conv.get("crm_otp_attempts_left") or 0)
+            expected = (conv.get("crm_otp_hash") or "").strip()
+
+            # brak oczekiwanego hasha = niespójny stan (nie "expired") – resetujemy challenge
+            if not expected:
+                self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+                self.conv.upsert_conversation(
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    channel_user_id=channel_user_id,
+                    state_machine_status=STATE_AWAITING_MESSAGE,
+                    language_code=lang,
+                )
+                body = self.tpl.render_named(tenant_id, "crm_challenge_expired", lang, {})
+                return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+
+            if now_ts > expires_at:
+                # nie zapętlamy: wychodzimy z challenge, user może pytać o FAQ
+                self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+                self.conv.upsert_conversation(
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    channel_user_id=channel_user_id,
+                    state_machine_status=STATE_AWAITING_MESSAGE,
+                    language_code=lang,
+                )
+                body = self.tpl.render_named(tenant_id, "crm_challenge_expired", lang, {})
+                return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+
+            if attempts_left <= 0:
+                # stan niespójny – traktuj jak blokadę
+                blocked_until = now_ts + 15 * 60
+                self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+                self.conv.upsert_conversation(
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    channel_user_id=channel_user_id,
+                    crm_verification_blocked_until=blocked_until,
+                    state_machine_status=STATE_AWAITING_MESSAGE,
+                    language_code=lang,
+                )
+                body = self.tpl.render_named(tenant_id, "crm_challenge_fail_handover", lang, {})
+                return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+
+            # weryfikacja OTP
+            given = otp_hash(tenant_id, "crm_email_otp", text)
+            is_correct = hmac.compare_digest(expected, given)
+
+            if not is_correct:
+                attempts_left = max(attempts_left - 1, 0)
+                self.conv.upsert_conversation(
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    channel_user_id=channel_user_id,
+                    crm_otp_attempts_left=attempts_left,
+                    language_code=lang,
+                )
+
+                if attempts_left <= 0:
+                    # BLOKADA 15 min + wyjście z challenge (żeby nie blokować FAQ)
+                    blocked_until = now_ts + 15 * 60
+                    self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+                    self.conv.upsert_conversation(
+                        tenant_id=tenant_id,
+                        channel=channel,
+                        channel_user_id=channel_user_id,
+                        crm_verification_blocked_until=blocked_until,
+                        state_machine_status=STATE_AWAITING_MESSAGE,
+                        language_code=lang,
+                    )
+                    body = self.tpl.render_named(tenant_id, "crm_challenge_fail_handover", lang, {})
+                    return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+
+                body = self.tpl.render_named(
+                    tenant_id,
+                    "crm_challenge_retry",
+                    lang,
+                    {"attempts_left": attempts_left},
+                )
+                return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+
+            # poprawny OTP → strong verification
+            ttl = now_ts + 15 * 60
 
             post_intent = conv.get("crm_post_intent")
             post_slots = conv.get("crm_post_slots") or {}
 
-            # 1) spróbuj pobrać membera z PerfectGym po numerze telefonu
             member_id: str | None = None
             try:
                 members_resp = self.crm.get_member_by_phone(tenant_id, msg.from_phone)
                 items = (members_resp or {}).get("value") or []
                 if items:
-                    # PerfectGym zwykle używa pola 'id' lub 'Id'
                     member_id = str(items[0].get("id") or items[0].get("Id"))
             except Exception:
                 member_id = None
 
-            # 2) fallback na MembersIndex, jeśli PG nic nie zwróci
             if not member_id and self.members_index:
                 try:
                     member = self.members_index.get_member(tenant_id, msg.from_phone)
                     if member:
-                        member_id = str(
-                            member.get("id") or member.get("member_id")
-                        )
+                        member_id = str(member.get("id") or member.get("member_id"))
                 except Exception:
                     member_id = None
 
-            # aktualizacja rozmowy – wychodzimy ze stanu challenge
             self.conv.upsert_conversation(
                 tenant_id=tenant_id,
                 channel=channel,
@@ -375,123 +818,195 @@ class CRMFlowService:
                 crm_member_id=member_id,
                 crm_verification_level="strong",
                 crm_verified_until=ttl,
+                language_code=lang,
             )
 
-            self._clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+            self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
 
-            success_body = self.tpl.render_named(
-                tenant_id,
-                "crm_challenge_success",
-                lang,
-                {},
-            )
-
+            success_body = self.tpl.render_named(tenant_id, "crm_challenge_success", lang, {})
             actions: List[Action] = [
-                self._reply(
-                    msg,
-                    lang,
-                    success_body,
-                    channel=msg.channel,
-                    channel_user_id=msg.channel_user_id,
-                )
+                self._reply(msg, lang, success_body, channel=channel, channel_user_id=channel_user_id)
             ]
 
-
-            # 2) automatyczne dokończenie pierwotnej operacji PG
+            # automatyczne dokończenie pierwotnej operacji PG
             if post_intent == "crm_member_balance":
                 if member_id:
-                    actions.extend(
-                        self._crm_member_balance_core(msg, lang, member_id)
-                    )
+                    actions.extend(self._crm_member_balance_core(msg, lang, member_id))
                 else:
-                    body = self.tpl.render_named(
-                        tenant_id,
-                        "crm_member_not_linked",
-                        lang,
-                        {},
-                    )
-                    actions.append(self._reply(msg, lang, body))
+                    body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
+                    actions.append(self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id))
 
             elif post_intent == "crm_contract_status":
                 if member_id:
-                    actions.extend(
-                        self._crm_contract_status_core(msg, lang, member_id)
-                    )
+                    actions.extend(self._crm_contract_status_core(msg, lang, member_id))
                 else:
-                    body = self.tpl.render_named(
-                        tenant_id,
-                        "crm_member_not_linked",
-                        lang,
-                        {},
-                    )
-                    actions.append(self._reply(msg, lang, body))
+                    body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
+                    actions.append(self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id))
 
             elif post_intent == "reserve_class":
                 post_class_id = (post_slots or {}).get("class_id")
                 if member_id and post_class_id:
-                    actions.extend(
-                        self.reserve_class_with_id_core(
-                            msg,
-                            lang,
-                            post_class_id,
-                            member_id,
-                        )
-                    )
+                    actions.extend(self.reserve_class_with_id_core(msg, lang, post_class_id, member_id))
                 else:
-                    body = self.tpl.render_named(
-                        tenant_id,
-                        "crm_member_not_linked",
-                        lang,
-                        {},
-                    )
-                    actions.append(self._reply(msg, lang, body))
+                    body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
+                    actions.append(self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id))
 
             return actions
 
-        # Zła odpowiedź – zwiększamy licznik prób
-        attempts += 1
-        self.conv.upsert_conversation(
+        # ------------------------------------------------------------------
+        # Inne challenge (np. DOB) – weryfikacja przez CRM
+        # ------------------------------------------------------------------
+        attempts = int(conv.get("crm_challenge_attempts") or 0)
+        is_correct = self.verify_challenge_answer(
             tenant_id=tenant_id,
-            channel=channel,
-            channel_user_id=channel_user_id,
-            crm_challenge_attempts=attempts,
+            phone=msg.from_phone,
+            challenge_type=challenge_type,
+            answer=text,
         )
 
-        if attempts >= 3:
-            # Po 3 próbach – blokujemy i przekazujemy do człowieka
+        if not is_correct:
+            attempts += 1
             self.conv.upsert_conversation(
                 tenant_id=tenant_id,
                 channel=channel,
                 channel_user_id=channel_user_id,
-                state_machine_status=STATE_AWAITING_MESSAGE,
+                crm_challenge_attempts=attempts,
+                language_code=lang,
             )
+
+            if attempts >= 3:
+                blocked_until = now_ts + 15 * 60
+                self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+                self.conv.upsert_conversation(
+                    tenant_id=tenant_id,
+                    channel=channel,
+                    channel_user_id=channel_user_id,
+                    crm_verification_blocked_until=blocked_until,
+                    state_machine_status=STATE_AWAITING_MESSAGE,
+                    language_code=lang,
+                )
+                body = self.tpl.render_named(tenant_id, "crm_challenge_fail_handover", lang, {})
+                return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
 
             body = self.tpl.render_named(
                 tenant_id,
-                "crm_challenge_fail_handover",
+                "crm_challenge_retry",
                 lang,
-                {},
+                {"attempts_left": 3 - attempts},
             )
-            return [
-                self._reply(msg, lang, body),
-                Action(
-                    "handover",
-                    {
-                        "tenant_id": tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
-                ),
-            ]
+            return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
 
-        # Mniej niż 3 próby – poproś o kolejną próbę
-        body = self.tpl.render_named(
-            tenant_id,
-            "crm_challenge_retry",
-            lang,
-            {"attempts_left": 3 - attempts},
+        # sukces DOB (lub innego challenge)
+        ttl = now_ts + 15 * 60
+        self.conv.upsert_conversation(
+            tenant_id=tenant_id,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            state_machine_status=STATE_AWAITING_MESSAGE,
+            crm_verification_level="strong",
+            crm_verified_until=ttl,
+            language_code=lang,
         )
-        return [self._reply(msg, lang, body)]
+        self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+        body = self.tpl.render_named(tenant_id, "crm_challenge_success", lang, {})
+        return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+    def _finalize_crm_verification_success(
+        self,
+        msg: Message,
+        conv: dict,
+        lang: str,
+    ) -> List[Action]:
+        """Wspólna ścieżka po pozytywnej weryfikacji (OTP/DOB) + dokończenie post_intent."""
+        tenant_id = msg.tenant_id
+        channel = msg.channel or "whatsapp"
+        channel_user_id = msg.channel_user_id or msg.from_phone
+
+        now_ts = int(time.time())
+        ttl = now_ts + 15 * 60  # 15 minut ważności weryfikacji
+
+        post_intent = conv.get("crm_post_intent")
+        post_slots = conv.get("crm_post_slots") or {}
+
+        # 1) spróbuj pobrać membera z PerfectGym po numerze telefonu
+        member_id: str | None = None
+        try:
+            members_resp = self.crm.get_member_by_phone(tenant_id, msg.from_phone)
+            items = (members_resp or {}).get("value") or []
+            if items:
+                member_id = str(items[0].get("id") or items[0].get("Id"))
+        except Exception:
+            member_id = None
+
+        # 2) fallback na MembersIndex, jeśli PG nic nie zwróci
+        if not member_id and self.members_index:
+            try:
+                member = self.members_index.get_member(tenant_id, msg.from_phone)
+                if member:
+                    member_id = str(member.get("id") or member.get("member_id"))
+            except Exception:
+                member_id = None
+
+        # aktualizacja rozmowy – wychodzimy ze stanu challenge
+        self.conv.upsert_conversation(
+            tenant_id=tenant_id,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            state_machine_status=STATE_AWAITING_MESSAGE,
+            crm_member_id=member_id,
+            crm_verification_level="strong",
+            crm_verified_until=ttl,
+            crm_verification_blocked_until=None,
+        )
+        self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
+
+        success_body = self.tpl.render_named(
+            tenant_id,
+            "crm_challenge_success",
+            lang,
+            {},
+        )
+
+        actions: List[Action] = [
+            self._reply(
+                msg,
+                lang,
+                success_body,
+                channel=msg.channel,
+                channel_user_id=msg.channel_user_id,
+            )
+        ]
+
+        # automatyczne dokończenie pierwotnej operacji PG
+        if post_intent == "crm_member_balance":
+            if member_id:
+                actions.extend(self._crm_member_balance_core(msg, lang, member_id))
+            else:
+                body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
+                actions.append(self._reply(msg, lang, body))
+
+        elif post_intent == "crm_contract_status":
+            if member_id:
+                actions.extend(self._crm_contract_status_core(msg, lang, member_id))
+            else:
+                body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
+                actions.append(self._reply(msg, lang, body))
+
+        elif post_intent == "reserve_class":
+            post_class_id = (post_slots or {}).get("class_id")
+            if member_id and post_class_id:
+                actions.extend(
+                    self.reserve_class_with_id_core(
+                        msg,
+                        lang,
+                        post_class_id,
+                        member_id,
+                    )
+                )
+            else:
+                body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
+                actions.append(self._reply(msg, lang, body))
+
+        return actions
 
     def verify_challenge_answer(
         self,
@@ -571,7 +1086,7 @@ class CRMFlowService:
     ) -> List[Action]:
         """
         Zwraca status kontraktu na podstawie member_id z PerfectGym.
-        Zakładamy, że wcześniej przeszedł `_ensure_crm_verification`
+        Zakładamy, że wcześniej przeszedł `ensure_crm_verification`
         i w rozmowie mamy poprawne crm_member_id.
         """
         if not member_id:
@@ -739,7 +1254,7 @@ class CRMFlowService:
 
         return [self._reply(msg, lang, body)]
 
-   
+
 
     def handle_class_selection(self, msg: Message, lang: str) -> List[Action]:      
         """
@@ -930,7 +1445,7 @@ class CRMFlowService:
             class_meta=class_meta,
         )
 
-  
+
 
     def handle_pending_reservation_confirmation(
         self,
@@ -1202,7 +1717,7 @@ class CRMFlowService:
             class_meta=class_meta,
         )
 
- 
+
     def _verify_challenge_answer(
         self,
         tenant_id: str,

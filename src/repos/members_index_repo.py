@@ -1,5 +1,6 @@
 import os, time
 from ..common.aws import ddb_resource
+from ..common.security import phone_hmac, normalize_phone
 from boto3.dynamodb.conditions import Key
 
 class MembersIndexRepo:
@@ -9,10 +10,11 @@ class MembersIndexRepo:
         )
 
     def find_by_phone(self, tenant_id: str, phone: str) -> dict | None:
+        ph = phone_hmac(tenant_id, phone)
         resp = self.table.query(
-            IndexName="tenant_phone_idx",
+            IndexName="tenant_phone_hmac_idx",
             KeyConditionExpression=Key("tenant_id").eq(tenant_id)
-                                   & Key("phone").eq(phone),
+                                   & Key("phone_hmac").eq(ph),
             Limit=1,
         )
         items = resp.get("Items") or []
@@ -23,7 +25,5 @@ class MembersIndexRepo:
         Wrapper zgodny z tym, co woła RoutingService.
         """
         # Normalizujemy phone, żeby był spójny z tym co zapisujesz w indeksie
-        normalized = phone
-        if normalized.startswith("whatsapp:"):
-            normalized = normalized.split(":", 1)[1]
+        normalized = normalize_phone(phone)
         return self.find_by_phone(tenant_id, normalized)

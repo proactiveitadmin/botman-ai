@@ -3,6 +3,19 @@ Transform: AWS::Serverless-2016-10-31
 Description: Botman AI – Etap 1 (prod-ready)
 
 Parameters:
+  PhoneHashPepperParam:
+    Type: String
+    Default: /botman/prod/phone_hash_pepper
+  UserHashPepperParam:
+    Type: String
+    Default: /botman/prod/user_hash_pepper
+  OtpHashPepperParam:
+    Type: String
+    Default: /botman/prod/otp_hash_pepper
+
+  SesFromEmail:
+    Type: String
+
   DevMode:
     Type: String
   LangDefault:
@@ -66,9 +79,13 @@ Globals:
 
         OPENAI_API_KEY:  !Ref OpenAiApiKey
         LLM_MODEL:       !Ref LlmModel
+        PHONE_HASH_PEPPER: !Ref PhoneHashPepperParam
+        USER_HASH_PEPPER: !Ref UserHashPepperParam
+        OTP_HASH_PEPPER: !Ref OtpHashPepperParam
 
         PG_BASE_URL:      !Ref PgBaseUrl
         PG_CLIENT_ID:     !Ref PgClientId
+        SES_FROM_EMAIL: !Ref SesFromEmail
         PG_CLIENT_SECRET: !Ref PgClientSecret
 
         JIRA_URL:         !Ref JiraUrl
@@ -92,10 +109,57 @@ Globals:
     
 
 Resources:
+  # --- API ---
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      EndpointConfiguration: REGIONAL
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingRateLimit: 50
+          ThrottlingBurstLimit: 100
+
+  # --- WAF ---
+  ApiWebAcl:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub 'botman-api-waf-${AWS::StackName}'
+      Scope: REGIONAL
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub 'botman-api-waf-${AWS::StackName}'
+      Rules:
+        - Name: RateLimitPerIP
+          Priority: 0
+          Action:
+            Block: {}
+          Statement:
+            RateBasedStatement:
+              Limit: 2000
+              AggregateKeyType: IP
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitPerIP
+
+  ApiWebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    DependsOn:
+      - ApiWebAcl
+      - MyApiProdStage
+    Properties:
+      WebACLArn: !GetAtt ApiWebAcl.Arn
+      ResourceArn: !Sub 'arn:aws:apigateway:${AWS::Region}::/restapis/${MyApi}/stages/Prod'
+
+  # --- SQS ---
+
   InboundEventsQueue:
     Type: AWS::SQS::Queue
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'inbound-events-${AWS::StackName}.fifo'
       FifoQueue: true
@@ -104,19 +168,16 @@ Resources:
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt InboundDLQ.Arn
         maxReceiveCount: 5
+        
   InboundDLQ:
     Type: AWS::SQS::Queue
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
-      QueueName: !Sub 'inbound-events-${AWS::StackName}-dlq'
+      QueueName: !Sub 'inbound-events-${AWS::StackName}-dlq.fifo'
       FifoQueue: true
       ContentBasedDeduplication: false
 
   OutboundQueue:
     Type: AWS::SQS::Queue
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'outbound-messages-${AWS::StackName}'
       VisibilityTimeout: 60
@@ -125,11 +186,10 @@ Resources:
         maxReceiveCount: 5
   OutboundDLQ:
     Type: AWS::SQS::Queue
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
     Properties:
       QueueName: !Sub 'outbound-messages-${AWS::StackName}-dlq'
 
+  # --- DynamoDB ---
   Tenants:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -268,7 +328,7 @@ Resources:
       AttributeDefinitions:
         - AttributeName: tenant_id
           AttributeType: S
-        - AttributeName: phone
+        - AttributeName: phone_hmac
           AttributeType: S
         - AttributeName: pk
           AttributeType: S
@@ -280,15 +340,16 @@ Resources:
         - AttributeName: sk
           KeyType: RANGE
       GlobalSecondaryIndexes:
-        - IndexName: tenant_phone_idx
+        - IndexName: tenant_phone_hmac_idx
           KeySchema:
             - AttributeName: tenant_id
               KeyType: HASH
-            - AttributeName: phone
+            - AttributeName: phone_hmac
               KeyType: RANGE
           Projection:
             ProjectionType: ALL
 
+  # --- S3 ---
   KnowledgeBaseBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -297,6 +358,12 @@ Resources:
       BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
       VersioningConfiguration:
         Status: Enabled
+
+  # --- IAM snippets (inline via Policies) ---
+  # Shared SSM+KMS access policy (copy/paste into each function Policies)
+  # NOTE: using kms:Decrypt with ViaService constraint (works with default SSM key + most setups)
+  #
+  # If you use a custom CMK for SecureString params, replace Resource: "*" with that key ARN.
 
   InboundWebhookFunction:
     Type: AWS::Serverless::Function
@@ -309,6 +376,19 @@ Resources:
             QueueName: !GetAtt InboundEventsQueue.QueueName
         - DynamoDBCrudPolicy:             
             TableName: !Ref IntentsStats
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
       Environment:
         Variables:
           InboundEventsQueueUrl: !Ref InboundEventsQueue
@@ -316,6 +396,7 @@ Resources:
         Api:
           Type: Api
           Properties:
+            RestApiId: !Ref MyApi
             Path: /webhooks/twilio
             Method: post
 
@@ -330,6 +411,7 @@ Resources:
             QueueName: !GetAtt InboundEventsQueue.QueueName
         - SQSSendMessagePolicy:
             QueueName: !GetAtt OutboundQueue.QueueName
+
         - DynamoDBCrudPolicy:
             TableName: !Ref Messages
         - DynamoDBCrudPolicy:
@@ -342,13 +424,37 @@ Resources:
             TableName: !Ref Tenants
         - DynamoDBReadPolicy:
             TableName: !Ref MembersIndex
+
         - S3ReadPolicy:
             BucketName: !Ref KnowledgeBaseBucket
+
         - Statement:
-          - Effect: Allow
-            Action:
-              - comprehend:DetectDominantLanguage
-            Resource: "*"
+            - Effect: Allow
+              Action:
+               - comprehend:DetectDominantLanguage
+              Resource: "*"
+
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: "*"
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue      
@@ -369,6 +475,19 @@ Resources:
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt OutboundQueue.QueueName      
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
       Environment:
         Variables:    
           WebOutboundEventsQueueUrl: !Ref OutboundQueue
@@ -392,6 +511,19 @@ Resources:
             QueueName: !GetAtt OutboundQueue.QueueName 
         - DynamoDBReadPolicy:
             TableName: !Ref Consents
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue
@@ -414,6 +546,19 @@ Resources:
             TableName: !Ref Conversations
         - DynamoDBCrudPolicy:  
             TableName: !Ref IntentsStats
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
 
   PgReservationsFunction:
     Type: AWS::Serverless::Function
@@ -421,58 +566,93 @@ Resources:
       FunctionName: !Sub 'pg-reservations-${AWS::StackName}'
       CodeUri: .
       Handler: src/lambdas/pg_reservations/handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
       Events:
         Api:
           Type: Api
           Properties:
+            RestApiId: !Ref MyApi
             Path: /api/pg/test
             Method: post
             
   WebWidgetFunction:
     Type: AWS::Serverless::Function
     Properties:
+      FunctionName: !Sub 'web-widget-${AWS::StackName}'
       CodeUri: .
       Handler: src/lambdas/web_widget/handler.lambda_handler
       Policies:
         - SQSSendMessagePolicy:
-            QueueName:
-              Fn::GetAtt:
-                - InboundEventsQueue
-                - QueueName
+            QueueName: !GetAtt InboundEventsQueue.QueueName
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
       Environment:
         Variables:
-          InboundEventsQueueUrl:
-            Ref: InboundEventsQueue
+          InboundEventsQueueUrl: !Ref InboundEventsQueue
       Events:
         Api:
           Type: Api
           Properties:
+            RestApiId: !Ref MyApi
             Path: /web/widget
             Method: post
-    Metadata:
-      SamResourceId: WebWidgetFunction
-      
+
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName:
-        Fn::Sub: health-${AWS::StackName}
+      FunctionName: !Sub 'health-${AWS::StackName}'
       CodeUri: src
       Handler: src/lambdas/health/handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
       Events:
         Api:
           Type: Api
           Properties:
+            RestApiId: !Ref MyApi
             Path: /health
             Method: get
-    Metadata:
-      SamResourceId: HealthFunction
-
 
 Outputs:
   ApiUrl:
     Description: API Gateway endpoint URL
-    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhooks/twilio'
+    Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhooks/twilio'
   PgTestUrl:
     Description: API Gateway endpoint URL for PerfectGym manual test
-    Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/pg/test'
+    Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/pg/test'

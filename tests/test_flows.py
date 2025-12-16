@@ -1,9 +1,11 @@
 import json
 import boto3
 import pytest
+import re
 
-from src.lambdas.message_router import handler as router_handler
+
 from src.lambdas.outbound_sender import handler as outbound_handler
+from src.lambdas.message_router import handler as router_handler
 import src.services.template_service as template_service
 
 # --- TABLICA SZABLONÓW W STYLU DDB (klucz = (template_code, language_code)) ---
@@ -141,6 +143,13 @@ DUMMY_TEMPLATES = {
         "body": "nie, nie., anuluj, rezygnuję, rezygnuje, ne",
         "placeholders": [],
     },
+      ("crm_code_via_email", "pl"): {
+        "body": (
+            "Twój kod weryfikacyjny to: {verification_code}\n\n"
+            "Ważny {ttl_minutes} minut."
+        ),
+        "placeholders": ["verification_code", "ttl_minutes"],
+    },
 }
 class DummyMembersIndex:
     """
@@ -255,6 +264,21 @@ class DummyTemplatesRepo:
 def patch_templates_repo(monkeypatch):
     monkeypatch.setattr(template_service, "TemplatesRepo", lambda: DummyTemplatesRepo())
 
+@pytest.fixture
+def router(monkeypatch):
+    """
+    Import ROUTER dopiero tutaj + podmień TemplatesRepo
+    """
+
+    dummy_repo = DummyTemplatesRepo()
+
+    for tpl in (router_handler.ROUTER.tpl, router_handler.ROUTER.crm_flow.tpl):
+        for attr in ("repo", "_repo", "templates_repo"):
+            if hasattr(tpl, attr):
+                monkeypatch.setattr(tpl, attr, dummy_repo, raising=False)
+
+    return router_handler
+    
 def _read_all_messages(queue_url: str, max_msgs: int = 10):
     """
     Pomocniczo – czytamy wiadomości z kolejki (Moto SQS).
@@ -279,6 +303,7 @@ def purge_queues_before_flow_tests(aws_stack):
         sqs.purge_queue(QueueUrl=url)
         
 def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
+    
     outbound_url = aws_stack["outbound"]
 
     event = {
@@ -320,98 +345,7 @@ def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
         "Nie znaleziono odpowiedzi FAQ w wiadomościach: "
         f"{[p.get('body') for p in payloads]}"
     )
-
-def test_reservation_flow_with_confirmation(aws_stack, mock_ai, mock_pg, monkeypatch):
-    outbound_url = aws_stack["outbound"]
-
-    # >>> DODANE: podmieniamy CRM w globalnym ROUTERze na DummyCRM,
-    # żeby challenge DOB działał lokalnie, bez DDB / PG.
-    from src.lambdas.message_router import handler as router_handler
-
-    dummy_crm = DummyCRM()
-    monkeypatch.setattr(router_handler.ROUTER, "crm", dummy_crm, raising=False)
-    monkeypatch.setattr(router_handler.ROUTER.language, "_detect_language", lambda text: "pl")
-    from src.domain.models import Action
-    def _challenge_ok(msg, conv, lang):
-        return [Action(type="reply", payload={"to": msg.from_phone, "body": "crm_challenge_success"})]
-    monkeypatch.setattr(router_handler.ROUTER.crm_flow, "handle_crm_challenge", _challenge_ok, raising=False)
-
-    # 1. Wiadomość "chcę się zapisać"
-    event1 = {
-        "Records": [
-            {
-                "body": json.dumps(
-                    {
-                        "event_id": "evt-2",
-                        "from": "whatsapp:+48123123123",
-                        "to": "whatsapp:+48000000000",
-                        "body": "Chcę się zapisać na zajęcia",
-                        "tenant_id": "default",
-                    }
-                )
-            }
-        ]
-    }
-    router_handler.lambda_handler(event1, None)
-
-    # Czytamy z kolejki – może być więcej wiadomości, więc filtrujemy
-    msgs_1 = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs_1, "Brak jakichkolwiek wiadomości po pierwszym kroku rezerwacji"
-
-    payloads_1 = [json.loads(m["Body"]) for m in msgs_1]
-
-    confirm_msgs = [
-        p
-        for p in payloads_1
-        if p.get("to") == "whatsapp:+48123123123"
-        and (
-            "urodzenia" in p.get("body", "").lower()
-            or "crm_challenge_ask_dob" in p.get("body", "")
-        )
-    ]
-
-    assert confirm_msgs, (
-        "Nie znaleziono wiadomości z prośbą o weryfikację.\n"
-        f"Wiadomości w kolejce: {[p.get('body') for p in payloads_1]}"
-    )
-
-    # 2. Użytkownik odpowiada na challenge
-    event2 = {
-        "Records": [
-            {
-                "body": json.dumps(
-                    {
-                        "event_id": "evt-3",
-                        "from": "whatsapp:+48123123123",
-                        "to": "whatsapp:+48000000000",
-                        "body": "01-05-1990",
-                        "tenant_id": "default",
-                    }
-                )
-            }
-        ]
-    }
-    router_handler.lambda_handler(event2, None)
-
-    msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs_2, "Brak jakichkolwiek wiadomości po podaniu daty urodzenia"
-
-    payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
-    confirm_ok_msgs = [
-        p
-        for p in payloads_2
-        if p.get("to") == "whatsapp:+48123123123"
-        and (
-            "weryfikacj" in p.get("body", "").lower()
-            or "crm_challenge_success" in p.get("body", "")
-        )
-    ]
-
-    assert confirm_ok_msgs, (
-        "Nie znaleziono wiadomości o powodzeniu weryfikacji.\n"
-        f"Wiadomości w kolejce: {[p.get('body') for p in payloads_2]}"
-    )
-    
+  
 def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch):
     """
     Sprawdzamy, że przy intencie 'ticket' bot:
@@ -420,8 +354,6 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
     """
     outbound_url = aws_stack["outbound"]
 
-    # Podmieniamy JiraClient w istniejącym ROUTERze, żeby nie dzwonić na prawdziwą Jirę.
-    from src.lambdas.message_router import handler as router_handler
 
     class DummyTicketing:
         def __init__(self):
@@ -495,3 +427,85 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
 
     # Dla pewności – sprawdzamy, że numer ticketa (ABC-123) pojawił się w treści
     assert any("ABC-123" in (p.get("body") or "") for p in ticket_msgs)
+
+
+def test_reservation_flow_with_email_otp(aws_stack, mock_ai, mock_pg, monkeypatch, router):
+    outbound_url = aws_stack["outbound"]
+    router_handler = router  # fixture z poprawnym repo templates
+
+    # CRM z emailem
+    class DummyCRMWithEmail:
+        def get_member_by_phone(self, tenant_id, phone):
+            return {"value": [{"id": "123", "email": "user@example.com"}]}
+
+        def verify_member_challenge(self, *args, **kwargs):
+            return True
+
+    monkeypatch.setattr(router_handler.ROUTER.crm_flow, "crm", DummyCRMWithEmail(), raising=False)
+    monkeypatch.setattr(router_handler.ROUTER.language, "_detect_language", lambda text: "pl")
+
+    # przechwyt maila i wyciągnij 6 cyfr
+    sent = {"to": None, "subject": None, "body": None, "code": None}
+
+    def fake_send_otp(self, *args, **kwargs):
+        to_email = kwargs.get("to_email") or (args[0] if len(args) > 0 else None)
+        subject = kwargs.get("subject") or (args[1] if len(args) > 1 else None)
+        body_text = kwargs.get("body_text") or (args[2] if len(args) > 2 else "")
+
+        sent["to"] = to_email
+        sent["subject"] = subject
+        sent["body"] = body_text or ""
+
+        m = re.search(r"\b([A-Z0-9]{6})\b", sent["body"])
+        assert m, f"Nie znaleziono 6-cyfrowego kodu w body email:\n{sent['body']}"
+        sent["code"] = m.group(1)
+        return True
+
+    monkeypatch.setattr("src.services.crm_flow_service.EmailClient.send_otp", fake_send_otp, raising=True)
+
+    # 1) start flow
+    event1 = {
+        "Records": [
+            {"body": json.dumps({
+                "event_id": "evt-2",
+                "from": "whatsapp:+48123123123",
+                "to": "whatsapp:+48000000000",
+                "body": "Chcę się zapisać na zajęcia",
+                "tenant_id": "default",
+            })}
+        ]
+    }
+    router_handler.lambda_handler(event1, None)
+
+    assert sent["to"] == "user@example.com"
+    assert sent["code"], "Nie przechwycono kodu OTP z emaila"
+
+    msgs_1 = _read_all_messages(outbound_url, max_msgs=10)
+    payloads_1 = [json.loads(m["Body"]) for m in msgs_1]
+    assert any(
+        p.get("to") == "whatsapp:+48123123123" and
+        ("kod" in (p.get("body") or "").lower() or "crm_challenge_ask_email_code" in (p.get("body") or ""))
+        for p in payloads_1
+    ), f"Brak prośby o kod. Outbound: {[p.get('body') for p in payloads_1]}"
+
+    # 2) user wpisuje kod
+    event2 = {
+        "Records": [
+            {"body": json.dumps({
+                "event_id": "evt-3",
+                "from": "whatsapp:+48123123123",
+                "to": "whatsapp:+48000000000",
+                "body": sent["code"],
+                "tenant_id": "default",
+            })}
+        ]
+    }
+    router_handler.lambda_handler(event2, None)
+
+    msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
+    payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
+    assert any(
+        p.get("to") == "whatsapp:+48123123123" and
+        ("crm_challenge_success" in (p.get("body") or "") or "weryfikacj" in (p.get("body") or "").lower())
+        for p in payloads_2
+    ), f"Brak sukcesu. Outbound: {[p.get('body') for p in payloads_2]}"

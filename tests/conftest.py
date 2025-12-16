@@ -143,6 +143,16 @@ def mock_jira(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def env_setup(monkeypatch):
+    
+    monkeypatch.setenv("PHONE_HASH_PEPPER", "test-phone")
+    monkeypatch.setenv("USER_HASH_PEPPER", "test-user")
+    monkeypatch.setenv("OTP_HASH_PEPPER", "test-otp")
+
+    monkeypatch.setattr(
+        "src.common.config.settings.ssm_param",
+        lambda key: f"mock-{key.lower()}"
+    )
+    
     # AWS fake env
     monkeypatch.setenv("AWS_REGION", "eu-central-1")
     monkeypatch.setenv("AWS_DEFAULT_REGION", "eu-central-1")
@@ -216,7 +226,10 @@ def aws_stack(monkeypatch):
         ddb = boto3.client("dynamodb", region_name="eu-central-1")
         print("TABLES:", ddb.list_tables()["TableNames"])
 
-        inbound = sqs.create_queue(QueueName="inbound-events")
+        inbound = sqs.create_queue(
+            QueueName="inbound-events.fifo",
+            Attributes={"FifoQueue": "true", "ContentBasedDeduplication": "true"},
+        )
         outbound = sqs.create_queue(QueueName="outbound-messages")
 
         monkeypatch.setenv("InboundEventsQueueUrl", inbound["QueueUrl"])
@@ -315,19 +328,7 @@ def aws_stack(monkeypatch):
             ],
         )
 
-        # SpamService – SpamService
-        ensure_table(
-            "SpamService",
-            attr_defs=[
-                {"AttributeName": "pk", "AttributeType": "S"},
-                {"AttributeName": "sk", "AttributeType": "S"},
-            ],
-            key_schema=[
-                {"AttributeName": "pk", "KeyType": "HASH"},
-                {"AttributeName": "sk", "KeyType": "RANGE"},
-            ],
-        )
-
+             
         # na końcu, po ensure_table:
         from src.lambdas.message_router import handler as router_handler
         from src.services.routing_service import RoutingService

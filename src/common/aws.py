@@ -75,3 +75,18 @@ def ddb_resource():
     if ep:
         kwargs["endpoint_url"] = ep
     return boto3.resource("dynamodb", **kwargs)
+
+
+def ssm_client():
+    ep = _endpoint_for("ssm")
+    kwargs = {"region_name": _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("ssm", **kwargs)
+
+def ses_client(region_name: str | None = None):
+    ep = _endpoint_for("ses")
+    kwargs = {"region_name": region_name or _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("ses", **kwargs)

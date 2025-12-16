@@ -24,7 +24,7 @@ def test_find_by_phone_returns_first_item(monkeypatch):
 
     item = repo.find_by_phone("t1", "+48123")
     assert item["name"] == "Alice"
-    assert dummy.last_query_kwargs["IndexName"] == "tenant_phone_idx"
+    assert dummy.last_query_kwargs["IndexName"] == "tenant_phone_hmac_idx"
 
 
 def test_find_by_phone_empty_items_returns_none(monkeypatch):
