@@ -2,6 +2,7 @@ import json
 import types
 
 import pytest
+from src.common.security import user_hmac
 
 
 class DummySQS:
@@ -102,6 +103,6 @@ def test_web_widget_wysyla_na_fifo_z_group_id_i_dedup(monkeypatch, dummy_sqs):
     call = dummy_sqs.calls[0]
     body = json.loads(call["MessageBody"])
 
-    assert body["conversation_id"] == "conv#web#user-abc"
+    assert body["conversation_id"] == f"conv#web#{user_hmac('t1', 'web', 'user-abc')}"
     assert call["MessageGroupId"] == body["conversation_id"]
     assert call["MessageDeduplicationId"] == body["event_id"]

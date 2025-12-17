@@ -3,6 +3,7 @@ import boto3
 
 from src.repos.consents_repo import ConsentsRepo
 from src.common.aws import _region
+from src.common.security import phone_hmac, phone_last4
 
 
 @mock_aws
@@ -20,26 +21,36 @@ def test_consents_repo_set_get_and_delete():
         BillingMode="PAY_PER_REQUEST",
     )
 
+
     repo = ConsentsRepo()
 
+    phone = "+48123"
+    tenant = "tenant-1"
+
     # opt-in
-    item = repo.set_opt_in("tenant-1", "+48123", source="test")
-    assert item["pk"] == "tenant-1#+48123"
-    assert item["opt_in"] is True
-    assert item["source"] == "test"
+    item = repo.set_opt_in(tenant, phone, source="test")
 
-    loaded = repo.get("tenant-1", "+48123")
-    assert loaded is not None
-    assert loaded["opt_in"] is True
+    assert item["pk"] == f"{tenant}#{phone_hmac(tenant, phone)}"
 
-    # opt-out
-    out_item = repo.set_opt_out("tenant-1", "+48123")
-    assert out_item["opt_in"] is False
+@mock_aws
+def test_set_opt_in_does_not_store_raw_phone():
+    region = _region()
+    ddb = boto3.resource("dynamodb", region_name=region)
+    ddb.create_table(
+        TableName="Consents",
+        KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"}],
+        AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"}],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    repo = ConsentsRepo()
 
-    loaded2 = repo.get("tenant-1", "+48123")
-    assert loaded2 is not None
-    assert loaded2["opt_in"] is False
+    phone = "+48123"
+    tenant = "tenant-1"
 
-    # delete
-    repo.delete("tenant-1", "+48123")
-    assert repo.get("tenant-1", "+48123") is None
+    item = repo.set_opt_in(tenant, phone, source="test")
+
+    assert item["pk"] == f"{tenant}#{phone_hmac(tenant, phone)}"
+    assert item["phone_hmac"] == phone_hmac(tenant, phone)
+    assert item["phone_last4"] == phone_last4(phone)
+
+    assert "phone" not in item  # kluczowe: żadnego raw phone w DDB

@@ -1,6 +1,7 @@
 import os, time
 from ..common.aws import ddb_resource
 from boto3.dynamodb.conditions import Key
+from ..common.security import user_hmac
 
 
 # Sentinel pozwalający odróżnić: "parametr nie podany" od "parametr ustawiony na None".
@@ -14,9 +15,15 @@ class ConversationsRepo:
         )
 
     def conversation_pk(self, tenant_id: str, channel: str, channel_user_id: str) -> dict:
+        """DDB key for conversation.
+
+        NOTE: channel_user_id may contain PII (phone / session id). We never put it
+        into PK/SK. Instead we derive a salted user_id using HMAC + pepper.
+        """
+        uid = user_hmac(tenant_id, channel, channel_user_id)
         return {
             "pk": f"tenant#{tenant_id}",
-            "sk": f"conv#{channel}#{channel_user_id}",
+            "sk": f"conv#{channel}#{uid}",
         }
 
     def get_conversation(self, tenant_id: str, channel: str, channel_user_id: str) -> dict | None:

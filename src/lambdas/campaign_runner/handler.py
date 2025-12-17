@@ -13,6 +13,7 @@ import json
 from ...services.campaign_service import CampaignService
 from ...common.aws import sqs_client, ddb_resource, resolve_queue_url
 from ...services.consent_service import ConsentService
+from ...repos.members_index_repo import MembersIndexRepo
 from ...common.logging import logger
 
 OUTBOUND_QUEUE_URL = os.getenv("OutboundQueueUrl")
@@ -20,6 +21,7 @@ CAMPAIGNS_TABLE = os.getenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
 
 svc = CampaignService()
 consents = ConsentService()
+members_index = MembersIndexRepo()
 
 
 def _resolve_outbound_queue_url() -> str:
@@ -62,7 +64,20 @@ def lambda_handler(event, context):
 
         tenant_id = item.get("tenant_id", "default")
 
-        for phone in svc.select_recipients(item):
+        for recipient in svc.select_recipients(item):
+            # recipient może być raw phone (legacy) albo dict z phone_hmac (bez PII w Campaigns)
+            if isinstance(recipient, str):
+                phone = recipient
+            elif isinstance(recipient, dict) and recipient.get("phone_hmac"):
+                mi = members_index.find_by_phone_hmac(tenant_id, recipient.get("phone_hmac"))
+                phone = (mi or {}).get("phone")
+                if not phone:
+                    # brak mapowania w MembersIndex -> pomijamy (nie mamy jak wysłać)
+                    continue
+            elif isinstance(recipient, dict) and recipient.get("phone"):
+                phone = recipient.get("phone")
+            else:
+                continue
             if not consents.has_opt_in(tenant_id, phone):
                 continue
 

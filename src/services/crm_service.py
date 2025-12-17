@@ -5,6 +5,7 @@ from datetime import datetime
 
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..common.logging import logger
+from ..common.logging_utils import mask_phone
 
 
 class CRMService:
@@ -166,7 +167,7 @@ class CRMService:
                 {
                     "crm": "verify_member_challenge_members_index_error",
                     "tenant_id": tenant_id,
-                    "phone": phone,
+                    "phone": mask_phone(phone),
                     "error": str(e),
                 }
             )

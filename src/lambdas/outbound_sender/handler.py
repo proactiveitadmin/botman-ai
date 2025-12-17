@@ -91,6 +91,9 @@ def lambda_handler(event, context):
                 }
             )
         except Exception as e:
-            logger.error({"sender": "twilio_fail", "err": str(e), "to": to})
+            logger.error({
+                "sender": "twilio_fail", 
+                "err": str(e), 
+                "to": mask_phone(to)})
 
     return {"statusCode": 200}

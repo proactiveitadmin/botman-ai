@@ -6,6 +6,7 @@ from typing import Optional
 
 from ..common.aws import ddb_resource
 from ..common.logging import logger
+from ..common.logging_utils import mask_phone
 
 
 TABLE_NAME = os.getenv("DDB_TABLE_INTENTS_STATS", "IntentsStats")
@@ -96,7 +97,7 @@ class SpamService:
                     "spam": "ddb_update_error",
                     "error": str(e),
                     "tenant_id": tenant_id,
-                    "phone": phone,
+                    "phone":  mask_phone(phone),
                 }
             )
             return False
@@ -132,7 +133,7 @@ class SpamService:
                 {
                     "spam": "already_blocked",
                     "tenant_id": tenant_id,
-                    "phone": phone,
+                    "phone": mask_phone(phone),
                     "blocked_until": blocked_until,
                 }
             )
@@ -153,7 +154,7 @@ class SpamService:
                         "spam": "set_blocked_until_failed",
                         "error": str(e),
                         "tenant_id": tenant_id,
-                        "phone": phone,
+                        "phone": mask_phone(phone),
                     }
                 )
 
@@ -161,7 +162,7 @@ class SpamService:
                 {
                     "spam": "rate_limit_hit",
                     "tenant_id": tenant_id,
-                    "phone": phone,
+                    "phone": mask_phone(phone),
                     "cnt": cnt,
                     "max_per_bucket": self.max_per_bucket,
                     "bucket_seconds": self.bucket_seconds,
@@ -175,7 +176,7 @@ class SpamService:
                 {
                     "spam": "tenant_bucket_limit_exceeded",
                     "tenant_id": tenant_id,
-                    "phone": phone,
+                    "phone": mask_phone(phone),
                     "total_cnt": total_cnt,
                 }
             )

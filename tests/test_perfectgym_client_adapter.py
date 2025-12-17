@@ -175,8 +175,13 @@ def test_get_available_classes_success(monkeypatch):
     client = PerfectGymClient()
     resp = client.get_available_classes(top=5)
     assert resp["value"][0]["id"] == 1
-    assert captured["params"]["$top"] == "5"
+    #default window is now..now+2d if to_iso not provided
+    fixed_from = datetime(2025, 1, 1, 12, 0, 0)
+    resp = client.get_available_classes(from_iso=fixed_from, top=5)
     assert "Classes" in captured["url"]
+    flt = captured["params"]["$filter"]
+    assert "startdate gt" in flt
+    assert "startdate lt" in flt
 
 
 def test_get_available_classes_error(monkeypatch):

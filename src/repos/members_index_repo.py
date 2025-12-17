@@ -27,3 +27,15 @@ class MembersIndexRepo:
         # Normalizujemy phone, żeby był spójny z tym co zapisujesz w indeksie
         normalized = normalize_phone(phone)
         return self.find_by_phone(tenant_id, normalized)
+
+    def find_by_phone_hmac(self, tenant_id: str, phone_hmac_value: str):
+        resp = self.table.query(
+            IndexName="tenant_phone_hmac_idx",
+            KeyConditionExpression=(
+                Key("tenant_id").eq(tenant_id) &
+                Key("phone_hmac").eq(phone_hmac_value)
+            ),
+            Limit=1,
+        )
+        items = resp.get("Items", [])
+        return items[0] if items else None

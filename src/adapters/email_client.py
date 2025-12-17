@@ -4,6 +4,7 @@ import os
 from ..common.config import settings
 from ..common.aws import ses_client
 from ..common.logging import logger
+from ..common.logging_utils import mask_email
 from ..repos.tenants_repo import TenantsRepo
 
 class EmailClient:
@@ -60,8 +61,14 @@ class EmailClient:
                 },
                 **kwargs,
             )
-            logger.info({"email": "sent", "to": to_email})
+            logger.info({
+                "email": "sent", 
+                "to": mask_email(to_email)})
             return True
         except Exception as e:
-            logger.error({"email": "send_failed", "to": to_email, "tenant_id": tenant_id, "error": str(e)})
+            logger.error({
+                "email": "send_failed", 
+                "to": mask_email(to_email), 
+                "tenant_id": tenant_id, 
+                "error": str(e)})
             return False

@@ -1,5 +1,6 @@
 import os, time
 from ..common.aws import ddb_resource
+from ..common.security import phone_hmac, phone_last4
 from boto3.dynamodb.conditions import Key
 
 class MessagesRepo:
@@ -26,7 +27,10 @@ class MessagesRepo:
         language_code: str | None = None,
     ):
         ts = int(time.time())
-        conv_key = conversation_id or from_phone
+        user_phone = from_phone if direction == "inbound" else to_phone
+        ph = phone_hmac(tenant_id, user_phone) if user_phone else None
+        last4 = phone_last4(user_phone) if user_phone else None
+        conv_key = conversation_id or ph or "unknown"
         item = {
             "pk": f"{tenant_id}#{conv_key}",
             "sk": f"{ts}#{direction}#{msg_id}",
@@ -35,8 +39,8 @@ class MessagesRepo:
             "msg_id": msg_id,
             "direction": direction,
             "body": body,
-            "from": from_phone,
-            "to": to_phone,
+            "phone_hmac": ph,
+            "phone_last4": last4,
             "channel": channel,
             "created_at": ts,
         }

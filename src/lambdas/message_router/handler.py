@@ -21,6 +21,7 @@ from ...domain.models import Message
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
 from ...common.utils import new_id
+from ...common.security import user_hmac
 
 ROUTER = RoutingService()
 MESSAGES = MessagesRepo()
@@ -154,13 +155,18 @@ def lambda_handler(event, context):
         event_id = msg_body.get("event_id")
         tenant_id = msg_body.get("tenant_id", "default")
         from_phone = msg_body.get("from")
+        channel = msg_body.get("channel", "whatsapp")
+        channel_user_id = msg_body.get("channel_user_id") or from_phone
+        #conversation key used for Messages pk/sk and idempotency markers (no PII)
+        uid = user_hmac(tenant_id, channel, channel_user_id)
+        conv_key = msg_body.get("conversation_id") or f"conv#{channel}#{uid}"
 
         # Prosta idempotencja: jeśli ten event już przerobiliśmy, skip
         if event_id:
             # np. pk = tenant_id#from_phone, sk = event#event_id
             existing = MESSAGES.table.get_item(
                 Key={
-                    "pk": f"{tenant_id}#{from_phone}",
+                    "pk": f"{tenant_id}#{conv_key}",
                     "sk": f"event#{event_id}",
                 }
             ).get("Item")
@@ -171,7 +177,7 @@ def lambda_handler(event, context):
             # zapisujemy event jako przetworzony
             MESSAGES.table.put_item(
                 Item={
-                    "pk": f"{tenant_id}#{from_phone}",
+                    "pk": f"{tenant_id}#{conv_key}",
                     "sk": f"event#{event_id}",
                     "created_at": int(time.time()),
                 }

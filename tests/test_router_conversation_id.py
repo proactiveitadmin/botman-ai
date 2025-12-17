@@ -1,5 +1,6 @@
 import types
 import pytest
+from src.common.security import user_hmac
 
 
 def test_router_przekazuje_do_routingservice_conversation_id_z_body(monkeypatch):
@@ -41,12 +42,13 @@ def test_router_przekazuje_do_routingservice_conversation_id_z_body(monkeypatch)
     monkeypatch.setattr(h.ROUTER, "handle", fake_handle)
 
     # Event jak z SQS (Records[*].body)
+    user_id = user_hmac('t1', 'web', 'u1')
     event = {
         "Records": [
             {
                 "body": (
                     '{"event_id":"evt-1",'
-                    '"conversation_id":"conv#web#u1",'
+                    '"conversation_id":"conv#web#' + user_id + '",'
                     '"tenant_id":"t1",'
                     '"from":"+48111111111",'
                     '"to":"+48222222222",'
@@ -62,4 +64,4 @@ def test_router_przekazuje_do_routingservice_conversation_id_z_body(monkeypatch)
     assert resp["statusCode"] == 200
 
     # Kluczowa asercja: conversation_id z payloadu musi przejść dalej 1:1
-    assert captured["conversation_id"] == "conv#web#u1"
+    assert captured["conversation_id"] == f"conv#web#{user_id}"

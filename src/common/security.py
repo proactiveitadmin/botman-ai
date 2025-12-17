@@ -62,7 +62,7 @@ def normalize_phone(phone: str) -> str:
     p = (phone or "").strip()
     if p.startswith("whatsapp:"):
         p = p.split(":", 1)[1]
-    # NOTE: jeśli chcecie pełne E.164, warto tu użyć libphonenumbers.
+    # NOTE: dla pelnego E.164, warto tu użyć libphonenumbers.
     return p
 
 def _hmac_b64url(key: str, msg: str) -> str:
@@ -84,3 +84,9 @@ def otp_hash(tenant_id: str, purpose: str, otp_code: str) -> str:
     pepper = _get_pepper("OTP_HASH_PEPPER", "OTP_HASH_PEPPER_PARAM") or _get_pepper("PHONE_HASH_PEPPER","PHONE_HASH_PEPPER_PARAM")
     msg = f"{tenant_id}|{purpose}|{(otp_code or '').strip()}"
     return _hmac_b64url(pepper, msg)
+
+def phone_last4(phone: str) -> str:
+    if not phone:
+        return ""
+    digits = "".join(c for c in phone if c.isdigit())
+    return digits[-4:] if len(digits) >= 4 else digits

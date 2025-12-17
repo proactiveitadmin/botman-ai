@@ -1,6 +1,7 @@
 from twilio.rest import Client
 from ..common.config import settings
 from ..common.logging import logger
+from ..common.logging_utils import mask_phone, mask_twilio_messaging_sid
 
 class TwilioClient:
     def __init__(self):
@@ -14,7 +15,10 @@ class TwilioClient:
         Automatycznie używa Messaging Service SID, jeśli jest skonfigurowany.
         """
         if not self.enabled:
-            logger.info({"msg": "Twilio disabled (dev mode)", "to": to, "body": body})
+            logger.info({
+                "msg": "Twilio disabled (dev mode)", 
+                "to": mask_phone(to), 
+                "body": body})
             return {"status": "DEV_OK"}
 
         try:
@@ -34,12 +38,15 @@ class TwilioClient:
             logger.info({
                 "msg": "Twilio sent",
                 "sid": message.sid,
-                "from": settings.twilio_messaging_sid if "messaging_service_sid" in send_args else settings.twilio_whatsapp_number,
-                "to": to,
+                "from": mask_twilio_messaging_sid(settings.twilio_messaging_sid) if "messaging_service_sid" in send_args else mask_phone(settings.twilio_whatsapp_number),
+                "to": mask_phone(to),
                 "used": "messaging_service_sid" if "messaging_service_sid" in send_args else "from_"
             })
             return {"status": "OK", "sid": message.sid}
 
         except Exception as e:
-            logger.error({"msg": "Twilio send failed", "error": str(e), "to": to})
+            logger.error({
+                "msg": "Twilio send failed", 
+                "error": str(e), 
+                "to": mask_phone(to)})
             return {"status": "ERROR", "error": str(e)}

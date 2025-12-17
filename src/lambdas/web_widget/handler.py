@@ -4,6 +4,7 @@ import time
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.utils import new_id
 from ...common.logging import logger
+from ...common.security import user_hmac
 
 def lambda_handler(event, context):
     """
@@ -25,7 +26,8 @@ def lambda_handler(event, context):
         if not channel_user_id or not text:
             return {"statusCode": 400, "body": "Missing channel_user_id or body"}
         
-        conv_id = f"conv#web#{channel_user_id}"
+        uid = user_hmac(tenant_id, "web", channel_user_id)
+        conv_id = f"conv#web#{uid}"
         msg = {
             "event_id": new_id("evt-web-"),
             "from": None,  # brak telefonu

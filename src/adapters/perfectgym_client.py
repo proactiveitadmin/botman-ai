@@ -1,9 +1,10 @@
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 import logging
 
+from ..common.logging_utils import mask_phone
 from ..common.config import settings
 
 logger = logging.getLogger("botman-ai")
@@ -96,7 +97,7 @@ class PerfectGymClient:
             self.logger.error(
                 {
                     "pg": "get_member_by_phone_error",
-                    "phone": phone,
+                    "phone": mask_phone(phone),
                     "error": str(e),
                 }
             )
@@ -205,6 +206,9 @@ class PerfectGymClient:
         # --- FORMATOWANIE DATY DOKŁADNIE JAK W CURLU --- #
         if from_iso is None:
             from_iso = datetime.utcnow()
+            
+        if to_iso is None:
+            to_iso = from_iso + timedelta(days=2)
 
         # Format: 2025-11-22T19:33:10.201Z
         # PG wymaga milisekund oraz "Z" na końcu
@@ -212,10 +216,14 @@ class PerfectGymClient:
             from_iso.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]  # mikrosekundy → milisekundy
             + "Z"
         )
+        end_str = (
+            to_iso.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]  # mikrosekundy → milisekundy
+            + "Z"
+        )
 
         # --- PARAMETRY IDENTYCZNE JAK W TWOIM CURLU --- #
         params = {
-            "$filter": f"isDeleted eq false and startdate gt {start_str}",
+            "$filter": f"isDeleted eq false and startdate gt {start_str} and startdate lt {end_str}",
             "$expand": "classType",
             "$orderby": "startdate",
         }

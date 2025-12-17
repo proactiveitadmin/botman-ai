@@ -4,15 +4,14 @@ import time
 from typing import Optional, Dict
 
 from ..common.aws import ddb_resource  # uwaga: ścieżka względem storage
-# jeśli common.aws jest w src/common/aws.py, to:
-# from ..common.aws import ddb_resource
+from ..common.security import phone_hmac, phone_last4
 
 class ConsentsRepo:
     """
     Prosty repozytorium zgód marketingowych.
 
     Klucz:
-      pk = "{tenant_id}#{phone}"
+      pk = "{tenant_id}#{phone_hmac}"
 
     Atrybuty:
       - tenant_id
@@ -27,21 +26,22 @@ class ConsentsRepo:
         self.table = ddb_resource().Table(table_name)
 
     @staticmethod
-    def _pk(tenant_id: str, phone: str) -> str:
-        return f"{tenant_id}#{phone}"
+    def _pk(tenant_id: str, phone_hmac_value: str) -> str:
+        return f"{tenant_id}#{phone_hmac_value}"
 
     def get(self, tenant_id: str, phone: str) -> Optional[Dict]:
-        resp = self.table.get_item(
-            Key={"pk": self._pk(tenant_id, phone)}
-        )
+        ph = phone_hmac(tenant_id, phone)
+        resp = self.table.get_item(Key={"pk": self._pk(tenant_id, ph)})
         return resp.get("Item")
 
     def set_opt_in(self, tenant_id: str, phone: str, source: str | None = None) -> Dict:
+        ph = phone_hmac(tenant_id, phone)
         item = {
-            "pk": self._pk(tenant_id, phone),
+            "pk": self._pk(tenant_id, ph),
             "tenant_id": tenant_id,
-            "phone": phone,
-            "opt_in": True,
+            "phone_hmac": ph,
+            "phone_last4": phone_last4(phone),
+            "opt_in": False,
             "updated_at": int(time.time()),
         }
         if source:
@@ -63,4 +63,5 @@ class ConsentsRepo:
         return item
 
     def delete(self, tenant_id: str, phone: str) -> None:
-        self.table.delete_item(Key={"pk": self._pk(tenant_id, phone)})
+        ph = phone_hmac(tenant_id, phone)
+        self.table.delete_item(Key={"pk": self._pk(tenant_id, ph)})

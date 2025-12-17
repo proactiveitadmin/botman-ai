@@ -17,6 +17,7 @@ from ...common.aws import sqs_client, resolve_queue_url
 from ...common.security import verify_twilio_signature
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
+from ...common.security import user_hmac
 
 
 NGROK_HOST_HINTS = (".ngrok-free.app", ".ngrok.io")
@@ -117,7 +118,8 @@ def lambda_handler(event, context):
         tenant_id = "default"  # TODO: w przyszłości mapowanie po numerze / endpointcie
         from_phone = params.get("From")
         channel_user_id = from_phone
-        conv_id = f"conv#whatsapp#{channel_user_id}"
+        uid = user_hmac(tenant_id, "whatsapp", channel_user_id)
+        conv_id = f"conv#whatsapp#{uid}"
 
         # --- SPAM / RATE LIMIT ---
         if spam_service.is_blocked(tenant_id=tenant_id, phone=from_phone):
