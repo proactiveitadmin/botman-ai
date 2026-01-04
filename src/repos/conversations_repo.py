@@ -13,6 +13,7 @@ class ConversationsRepo:
         self.table = ddb_resource().Table(
             os.environ.get("DDB_TABLE_CONVERSATIONS", "Conversations")
         )
+        self.retention_days: int = int(os.getenv("CONVERSATIONS_RETENTION_DAYS", "365"))
 
     def conversation_pk(self, tenant_id: str, channel: str, channel_user_id: str) -> dict:
         """DDB key for conversation.
@@ -101,6 +102,9 @@ class ConversationsRepo:
 
         now_ts = int(time.time())
         set_field("updated_at", now_ts)
+              
+        ttl_ts = now_ts + self.retention_days * 86400
+        set_field("ttl_ts", ttl_ts)
 
         maybe_set_or_remove("language_code", language_code)
         maybe_set_or_remove("last_intent", last_intent)

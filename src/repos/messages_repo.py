@@ -1,12 +1,13 @@
 import os, time
+from boto3.dynamodb.conditions import Key
 from ..common.aws import ddb_resource
 from ..common.security import phone_hmac, phone_last4
-from boto3.dynamodb.conditions import Key
 
 class MessagesRepo:
     def __init__(self):
         self.table = ddb_resource().Table(os.environ.get("DDB_TABLE_MESSAGES", "Messages"))
-
+        self.retention_days: int = int(os.getenv("CONVERSATIONS_RETENTION_DAYS", "365"))
+        
     def put(self, item: dict):
         self.table.put_item(Item=item)
 
@@ -31,6 +32,7 @@ class MessagesRepo:
         ph = phone_hmac(tenant_id, user_phone) if user_phone else None
         last4 = phone_last4(user_phone) if user_phone else None
         conv_key = conversation_id or ph or "unknown"
+        ttl_ts = ts + self.retention_days * 86400
         item = {
             "pk": f"{tenant_id}#{conv_key}",
             "sk": f"{ts}#{direction}#{msg_id}",
@@ -43,6 +45,7 @@ class MessagesRepo:
             "phone_last4": last4,
             "channel": channel,
             "created_at": ts,
+            "ttl_ts": ttl_ts
         }
         if template_id:
             item["template_id"] = template_id

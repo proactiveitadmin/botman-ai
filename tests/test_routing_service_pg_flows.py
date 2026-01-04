@@ -121,7 +121,7 @@ def test_pg_contract_status_core_member_not_linked():
     )
 
     msg = _make_msg("status kontraktu?")
-    actions = svc._crm_contract_status_core(msg, lang="pl", member_id="")
+    actions = svc.crm_contract_status_core(msg, lang="pl", member_id="")
     assert len(actions) == 1
     a = actions[0]
     assert a.type == "reply"
@@ -158,7 +158,7 @@ def test_pg_contract_status_core_happy_path():
 
 
     msg = _make_msg("status kontraktu?")
-    actions = svc._crm_contract_status_core(msg, lang="pl", member_id="123")
+    actions = svc.crm_contract_status_core(msg, lang="pl", member_id="123")
     assert len(actions) == 1
     a = actions[0]
     assert a.type == "reply"

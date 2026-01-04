@@ -249,14 +249,16 @@ def aws_stack(monkeypatch):
             ],
         )
 
-        # Conversations
+        # Conversations (prod schema: pk + sk)
         ensure_table(
             "Conversations",
             attr_defs=[
                 {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
             ],
             key_schema=[
                 {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
             ],
         )
 

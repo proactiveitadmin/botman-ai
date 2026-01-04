@@ -838,7 +838,7 @@ class CRMFlowService:
 
             elif post_intent == "crm_contract_status":
                 if member_id:
-                    actions.extend(self._crm_contract_status_core(msg, lang, member_id))
+                    actions.extend(self.crm_contract_status_core(msg, lang, member_id))
                 else:
                     body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
                     actions.append(self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id))
@@ -986,7 +986,7 @@ class CRMFlowService:
 
         elif post_intent == "crm_contract_status":
             if member_id:
-                actions.extend(self._crm_contract_status_core(msg, lang, member_id))
+                actions.extend(self.crm_contract_status_core(msg, lang, member_id))
             else:
                 body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
                 actions.append(self._reply(msg, lang, body))
@@ -1081,7 +1081,7 @@ class CRMFlowService:
         )
         return [self._reply(msg, lang, body)]
 
-    def _crm_contract_status_core(
+    def crm_contract_status_core(
         self, msg: Message, lang: str, member_id: str
     ) -> List[Action]:
         """
