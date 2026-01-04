@@ -108,8 +108,10 @@ Globals:
         CAMPAIGN_SEND_TO: "20:00"
 
         # Retencja danych (housekeeping)
-        MESSAGES_RETENTION_DAYS: "365"
-        CONVERSATIONS_RETENTION_DAYS: "365"
+        #MESSAGES_RETENTION_DAYS: "365"
+        #CONVERSATIONS_RETENTION_DAYS: "365"
+        MESSAGES_RETENTION_DAYS: "5"
+        CONVERSATIONS_RETENTION_DAYS: "5"
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
            
 
@@ -205,9 +207,18 @@ Resources:
       AttributeDefinitions:
         - AttributeName: tenant_id
           AttributeType: S
+        - AttributeName: twilio_to
+          AttributeType: S         
       KeySchema:
         - AttributeName: tenant_id
           KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: TwilioToIndex
+          KeySchema:
+            - AttributeName: twilio_to
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
   Conversations:
     Type: AWS::DynamoDB::Table

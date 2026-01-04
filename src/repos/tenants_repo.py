@@ -1,5 +1,8 @@
 import os
+from typing import Any
+from boto3.dynamodb.conditions import Key
 from ..common.aws import ddb_resource
+
 
 class TenantsRepo:
     def __init__(self):
@@ -7,6 +10,53 @@ class TenantsRepo:
 
     def get(self, tenant_id: str) -> dict | None:
         return self.table.get_item(Key={"tenant_id": tenant_id}).get("Item")
+
+    def find_by_twilio_to(self, to_number: str) -> dict | None:
+        """
+        Resolve tenant by Twilio destination number (To) using GSI TwilioToIndex.
+
+        Expected tenant item shape:
+          - tenant_id: str (PK)
+          - twilio_to: str (indexed, exact match, e.g. "whatsapp:+48....")
+
+        Backward-compatible fallback:
+          - if you used 'twilio_numbers': [..] historically, we do a scan for that.
+            Prefer migrating data to 'twilio_to' (or separate mapping table if many-to-one).
+        """
+        if not to_number:
+            return None
+
+        # Primary path: query GSI
+        try:
+            resp = self.table.query(
+                IndexName="TwilioToIndex",
+                KeyConditionExpression=Key("twilio_to").eq(to_number),
+                Limit=1,
+            )
+            items = resp.get("Items") or []
+            if items:
+                return items[0]
+        except Exception:
+            # If index is not deployed yet (dev/local), fall back to scan
+            pass
+
+        # Fallback path: scan legacy list attribute
+        resp = self.table.scan()
+        items = resp.get("Items") or []
+        while True:
+            for it in items:
+                if it.get("twilio_to") == to_number:
+                    return it
+                nums = it.get("twilio_numbers")
+                if isinstance(nums, list) and to_number in nums:
+                    return it
+            lek = resp.get("LastEvaluatedKey")
+            if not lek:
+                break
+            resp = self.table.scan(ExclusiveStartKey=lek)
+            items = resp.get("Items") or []
+
+        return None
 
     def set_language(self, tenant_id: str, language_code: str):
         self.table.update_item(

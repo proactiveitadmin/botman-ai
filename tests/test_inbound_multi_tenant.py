@@ -4,16 +4,13 @@ import pytest
 import urllib.parse
 
 
-def _read_all(sqs, q_url, *, max_msgs=10, max_loops=20):
+def _read_all(sqs, q_url, max_msgs=10, max_loops=20):
     """
     Czytamy wiadomości z kolejki (Moto SQS).
-    Ograniczamy liczbę pętli, żeby test nigdy nie "mielił" w nieskończoność.
+    Limit pętli, żeby nie mielić w nieskończoność gdy coś jest nie tak z endpointem.
     """
     messages = []
-    loops = 0
-
-    while loops < max_loops:
-        loops += 1
+    for _ in range(max_loops):
         resp = sqs.receive_message(
             QueueUrl=q_url,
             MaxNumberOfMessages=max_msgs,
@@ -23,16 +20,11 @@ def _read_all(sqs, q_url, *, max_msgs=10, max_loops=20):
         if not batch:
             break
         messages.extend(batch)
-
     return messages
 
 
 @pytest.mark.slow
 def test_inbound_rate_limit_per_phone_blocks_after_threshold(aws_stack, monkeypatch):
-    """
-    E2E: Twilio webhook + SpamService + DDB + SQS.
-    """
-    # Importy dopiero w teście (po ustawieniu env przez conftest/fixture)
     import boto3
     from src.services.spam_service import SpamService
     from src.common.aws import ddb_resource
@@ -62,8 +54,11 @@ def test_inbound_rate_limit_per_phone_blocks_after_threshold(aws_stack, monkeypa
 
     event = {
         "headers": {"Host": "localhost"},
-        "requestContext": {"path": "/webhooks/twilio", "requestTimeEpoch": fixed_ts * 1000},
-        "pathParameters": {"tenant": "default"},
+        "requestContext": {
+            "path": "/webhooks/twilio",
+            "requestTimeEpoch": fixed_ts * 1000,
+        },
+        "pathParameters": {"tenant": "default"},  # <-- kluczowe po multi-tenant
         "body": (
             "From=whatsapp%3A%2B48123123123"
             "&To=whatsapp%3A%2B48000000000"
@@ -97,7 +92,7 @@ def test_inbound_rate_limit_per_tenant_blocks_after_threshold(aws_stack, monkeyp
     svc = SpamService(
         now_fn=lambda: fixed_ts,
         bucket_seconds=60,
-        max_per_bucket=1000,          # per phone wyłączony
+        max_per_bucket=1000,          # per phone praktycznie wyłączony
         tenant_max_per_bucket=tenant_limit,
     )
 
@@ -114,8 +109,11 @@ def test_inbound_rate_limit_per_tenant_blocks_after_threshold(aws_stack, monkeyp
         encoded_from = urllib.parse.quote_plus(from_phone)
         return {
             "headers": {"Host": "localhost"},
-            "requestContext": {"path": "/webhooks/twilio", "requestTimeEpoch": fixed_ts * 1000},
-            "pathParameters": {"tenant": "default"},
+            "requestContext": {
+                "path": "/webhooks/twilio",
+                "requestTimeEpoch": fixed_ts * 1000,
+            },
+            "pathParameters": {"tenant": "default"},  # <-- kluczowe po multi-tenant
             "body": (
                 f"From={encoded_from}"
                 "&To=whatsapp%3A%2B48000000000"

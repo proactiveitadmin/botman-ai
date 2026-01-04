@@ -10,8 +10,10 @@ Zadania:
 import os
 import json
 import urllib.parse
+import re
 
 from ...services.spam_service import SpamService
+from ...repos.tenants_repo import TenantsRepo
 from ...common.utils import new_id
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.security import verify_twilio_signature
@@ -22,6 +24,7 @@ from ...common.security import user_hmac
 
 NGROK_HOST_HINTS = (".ngrok-free.app", ".ngrok.io")
 spam_service = SpamService()
+tenants_repo = TenantsRepo()
 
 
 def _build_public_url(event, headers_in) -> str:
@@ -61,6 +64,38 @@ def _build_public_url(event, headers_in) -> str:
     )
     return f"{base}?{query}" if query else base
 
+
+def _normalize_twilio_number(value: str | None) -> str | None:
+    if not value:
+        return None
+    v = value.strip()
+    v = re.sub(r"\s+", "", v)
+    return v or None
+
+
+def _resolve_tenant_id(event: dict, params: dict) -> str:
+    """
+    Tenant resolution strategy:
+      1) path param /webhook/{tenant} (or /webhooks/twilio/{tenant})
+      2) Twilio 'To' number mapping via TenantsRepo (GSI TwilioToIndex)
+    """
+    path_params = event.get("pathParameters") or {}
+    tenant_from_path = (
+        path_params.get("tenant")
+        or path_params.get("tenantId")
+        or path_params.get("tenant_id")
+    )
+    if tenant_from_path:
+        return tenant_from_path
+
+    to_number = params.get("To")
+    if not to_number:
+        raise ValueError("Unable to resolve tenant: missing path tenant and missing Twilio 'To'")
+
+    tenant = tenants_repo.find_by_twilio_to(to_number)
+    if not tenant:
+        raise ValueError(f"Unable to resolve tenant for Twilio To={to_number}")
+    return tenant["tenant_id"]
 
 def _parse_params(body_raw: str, content_type: str) -> dict:
     """
@@ -115,7 +150,20 @@ def lambda_handler(event, context):
             logger.warning({"webhook": "invalid_signature"})
             return {"statusCode": 403, "body": "Forbidden"}
 
-        tenant_id = "default"  # TODO: w przyszłości mapowanie po numerze / endpointcie
+        tenant_id = _resolve_tenant_id(event, params)
+        if not tenant_id:
+            logger.error({
+                "webhook": "tenant_unresolved",
+                "to": mask_phone(params.get("To")),
+                "pathParameters": event.get("pathParameters"),
+            })
+            # celowo 200 dla Twilio (żeby nie retry'ował), ale nie wysyłamy do SQS
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "text/xml"},
+                "body": "<Response></Response>",
+            }
+            
         from_phone = params.get("From")
         channel_user_id = from_phone
         uid = user_hmac(tenant_id, "whatsapp", channel_user_id)

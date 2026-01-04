@@ -39,11 +39,11 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai, monkeypatch):
 
     monkeypatch.setattr(inbound_lambda, "spam_service", NoSpam(), raising=False)
 
-    # ✅ podmieniamy SQS w obu lambdach – żadnych prawdziwych wywołań AWS
+    # podmieniamy SQS w obu lambdach – żadnych prawdziwych wywołań AWS
     monkeypatch.setattr(inbound_lambda, "sqs_client", fake_sqs_client, raising=True)
     monkeypatch.setattr(router_lambda, "sqs_client", fake_sqs_client, raising=True)
 
-    # ✅ resolve_queue_url ma zwracać nasze „fake” url-e
+    # resolve_queue_url ma zwracać nasze „fake” url-e
     monkeypatch.setattr(
         inbound_lambda,
         "resolve_queue_url",
@@ -68,6 +68,8 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai, monkeypatch):
         "headers": {"Content-Type": "application/x-www-form-urlencoded"},
         "body": form,
         "isBase64Encoded": False,
+        "pathParameters": {"tenant": "default"},
+        "requestContext": {"path": "/webhook/default", "requestTimeEpoch": 0},
     }
     inbound_lambda.lambda_handler(event, None)
 

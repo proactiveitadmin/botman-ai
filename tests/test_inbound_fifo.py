@@ -43,16 +43,19 @@ def test_inbound_webhook_wysyla_na_fifo_z_group_id_i_dedup(monkeypatch, dummy_sq
     # Podmieniamy resolver URL kolejki
     monkeypatch.setattr(h, "resolve_queue_url", lambda _name: "https://example.com/inbound.fifo")
 
+    monkeypatch.setattr(h, "tenants_repo", types.SimpleNamespace(find_by_twilio_to=lambda _to: {"tenant_id": "default"}), raising=False)
+    
     # Jeśli jest mechanizm antyspamowy – wyłączamy go na potrzeby testu
     if hasattr(h, "spam_service"):
         monkeypatch.setattr(h.spam_service, "is_blocked", lambda **kwargs: False)
 
     # Minimalny event w formacie webhooka (Twilio / WhatsApp)
     event = {
-        "body": "From=whatsapp%3A%2B48111111111&Body=hello&MessageSid=SM123",
+        "body": "From=whatsapp%3A%2B48111111111&To=whatsapp%3A%2B48000000000&Body=hello&MessageSid=SM123",
         "isBase64Encoded": False,
         "headers": {"content-type": "application/x-www-form-urlencoded"},
         "requestContext": {"requestTimeEpoch": 1700000000000},
+        "pathParameters": {"tenant": "default"},
     }
 
     response = h.lambda_handler(event, context=types.SimpleNamespace())
