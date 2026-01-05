@@ -287,7 +287,19 @@ def aws_stack(monkeypatch):
             ],
         )
 
-        # Tenants – pod przyszłe repo Tenants / language per klub
+        
+        # Idempotency – deduplikacja (inbound/outbound)
+        ensure_table(
+            "Idempotency",
+    attr_defs=[
+        {"AttributeName": "pk", "AttributeType": "S"},
+    ],
+    key_schema=[
+        {"AttributeName": "pk", "KeyType": "HASH"},
+    ],
+        )
+        monkeypatch.setenv("DDB_TABLE_IDEMPOTENCY", "Idempotency")
+# Tenants – pod przyszłe repo Tenants / language per klub
         ensure_table(
             "Tenants",
             attr_defs=[
@@ -405,3 +417,17 @@ def wire_subservices(svc):
         svc.crm_flow.members_index = getattr(svc, "members_index", None)
 
     return svc
+    
+import pytest
+
+@pytest.fixture(autouse=True)
+def _dev_and_idempotency(monkeypatch):
+    monkeypatch.setenv("DEV_MODE", "true")
+    from src.lambdas.message_router import handler as router_handler
+    from src.lambdas.outbound_sender import handler as outbound_handler
+    from src.repos.idempotency_repo import IdempotencyRepo
+
+    monkeypatch.setattr(router_handler, "IDEMPOTENCY", IdempotencyRepo(table_name_env=""), raising=False)
+    monkeypatch.setattr(outbound_handler, "IDEMPOTENCY", IdempotencyRepo(table_name_env=""), raising=False)
+    yield
+

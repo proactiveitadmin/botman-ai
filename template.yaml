@@ -95,12 +95,13 @@ Globals:
         DDB_TABLE_TENANTS: !Sub 'Tenants-${AWS::StackName}'
         DDB_TABLE_CONVERSATIONS: !Sub 'Conversations-${AWS::StackName}'
         DDB_TABLE_MESSAGES:      !Sub 'Messages-${AWS::StackName}'
-        DDB_TABLE_TEMPLATES:      !Sub 'Templates-${AWS::StackName}'
+        DDB_TABLE_TEMPLATES:     !Sub 'Templates-${AWS::StackName}'
         DDB_TABLE_CAMPAIGNS:     !Sub 'Campaigns-${AWS::StackName}'
         DDB_TABLE_CONSENTS:      !Sub 'Consents-${AWS::StackName}'
         DDB_TABLE_INTENTS_STATS: !Sub 'IntentsStats-${AWS::StackName}'
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
-        DDB_TABLE_LEADS:          !Sub 'Leads-${AWS::StackName}'
+        DDB_TABLE_LEADS:         !Sub 'Leads-${AWS::StackName}'
+        DDB_TABLE_IDEMPOTENCY:   !Sub 'Idempotency-${AWS::StackName}'
         
         KB_BUCKET: !Ref KnowledgeBaseBucket
         
@@ -262,6 +263,24 @@ Resources:
           AttributeName: ttl_ts
           Enabled: true
 
+
+  Idempotency:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        TableName: !Sub 'Idempotency-${AWS::StackName}'
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: pk
+            AttributeType: S
+        KeySchema:
+          - AttributeName: pk
+            KeyType: HASH
+        TimeToLiveSpecification:
+          AttributeName: ttl
+          Enabled: true
+          
   Templates:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -414,6 +433,11 @@ Resources:
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+            - Effect: Allow
+              Action:
+                 - dynamodb:Query
+              Resource:
+                 - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Tenants-${AWS::StackName}/index/TwilioToIndex'
       Environment:
         Variables:
           InboundEventsQueueUrl: !Ref InboundEventsQueue
@@ -441,6 +465,8 @@ Resources:
             TableName: !Ref Messages
         - DynamoDBCrudPolicy:
             TableName: !Ref Conversations
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Idempotency
         - DynamoDBCrudPolicy:
             TableName: !Ref Leads 
         - DynamoDBReadPolicy:
@@ -489,7 +515,9 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt InboundEventsQueue.Arn
-            BatchSize: 5
+            BatchSize: 10
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   OutboundSenderFunction:
     Type: AWS::Serverless::Function
@@ -500,6 +528,8 @@ Resources:
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt OutboundQueue.QueueName      
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Idempotency
         - Statement:
             - Effect: Allow
               Action: ssm:GetParameter
@@ -521,7 +551,10 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt OutboundQueue.Arn
-            BatchSize: 5
+            BatchSize: 20
+            MaximumBatchingWindowInSeconds: 2
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
 
   CampaignRunnerFunction:
     Type: AWS::Serverless::Function

@@ -12,6 +12,7 @@ import os
 from ...services.routing_service import RoutingService
 from ...services.template_service import TemplateService
 from ...services.kb_service import KBService
+from ...repos.idempotency_repo import IdempotencyRepo
 from ...adapters.openai_client import OpenAIClient
 from ...repos.conversations_repo import ConversationsRepo
 from ...repos.messages_repo import MessagesRepo
@@ -22,6 +23,8 @@ from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
 from ...common.utils import new_id
 from ...common.security import user_hmac
+
+IDEMPOTENCY = IdempotencyRepo()
 
 ROUTER = RoutingService()
 MESSAGES = MessagesRepo()
@@ -114,6 +117,12 @@ def _publish_actions(actions, original_body: dict):
         except Exception:
             pass
 
+        # zapewnij idempotency_key dla outbound (unikamy podwójnych wysyłek przy retry)
+        if "idempotency_key" not in payload:
+            base = original_body.get("event_id") or original_body.get("message_sid") or original_body.get("conversation_id")
+            if base:
+                payload["idempotency_key"] = f"out#{base}#{a.type}"
+
         # wysyłka do kolejki outbound
         sqs_client().send_message(
             QueueUrl=outbound_url,
@@ -148,10 +157,27 @@ def lambda_handler(event, context):
         logger.info({"handler": "message_router", "event": "no_records"})
         return {"statusCode": 200, "body": "no-records"}
 
+    batch_failures = []
+
     for r in records:
-        msg_body = _parse_record(r)
+        try:
+            msg_body = _parse_record(r)
+        except Exception as e:
+            logger.error({"handler": "message_router", "event": "bad_record", "err": str(e)})
+            batch_failures.append({"itemIdentifier": r.get("messageId")})
+            continue
+
         if not msg_body:
             continue
+
+        # inbound idempotency
+        base = msg_body.get("event_id") or msg_body.get("message_sid") or r.get("messageId")
+        tenant_id = msg_body.get("tenant_id", "default")
+        if base:
+            inbound_key = f"in#{tenant_id}#{base}"
+            if not IDEMPOTENCY.try_acquire(inbound_key, meta={"scope": "inbound"}):
+                logger.info({"handler": "message_router", "event": "duplicate_inbound", "tenant_id": tenant_id})
+                continue
         event_id = msg_body.get("event_id")
         tenant_id = msg_body.get("tenant_id", "default")
         from_phone = msg_body.get("from")
@@ -218,5 +244,8 @@ def lambda_handler(event, context):
         actions = ROUTER.handle(msg)
         _publish_actions(actions, msg_body)
 
-    logger.info({"handler": "message_router", "event": "done"})
+    logger.info({"handler": "message_router", "event": "done", "failures": len(batch_failures)})
+    # partial batch response for SQS event source mapping
+    if batch_failures:
+        return {"batchItemFailures": batch_failures}
     return {"statusCode": 200}
