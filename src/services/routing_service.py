@@ -133,8 +133,12 @@ class RoutingService:
     ) -> None:
         """Ustawia last_intent + ewentualny stan maszyny."""
         sm_state = None
-        if intent == "reserve_class" and (slots.get("class_id") or "").strip():
-            sm_state = STATE_AWAITING_CONFIRMATION
+        if intent == "reserve_class":
+            cid = (slots.get("class_id") or "").strip()
+            if cid and cid.isdigit():
+                sm_state = STATE_AWAITING_CONFIRMATION
+            elif cid:
+                sm_state = STATE_AWAITING_CLASS_SELECTION
         elif intent == "crm_available_classes":
             sm_state = STATE_AWAITING_CLASS_SELECTION
 
@@ -340,7 +344,24 @@ class RoutingService:
                     state_machine_status=STATE_AWAITING_CLASS_SELECTION,
                     language_code=lang,
                 )
-                return self.crm_flow.build_available_classes_response(msg, lang)
+                return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=True)
+
+            # class_id to nie ID tylko nazwa typu zajęć (np. 'pilates') → lista z filtrem
+            if class_id and not class_id.isdigit():
+                self.conv.upsert_conversation(
+                    tenant_id=msg.tenant_id,
+                    channel=msg.channel or "whatsapp",
+                    channel_user_id=msg.channel_user_id or msg.from_phone,
+                    last_intent=intent,
+                    state_machine_status=STATE_AWAITING_CLASS_SELECTION,
+                    language_code=lang,
+                )
+                return self.crm_flow.build_available_classes_response(
+                    msg,
+                    lang,
+                    auto_confirm_single=True,
+                    class_type_query=class_id,
+                )
 
             # mamy class_id → standardowy flow z weryfikacją PG i pending
             verify_resp = self.crm_flow.ensure_crm_verification(
@@ -463,7 +484,7 @@ class RoutingService:
 
         # 6.6 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
         if intent == "crm_available_classes":
-            return self.crm_flow.build_available_classes_response(msg, lang)
+            return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=False)
 
         # 6.7 Status kontraktu
         if intent == "crm_contract_status":

@@ -220,13 +220,17 @@ def lambda_handler(event, context):
             "conversation_id": conv_id,
         }
 
+        # FIFO dedup: Twilio potrafi retry'ować webhook (timeouty, sieć).
+        # Ustawienie dedup ID na MessageSid powoduje, że ponowne webhooki
+        # dla tej samej wiadomości nie tworzą duplikatów w kolejce.
+        dedup_id = (params.get("MessageSid") or "").strip() or msg.get("event_id") or new_id("dedup-")
 
         queue_url = resolve_queue_url("InboundEventsQueueUrl")
         sqs_client().send_message(
             QueueUrl=queue_url, 
             MessageBody=json.dumps(msg),            
             MessageGroupId=msg.get('conversation_id') or 'default',
-            MessageDeduplicationId=msg.get('event_id') or new_id('dedup-'),
+            MessageDeduplicationId=dedup_id,
         )
 
         logger.info({

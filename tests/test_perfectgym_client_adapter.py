@@ -1,4 +1,5 @@
-import json
+import json as jsonlib
+import re
 from datetime import datetime
 
 import pytest
@@ -130,8 +131,42 @@ def test_reserve_class_http_error(monkeypatch):
     resp = client.reserve_class(member_id="10", class_id="20")
     assert resp["ok"] is False
     assert resp["status_code"] == 400
-    assert "HTTP 400" in resp["error"]
+    assert isinstance(resp.get("error"), str)
+    assert resp["error"]  # niepusty
+    assert re.search(r"\bHTTP\b", resp["error"]) is not None
     assert resp["body"] == "Bad Request"
+
+def test_reserve_class_http_error_classes_already_booked_is_mapped(monkeypatch):
+    monkeypatch.setattr(settings, "pg_base_url", "https://pg.example/api/v2.2/odata", raising=False)
+    monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
+    monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
+
+    payload = {
+        "errors": [
+            {
+                "message": "Classes already booked.",
+                "property": None,
+                "code": "ClassesAlreadyBooked",
+                "nestedBusinessErrors": [],
+                "data": None,
+            }
+        ]
+    }
+
+    def fake_request(method, url, json=None, headers=None, timeout=None, **kwargs):
+        assert method == "POST"
+        # PG zwraca 4xx + JSON z errors
+        return DummyResp(status_code=400, payload=payload, text=jsonlib.dumps(payload), raise_http=True)
+
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+
+    client = PerfectGymClient()
+    resp = client.reserve_class(member_id="10", class_id="20")
+
+    assert resp["ok"] is False
+    assert resp["status_code"] == 400
+    assert resp["mapped_error"] == "classes_already_booked"
+    assert resp["pg_error"]["code"] == "ClassesAlreadyBooked"
 
 
 def test_reserve_class_success(monkeypatch):

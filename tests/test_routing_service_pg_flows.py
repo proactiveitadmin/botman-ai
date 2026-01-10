@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 
 from src.services.crm_flow_service import CRMFlowService
-from src.common.constants import STATE_AWAITING_MESSAGE
+from src.common.constants import STATE_AWAITING_MESSAGE,STATE_AWAITING_CONFIRMATION
 from src.domain.models import Message, Action
 
 
@@ -40,8 +40,18 @@ class FakeCRM:
         self.calls["get_contracts_by_member_id"] = {"tenant_id": tenant_id, "member_id": member_id}
         return self.contracts_resp
 
-    def get_available_classes(self, tenant_id: str, top: int | None = None):
-        self.calls["get_available_classes"] = {"tenant_id": tenant_id, "top": top}
+    def get_available_classes(
+        self,
+        tenant_id: str,
+        top: int | None = None,
+        class_type_query: str | None = None,
+        **kwargs,
+    ):
+        self.calls["get_available_classes"] = {
+            "tenant_id": tenant_id,
+            "top": top,
+            "class_type_query": class_type_query,
+        }
         return self.available_classes_resp
 
     def get_member_by_phone(self, tenant_id: str, phone: str):
@@ -54,12 +64,28 @@ class FakeConv:
         self.put_calls: List[Dict[str, Any]] = []
         self.last_upsert: Optional[Dict[str, Any]] = None
         self.verification_map: Dict[str, Dict[str, Any]] = {}
-
+        self._items: Dict[tuple[str, str], Dict[str, Any]] = {}
+        self._conversation: Dict[str, Any] = {}
+    
     def put(self, item: Dict[str, Any]):
         self.put_calls.append(item)
-
+        pk = item.get("pk")
+        sk = item.get("sk")
+        if pk and sk:
+            self._items[(pk, sk)] = item
+ 
     def upsert_conversation(self, **kwargs):
         self.last_upsert = kwargs
+        self._conversation.update(kwargs)
+
+    def get_conversation(self, tenant_id: str, channel: str, channel_user_id: str):
+        return dict(self._conversation)
+
+    def get(self, pk: str, sk: str):
+        return self._items.get((pk, sk))
+
+    def delete(self, pk: str, sk: str):
+        self._items.pop((pk, sk), None)
 
     def find_by_verification_code(self, tenant_id: str, verification_code: str):
         key = f"{tenant_id}:{verification_code}"
@@ -336,4 +362,60 @@ def test_build_available_classes_response_with_items():
     a = actions[0]
     assert a.type == "reply"
     # upewniamy się, że została użyta główna templatka listy
-    assert tpl.calls[-1]["name"] == "crm_available_classes"
+    names = [c["name"] for c in tpl.calls]
+    assert "crm_available_classes" in names
+
+    # opcjonalnie: jeśli dokładamy instrukcję wyboru numerem
+    # (jeśli w danym środowisku/tenant templates istnieją)
+    assert "crm_available_classes_select_by_number" in names
+
+
+
+def test_build_available_classes_response_single_item_skips_list_and_asks_confirmation():
+    """Jeśli PG zwraca dokładnie 1 zajęcia, pomijamy listę i od razu pytamy o potwierdzenie."""
+    tpl = FakeTpl()
+    crm = FakeCRM()
+    conv = FakeConv()
+
+    # użytkownik już zweryfikowany + ma member_id, żeby nie wchodzić w challenge
+    conv._conversation.update(
+        {
+            "crm_verification_level": "strong",
+            "crm_verified_until": 9999999999,
+            "crm_member_id": "111",
+        }
+    )
+
+    crm.available_classes_resp = {
+        "value": [
+            {
+                "id": 1,
+                "startDate": "2026-01-12T18:30:00",
+                "classType": {"name": "Pilates"},
+                "attendeesCount": 0,
+                "attendeesLimit": 9,
+            }
+        ]
+    }
+
+    svc = CRMFlowService(
+        crm=crm,
+        tpl=tpl,
+        conv=conv,
+        members_index=None,
+    )
+
+    msg = _make_msg("czy mogę zarezerwować pilates?")
+    actions = svc.build_available_classes_response(msg, lang="pl", auto_confirm_single=True)
+
+    assert len(actions) == 1
+    assert actions[0].type == "reply"
+
+    # zamiast listy, od razu pytanie o potwierdzenie
+    assert tpl.calls[-1]["name"] == "reserve_class_confirm"
+
+    # powinien powstać pending rezerwacji (sk=pending)
+    assert any(it.get("sk") == "pending" for it in conv.put_calls)
+    # i stan ustawiony na awaiting_confirmation
+    assert conv.last_upsert is not None
+    assert conv.last_upsert.get("state_machine_status") == STATE_AWAITING_CONFIRMATION

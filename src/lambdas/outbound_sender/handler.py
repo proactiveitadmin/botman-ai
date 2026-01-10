@@ -1,4 +1,5 @@
 import json
+import time
 
 from ...common.aws import sqs_client, resolve_optional_queue_url
 from ...common.logging import logger
@@ -12,7 +13,15 @@ clients = ClientsFactory()
 metrics = MetricsService()
 IDEMPOTENCY = IdempotencyRepo()
 
-
+def _queue_delay_ms(record: dict) -> int | None:
+    try:
+        attrs = record.get("attributes") or {}
+        sent = int(attrs.get("SentTimestamp"))  # ms
+        now = int(time.time() * 1000)
+        return now - sent
+    except Exception:
+        return None
+        
 def lambda_handler(event, context):
     records = event.get("Records", [])
     if not records:
@@ -22,7 +31,15 @@ def lambda_handler(event, context):
     batch_failures = []
 
     for r in records:
+
         msg_id = r.get("messageId")
+        delay_ms = _queue_delay_ms(r)
+        logger.info({
+            "handler": "outbound_sender",
+            "event": "record_received",
+            "sqs_delay_ms": delay_ms,
+            "message_id": msg_id,
+        })
         try:
             raw = r.get("body", "")
             try:

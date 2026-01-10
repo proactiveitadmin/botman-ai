@@ -93,6 +93,10 @@ DUMMY_TEMPLATES = {
         "body": "Nie udało się zarezerwować. Spróbuj ponownie później.",
         "placeholders": [],
     },
+    ("reserve_class_already_booked", "pl"): {
+        "body": "Te zajęcia są już przez Ciebie zarezerwowane.",
+        "placeholders": [],
+    },
     ("reserve_class_declined", "pl"): {
         "body": (
             "Anulowano rezerwację. Daj znać, jeżeli będziesz chciał/chciała "

@@ -96,3 +96,71 @@ def test_message_router_faq_to_outbound(monkeypatch):
     payload = json.loads(sent_messages[0]["MessageBody"])
     assert payload["to"] == "whatsapp:+48123123123"
     assert "godzin" in payload["body"].lower() or "otwar" in payload["body"].lower()
+    
+
+def test_message_router_generates_unique_idempotency_key_per_reply(monkeypatch):
+    """
+    W ramach jednego inbound eventu router może zwrócić kilka reply.
+    Każdy reply musi dostać unikalny idempotency_key, bo outbound_sender
+    deduplikuje po tym kluczu.
+    """
+
+    actions = [
+        DummyAction({"to": "whatsapp:+481", "body": "Zweryfikowaliśmy Twoje konto.", "tenant_id": "default"}),
+        DummyAction({"to": "whatsapp:+481", "body": "Czy potwierdzasz rezerwację?", "tenant_id": "default"}),
+    ]
+    dummy_router = DummyRouter(actions)
+    monkeypatch.setattr(handler, "ROUTER", dummy_router)
+
+    sent_messages = []
+
+    class DummySQS:
+        def send_message(self, QueueUrl, MessageBody):
+            sent_messages.append({"QueueUrl": QueueUrl, "MessageBody": MessageBody})
+
+    monkeypatch.setattr(handler, "sqs_client", lambda: DummySQS(), raising=False)
+    monkeypatch.setenv("OutboundQueueUrl", "dummy-outbound-url")
+
+    class DummyTable:
+        def get_item(self, **kwargs):
+            return {}
+
+        def put_item(self, **kwargs):
+            pass
+
+    class DummyMessages:
+        table = DummyTable()
+
+        @staticmethod
+        def log_message(**kwargs):
+            pass
+
+    monkeypatch.setattr(handler, "MESSAGES", DummyMessages(), raising=False)
+
+    event = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-otp-1",
+                        "message_sid": "SM123",
+                        "from": "whatsapp:+481",
+                        "to": "whatsapp:+480",
+                        "body": "T4KP7F",
+                        "tenant_id": "default",
+                        "channel": "whatsapp",
+                    }
+                )
+            }
+        ]
+    }
+
+    res = handler.lambda_handler(event, None)
+    assert res["statusCode"] == 200
+    assert len(sent_messages) == 2
+
+    p1 = json.loads(sent_messages[0]["MessageBody"])
+    p2 = json.loads(sent_messages[1]["MessageBody"])
+    assert p1["idempotency_key"] != p2["idempotency_key"]
+    assert p1["idempotency_key"].startswith("out#")
+    assert p2["idempotency_key"].startswith("out#")

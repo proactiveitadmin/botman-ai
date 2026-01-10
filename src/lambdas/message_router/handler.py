@@ -70,7 +70,7 @@ def _publish_actions(actions, original_body: dict):
         else None
     )
 
-    for a in actions or []:
+    for idx, a in enumerate(actions or []):
         # akcje ticket – do kolejki ticketów, nie wysyłamy do klienta
         if a.type == "ticket":
             if tickets_url:
@@ -119,10 +119,20 @@ def _publish_actions(actions, original_body: dict):
 
         # zapewnij idempotency_key dla outbound (unikamy podwójnych wysyłek przy retry)
         if "idempotency_key" not in payload:
-            base = original_body.get("event_id") or original_body.get("message_sid") or original_body.get("conversation_id")
+            # NOTE:
+            # W ramach jednego inbound eventu router potrafi wygenerować *kilka* reply (np.
+            # "Zweryfikowaliśmy Twoje konto" + kolejny krok flow).
+            # OutboundSender ma idempotencję po idempotency_key, więc klucz musi być unikalny
+            # per wiadomość, a jednocześnie stabilny przy retry tego samego inbound eventu.
+            base = (
+                original_body.get("event_id")
+                or original_body.get("message_sid")
+                or original_body.get("conversation_id")
+            )
             if base:
-                payload["idempotency_key"] = f"out#{base}#{a.type}"
+                payload["idempotency_key"] = f"out#{base}#{a.type}#{idx}"
 
+        t0 = time.perf_counter()
         # wysyłka do kolejki outbound
         sqs_client().send_message(
             QueueUrl=outbound_url,
@@ -136,6 +146,7 @@ def _publish_actions(actions, original_body: dict):
                 "from": mask_phone(original_body.get("from")),
                 "to": mask_phone(payload.get("to")),
                 "body": shorten_body(payload.get("body")),
+                "enqueue_ms": int((time.perf_counter() - t0) * 1000),
                 "tenant_id": payload.get("tenant_id", original_body.get("tenant_id")),
             }
         )

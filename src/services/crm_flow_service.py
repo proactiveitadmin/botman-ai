@@ -1155,7 +1155,14 @@ class CRMFlowService:
 
         return [self._reply(msg, lang, body)]
         
-    def build_available_classes_response(self, msg: Message, lang: str) -> List[Action]:
+    def build_available_classes_response(
+        self,
+        msg: Message,
+        lang: str,
+        *,
+        auto_confirm_single: bool = False,
+        class_type_query: str | None = None,
+    ) -> List[Action]:
         """
         Pobiera listę dostępnych zajęć z PG, buduje listę tekstową
         + zapisuje uproszczone dane w DDB (do późniejszego wyboru).
@@ -1163,6 +1170,7 @@ class CRMFlowService:
         classes_resp = self.crm.get_available_classes(
             tenant_id=msg.tenant_id,
             top=10,
+            class_type_query=class_type_query,
         )
         classes = classes_resp.get("value") or []
 
@@ -1174,7 +1182,32 @@ class CRMFlowService:
                 {},
             )
             return [self._reply(msg, lang, body)]
+        
+        # Jeśli jest dokładnie 1 pozycja, nie pokazujemy listy.
+        # Od razu przechodzimy do standardowego flow rezerwacji (w tym weryfikacji PG).
+        if auto_confirm_single and len(classes) == 1:
+            c = classes[0] or {}
+            start = str(c.get("startDate") or c.get("startdate") or "")
+            date_str = start[:10] if len(start) >= 10 else "?"
+            time_str = start[11:16] if len(start) >= 16 else "?"
+            class_type = (c.get("classType") or {}).get("name") or "Class"
 
+            # jeżeli wcześniej była zapisana lista, usuń ją, żeby nie mieszała w state machine
+            try:
+                self.conv.delete(self._pending_key(msg.from_phone), "classes")
+            except Exception:
+                pass
+
+            selected = {
+                "index": 1,
+                "class_id": c.get("id"),
+                "date": date_str,
+                "time": time_str,
+                "name": class_type,
+                "start": start,
+            }
+            return self._start_reservation_from_selection(msg, lang, selected)
+            
         lines: list[str] = []
         simplified: list[dict] = []
 
@@ -1252,7 +1285,19 @@ class CRMFlowService:
             }
         )
 
-        return [self._reply(msg, lang, body)]
+        try:
+            extra = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_available_classes_select_by_number",
+                lang,
+                {},
+            )
+        except Exception:
+            extra = ""
+        
+        full_body = f"{body}\n\n{extra}" if extra else body
+        
+        return [self._reply(msg, lang, full_body)]
 
 
 
@@ -1523,6 +1568,23 @@ class CRMFlowService:
                 body = self.tpl.render_named(
                     msg.tenant_id,
                     "reserve_class_confirmed",
+                    lang,
+                    {
+                        "class_id": class_id,
+                        "class_name": class_name,
+                        "class_date": class_date,
+                        "class_time": class_time,
+                    },
+                )
+                return [self._reply(msg, lang, body)]
+                
+            mapped_error = (res or {}).get("mapped_error")
+            pg_code = ((res or {}).get("pg_error") or {}).get("code")
+
+            if mapped_error == "classes_already_booked" or pg_code == "ClassesAlreadyBooked":
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "reserve_class_already_booked",
                     lang,
                     {
                         "class_id": class_id,

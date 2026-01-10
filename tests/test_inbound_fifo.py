@@ -39,12 +39,12 @@ def test_inbound_webhook_wysyla_na_fifo_z_group_id_i_dedup(monkeypatch, dummy_sq
 
     # Podmieniamy klienta SQS na atrapę
     monkeypatch.setattr(h, "sqs_client", lambda: dummy_sqs)
-
     # Podmieniamy resolver URL kolejki
     monkeypatch.setattr(h, "resolve_queue_url", lambda _name: "https://example.com/inbound.fifo")
-
     monkeypatch.setattr(h, "tenants_repo", types.SimpleNamespace(find_by_twilio_to=lambda _to: {"tenant_id": "default"}), raising=False)
-    
+    monkeypatch.setattr(h.tenant_cfg, "get", lambda tenant_id: {"twilio": {"auth_token": "dummy"}}, raising=False)
+    monkeypatch.setattr(h, "verify_twilio_signature", lambda *args, **kwargs: True, raising=False)
+
     # Jeśli jest mechanizm antyspamowy – wyłączamy go na potrzeby testu
     if hasattr(h, "spam_service"):
         monkeypatch.setattr(h.spam_service, "is_blocked", lambda **kwargs: False)
@@ -69,7 +69,8 @@ def test_inbound_webhook_wysyla_na_fifo_z_group_id_i_dedup(monkeypatch, dummy_sq
 
     assert body["conversation_id"].startswith("conv#whatsapp#")
     assert call["MessageGroupId"] == body["conversation_id"]
-    assert call["MessageDeduplicationId"] == body["event_id"]
+    expected_dedup = body.get("message_sid") or body["event_id"]
+    assert call["MessageDeduplicationId"] == expected_dedup
 
 
 def test_web_widget_wysyla_na_fifo_z_group_id_i_dedup(monkeypatch, dummy_sqs):

@@ -82,6 +82,7 @@ class CRMService:
         from_iso: str | None = None,
         to_iso: str | None = None,
         member_id: int | None = None,
+        class_type_query: str | None = None,
         fields: list[str] | None = None,
         top: int | None = None,
     ) -> dict:
@@ -94,6 +95,7 @@ class CRMService:
             from_iso=from_iso,
             to_iso=to_iso,
             member_id=member_id,
+            class_type_query=class_type_query,
             fields=fields,
             top=top,
         )

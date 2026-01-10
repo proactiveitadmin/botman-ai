@@ -7,7 +7,7 @@ from src.services.routing_service import RoutingService
 from tests.fakes_routing import InMemoryConversations, FakeTenantsRepo, FakeTemplateServicePG
 
 
-def test_pg_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
+def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
     # 1) Ustaw bazowy URL PerfectGym w settings
     monkeypatch.setattr(settings, "pg_base_url", "https://example.perfectgym.com")
 
@@ -53,7 +53,6 @@ def test_pg_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
         channel="whatsapp",
         channel_user_id="whatsapp:+48123123123",
     )
-
     actions = router.handle(msg)
 
     assert len(actions) == 1

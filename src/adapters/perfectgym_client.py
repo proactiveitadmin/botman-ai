@@ -176,6 +176,44 @@ class PerfectGymClient:
                 }
             )
             return {"value": []}
+    @staticmethod
+    def _extract_pg_business_error(payload: Any) -> dict | None:
+        """Wyciąga pierwszy business error z odpowiedzi PG.
+
+        Oczekiwany format:
+        {
+            "errors": [
+                {
+                    "message": "Classes already booked.",
+                    "code": "ClassesAlreadyBooked",
+                    ...
+                }
+            ]
+        }
+        """
+        if not isinstance(payload, dict):
+            return None
+        errors = payload.get("errors")
+        if not isinstance(errors, list) or not errors:
+            return None
+        first = errors[0]
+        if not isinstance(first, dict):
+            return None
+        return {
+            "message": first.get("message"),
+            "code": first.get("code"),
+            "property": first.get("property"),
+        }
+
+    @staticmethod
+    def _map_pg_error_to_internal(pg_error: dict | None) -> str | None:
+        """Mapuje znane błędy PG na stabilne kody wewnętrzne."""
+        if not pg_error:
+            return None
+        code = pg_error.get("code")
+        if code == "ClassesAlreadyBooked":
+            return "classes_already_booked"
+        return None
 
     # ------------------------------------------------------------------ #
     # Classes / rezerwacje
@@ -218,7 +256,6 @@ class PerfectGymClient:
         headers = self._headers()
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
-
         try:
             resp = self._request_with_retry("POST", url, json=payload, headers=headers, timeout=10)
         except requests.RequestException as e:
@@ -237,9 +274,46 @@ class PerfectGymClient:
                 "body": None,
             }
 
+        # PG czasem zwraca business-error w JSON nawet dla 4xx.
+        # Parsujemy JSON przed raise_for_status, żeby móc go zmapować i dać lepszy UX.
         try:
-            resp.raise_for_status()
-        except requests.HTTPError as e:
+            data = resp.json()
+        except ValueError:
+            data = None
+
+        if resp.status_code >= 400:
+            pg_error = self._extract_pg_business_error(data)
+            mapped = self._map_pg_error_to_internal(pg_error)
+
+            # nadal wywołaj raise_for_status() żeby error był spójny w logach
+            try:
+                resp.raise_for_status()
+            except requests.HTTPError as e:
+                self.logger.error(
+                    {
+                        "pg": "reserve_class_error",
+                        "member_id": member_id,
+                        "error": "HTTP error",
+                    }
+                )
+                return {
+                    "ok": False,
+                    "status_code": resp.status_code,
+                    "error": "HTTP error",
+                    "body": resp.text,
+                    "data": data,
+                    "pg_error": pg_error,
+                    "mapped_error": mapped,
+                }
+
+            # teoretycznie nie powinno się zdarzyć, ale zostawiamy bezpieczny fallback
+            self.logger.error(
+                {
+                    "pg": "reserve_class_error",
+                    "member_id": member_id,
+                    "error": "HTTP error",
+                }
+            )
             return {
                 "ok": False,
                 "status_code": resp.status_code,
@@ -265,6 +339,7 @@ class PerfectGymClient:
         from_iso: datetime | None = None,
         to_iso: datetime | None = None,
         member_id: int | None = None,
+        class_type_query: str | None = None,
         fields: list[str] | None = None,
         top: int | None = None,
     ) -> Dict[str, Any]:
@@ -305,10 +380,16 @@ class PerfectGymClient:
             to_iso.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]  # mikrosekundy → milisekundy
             + "Z"
         )
-
+        filter_expr = f"isDeleted eq false and startdate gt {start_str} and startdate lt {end_str}"
+        # dodatkowy filtr po typie zajęć (np. 'pilates')
+        # wymaganie: and contains(tolower(classType/name),'pilates')
+        if class_type_query:
+            q = class_type_query.strip().lower().replace("'", "''")
+            if q:
+                filter_expr += f" and contains(tolower(classType/name),'{q}')"
         # --- PARAMETRY IDENTYCZNE JAK W TWOIM CURLU --- #
         params = {
-            "$filter": f"isDeleted eq false and startdate gt {start_str} and startdate lt {end_str}",
+            "$filter": filter_expr,
             "$expand": "classType",
             "$orderby": "startdate",
         }

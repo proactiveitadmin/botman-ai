@@ -40,8 +40,16 @@ class FakeCRMService:
         self.reserve_calls = []
         self.available_classes_calls = []
 
-    def get_available_classes(self, tenant_id: str, top: int = 10):
-        self.available_classes_calls.append((tenant_id, top))
+    def get_available_classes(
+        self,
+        tenant_id: str,
+        top: int = 10,
+        class_type_query: str | None = None,
+        **kwargs,
+    ):
+        self.available_classes_calls.append(
+            {"tenant_id": tenant_id, "top": top, "class_type_query": class_type_query}
+        )
         # 2 przykładowe zajęcia
         return {
             "value": [
@@ -239,7 +247,6 @@ def test_reserve_class_selection_does_not_hit_nlu_and_starts_email_otp_challenge
         lambda *args, **kwargs: True,
         raising=True,
     )
-
     # --- Krok 1: user prosi o rezerwację ---
     msg1 = _make_msg("Chciałbym się zapisać na zajęcia")
     actions1 = routing.handle(msg1)

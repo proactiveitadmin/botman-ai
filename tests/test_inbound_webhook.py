@@ -2,6 +2,7 @@ import os
 import pytest
 import json
 
+@pytest.mark.slow
 def test_inbound_pushes_to_sqs_aws(aws_stack):
     from src.lambdas.inbound_webhook.handler import lambda_handler  # <- import dopiero tu
 
@@ -15,6 +16,7 @@ def test_inbound_pushes_to_sqs_aws(aws_stack):
     res = lambda_handler(event, None)
     assert res["statusCode"] == 200
 
+@pytest.mark.slow
 def test_inbound_rate_limited_returns_429(aws_stack, monkeypatch):
     monkeypatch.setenv("InboundEventsQueueUrl", aws_stack["inbound"])
     monkeypatch.setenv("TWILIO_SKIP_SIGNATURE", "true")
@@ -42,7 +44,7 @@ def test_inbound_rate_limited_returns_429(aws_stack, monkeypatch):
     res = lambda_handler(event, None)
     assert res["statusCode"] == 429
 
-
+@pytest.mark.slow
 def test_inbound_pushes_to_sqs(monkeypatch):
     """
     Szybki test: sprawdzamy, że inbound_webhook:

@@ -97,6 +97,7 @@ class FakeCRM:
                 }
             ]
         }
+        self.available_classes_calls: list[dict] = []
 
     def get_available_classes(
         self,
@@ -105,9 +106,12 @@ class FakeCRM:
         from_iso=None,
         to_iso=None,
         member_id=None,
+        class_type_query: str | None = None,
         fields=None,
         top=None,
+        **kwargs,
     ):
+        self.available_classes_calls.append({"tenant_id": tenant_id, "class_type_query": class_type_query, "top": top})
         return self.available_classes_resp
 
     def reserve_class(self, tenant_id: str, member_id: str, class_id: str, idempotency_key: str, comments: str):
@@ -175,6 +179,9 @@ class FakeTemplateServicePG:
 
         if template_code == "reserve_class_failed":
             return "Nie udało się zarezerwować zajęć."
+            
+        if template_code == "reserve_class_already_booked":
+            return "Te zajęcia są już przez Ciebie zarezerwowane."
 
         if template_code == "reserve_class_declined":
             return "Anulowano rezerwację."

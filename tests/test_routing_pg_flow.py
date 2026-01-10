@@ -35,7 +35,7 @@ def _build_router(monkeypatch) -> tuple[RoutingService, InMemoryConversations]:
     return router, conv
 
 
-def test_pg_available_classes_sets_state_and_pending(mock_ai, monkeypatch):
+def test_crm_available_classes_sets_state_and_pending(mock_ai, monkeypatch):
     """
     Wiadomość o dostępnych zajęciach:
     - zwraca listę zajęć,
@@ -48,11 +48,10 @@ def test_pg_available_classes_sets_state_and_pending(mock_ai, monkeypatch):
         tenant_id="tenantA",
         from_phone="whatsapp:+48123123123",
         to_phone="whatsapp:+48000000000",
-        body="jakie są dostępne zajęcia?",  # mock_ai -> intent pg_available_classes
+        body="jakie są dostępne zajęcia?",  # mock_ai -> intent crm_available_classes
         channel="whatsapp",
         channel_user_id="whatsapp:+48123123123",
     )
-
     actions = router.handle(msg)
 
     assert len(actions) == 1
@@ -193,6 +192,70 @@ def test_pending_reservation_confirmation_yes_triggers_crm_and_clears_pending(mo
     assert res_call["member_id"] == "111"
     assert res_call["class_id"] == "CLASS-1"
 
+def test_pending_reservation_confirmation_yes_when_already_booked_returns_dedicated_message(monkeypatch, mock_ai):
+    """Jeśli PG zwróci business error 'ClassesAlreadyBooked', użytkownik dostaje dedykowany komunikat."""
+    router, conv = _build_router(monkeypatch)
+    crm: FakeCRM = router.crm  # type: ignore[assignment]
+
+    tenant_id = "tenantA"
+    phone = "whatsapp:+48123123123"
+    channel = "whatsapp"
+    channel_user_id = phone
+    pk = "pending#" + phone
+
+    conv.pending[pk] = {
+        "pk": pk,
+        "sk": "pending",
+        "class_id": "CLASS-1",
+        "member_id": "111",
+        "idempotency_key": "idem-123",
+        "class_name": "Zumba",
+        "class_date": "2025-11-23",
+        "class_time": "10:00",
+    }
+
+    def fake_reserve_class(*args, **kwargs):
+        # zachowujemy log rezerwacji dla asercji, ale zwracamy mapped_error
+        crm.reservations.append(
+            {
+                "tenant_id": kwargs.get("tenant_id"),
+                "member_id": kwargs.get("member_id"),
+                "class_id": kwargs.get("class_id"),
+                "idem": kwargs.get("idempotency_key"),
+                "comments": kwargs.get("comments"),
+            }
+        )
+        return {
+            "ok": False,
+            "status_code": 400,
+            "mapped_error": "classes_already_booked",
+            "pg_error": {"code": "ClassesAlreadyBooked"},
+        }
+
+    monkeypatch.setattr(crm, "reserve_class", fake_reserve_class)
+
+    msg = Message(
+        tenant_id=tenant_id,
+        from_phone=phone,
+        to_phone="whatsapp:+48000000000",
+        body="tak",
+        channel=channel,
+        channel_user_id=channel_user_id,
+    )
+
+    actions = router.handle(msg)
+
+    assert len(actions) == 1
+    assert actions[0].type == "reply"
+    assert "już" in actions[0].payload["body"].lower()
+    assert "zarezerw" in actions[0].payload["body"].lower()
+
+    # pending wyczyszczony nawet w przypadku business erroru
+    assert pk not in conv.pending
+
+    # CRM został wywołany
+    assert len(crm.reservations) == 1
+
 def test_email_otp_success_clears_state_and_runs_post_intent(monkeypatch):
     router, conv = _build_router(monkeypatch)
 
@@ -264,3 +327,87 @@ def test_email_otp_success_clears_state_and_runs_post_intent(monkeypatch):
         "crm_otp_email",
     ):
         assert field not in stored_conv
+        
+def test_reserve_class_with_class_type_name_returns_list_not_confirmation(
+    monkeypatch, mock_ai
+):
+    """
+    Użytkownik pyta: 'mogę zarezerwować pilates?'
+
+    Oczekujemy:
+    - zapytania do PG o listę zajęć z filtrem classType/name contains 'pilates'
+    - odpowiedzi z listą zajęć
+    - stanu rozmowy: awaiting_class_selection
+    - brak pytania o potwierdzenie (TAK/NIE)
+    """
+    router, conv = _build_router(monkeypatch)
+    crm: FakeCRM = router.crm  # type: ignore
+
+    # Fake odpowiedź PG: lista zajęć Pilates
+    crm.available_classes_resp = {
+        "ok": True,
+        "value": [
+            {
+                "id": "CLASS-1",
+                "startDate": "2026-01-12T18:00:00",
+                "classType": {"name": "Pilates"},
+                "instructor": {"name": "Anna"},
+            },
+            {
+                "id": "CLASS-2",
+                "startDate": "2026-01-13T09:00:00",
+                "classType": {"name": "Pilates"},
+                "instructor": {"name": "Kasia"},
+            },
+        ],
+    }
+
+    # NLU zwraca class_id jako tekst (nazwa typu zajęć!)
+    def fake_detect_intent(*args, **kwargs):
+        return {
+            "intent": "reserve_class",
+            "confidence": 0.95,
+            "slots": {
+                "class_id": "pilates",
+            },
+        }
+
+    monkeypatch.setattr(router.nlu, "classify_intent", lambda body, lang: fake_detect_intent())
+
+    msg = Message(
+        tenant_id="tenantA",
+        from_phone="whatsapp:+48123123123",
+        to_phone="whatsapp:+48000000000",
+        body="mogę zarezerwować pilates?",
+        channel="whatsapp",
+        channel_user_id="whatsapp:+48123123123",
+    )
+
+    actions = router.handle(msg)
+
+    # --- ASSERTY ---
+
+    # 1️⃣ Jedna odpowiedź – lista zajęć
+    assert len(actions) == 1
+    assert actions[0].type == "reply"
+
+    body = actions[0].payload["body"].lower()
+
+    # 2️⃣ Jest lista zajęć, a nie confirmation
+    assert "pilates" in body
+    assert "1." in body or "1)" in body
+    assert "tak" not in body
+    assert "nie" not in body
+
+    # 3️⃣ CRM dostał filtr po typie zajęć
+    assert len(crm.available_classes_calls) == 1
+    call = crm.available_classes_calls[0]
+    assert call["class_type_query"] == "pilates"
+
+    # 4️⃣ Stan rozmowy: wybór klasy z listy
+    conv_state = conv.get_conversation(
+        tenant_id="tenantA",
+        channel="whatsapp",
+        channel_user_id="whatsapp:+48123123123",
+    )
+    assert conv_state["state_machine_status"] == "awaiting_class_selection"
