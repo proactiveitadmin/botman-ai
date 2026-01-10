@@ -395,9 +395,16 @@ def requests_mock(monkeypatch):
                 raise AssertionError(f"Unexpected GET {url!r} in test_pg_available_classes")
             payload, status = self._mappings[key]
             return _Response(payload, status)
+        
+        def _fake_request(self, method, url, **kwargs):
+            m = (method or "").upper()
+            if m == "GET":
+                return self._fake_get(url, **kwargs)
+            raise AssertionError(f"Unexpected {m} {url!r} in requests_mock fixture")
 
     mock = _RequestsMock()
     monkeypatch.setattr("requests.get", mock._fake_get)
+    monkeypatch.setattr("requests.request", mock._fake_request)
     return mock
     
 def wire_subservices(svc):

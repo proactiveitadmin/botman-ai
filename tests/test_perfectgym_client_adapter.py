@@ -9,10 +9,11 @@ import src.adapters.perfectgym_client as pg_mod
 
 
 class DummyResp:
-    def __init__(self, status_code=200, payload=None, text="OK", raise_http=False):
+    def __init__(self, status_code=200, payload=None, text="OK", raise_http=False, headers=None):
         self.status_code = status_code
         self._payload = payload or {}
         self.text = text
+        self.headers = headers or {}
         self._raise_http = raise_http
 
     def raise_for_status(self):
@@ -44,13 +45,15 @@ def test_get_member_ok(monkeypatch):
 
     called = {}
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
+        called["method"] = method
         called["url"] = url
         called["headers"] = headers
         called["timeout"] = timeout
         return DummyResp(payload={"Id": 123, "name": "John"})
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_member("123")
@@ -65,10 +68,11 @@ def test_get_member_by_phone_error_logs_and_returns_empty(monkeypatch, capsys):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
         raise pg_mod.requests.RequestException("boom")
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_member_by_phone("+48123123123")
@@ -97,10 +101,11 @@ def test_reserve_class_post_error(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_request(method, url, json=None, headers=None, timeout=None, **kwargs):
+        assert method == "POST"
         raise pg_mod.requests.RequestException("boom")
 
-    monkeypatch.setattr(pg_mod.requests, "post", fake_post)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.reserve_class(member_id="10", class_id="20", idempotency_key="KEY")
@@ -115,10 +120,11 @@ def test_reserve_class_http_error(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_request(method, url, json=None, headers=None, timeout=None, **kwargs):
+        assert method == "POST"
         return DummyResp(status_code=400, text="Bad Request", raise_http=True)
 
-    monkeypatch.setattr(pg_mod.requests, "post", fake_post)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.reserve_class(member_id="10", class_id="20")
@@ -135,14 +141,15 @@ def test_reserve_class_success(monkeypatch):
 
     captured = {}
 
-    def fake_post(url, json=None, headers=None, timeout=None):
+    def fake_request(method, url, json=None, headers=None, timeout=None, **kwargs):
+        assert method == "POST"
         captured["url"] = url
         captured["json"] = json
         captured["headers"] = headers
         captured["timeout"] = timeout
         return DummyResp(status_code=201, payload={"ok": True})
 
-    monkeypatch.setattr(pg_mod.requests, "post", fake_post)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.reserve_class(member_id="10", class_id="30", idempotency_key="IDEMP", allow_overlap=True)
@@ -163,14 +170,15 @@ def test_get_available_classes_success(monkeypatch):
 
     captured = {}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_request(method, url, headers=None, params=None, timeout=None, **kwargs):
+        assert method == "GET"
         captured["url"] = url
         captured["headers"] = headers
         captured["params"] = params
         captured["timeout"] = timeout
         return DummyResp(payload={"value": [{"id": 1}]})
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_available_classes(top=5)
@@ -189,10 +197,11 @@ def test_get_available_classes_error(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_request(method, url, headers=None, params=None, timeout=None, **kwargs):
+        assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_available_classes()
@@ -206,12 +215,13 @@ def test_get_contracts_by_email_and_phone_success(monkeypatch):
 
     captured = {}
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_request(method, url, headers=None, params=None, timeout=None, **kwargs):
+        assert method == "GET"
         captured["url"] = url
         captured["params"] = params
         return DummyResp(payload={"value": [{"id": "c1"}]})
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_contracts_by_email_and_phone("u@example.com", "+48123")
@@ -225,10 +235,11 @@ def test_get_contracts_by_email_and_phone_error(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, params=None, timeout=None):
+    def fake_request(method, url, headers=None, params=None, timeout=None, **kwargs):
+        assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_contracts_by_email_and_phone("u@example.com", "+48123")
@@ -240,10 +251,11 @@ def test_get_contracts_by_member_id_success(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
         return DummyResp(payload={"Contracts": [{"id": "c1"}]})
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_contracts_by_member_id("123")
@@ -255,10 +267,11 @@ def test_get_contracts_by_member_id_error(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_contracts_by_member_id("123")
@@ -281,7 +294,8 @@ def test_get_member_balance_success(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
         return DummyResp(
             payload={
                 "memberBalance": {
@@ -293,7 +307,7 @@ def test_get_member_balance_success(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_member_balance(123)
@@ -308,10 +322,11 @@ def test_get_member_balance_error(monkeypatch):
     monkeypatch.setattr(settings, "pg_client_id", "id", raising=False)
     monkeypatch.setattr(settings, "pg_client_secret", "secret", raising=False)
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_member_balance(123)
@@ -335,11 +350,12 @@ def test_get_class_success_with_collection(monkeypatch):
 
     captured = {}
 
-    def fake_get(url, headers=None, timeout=None):
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        assert method == "GET"
         captured["url"] = url
         return DummyResp(payload={"value": [{"id": 1, "name": "Yoga"}]})
 
-    monkeypatch.setattr(pg_mod.requests, "get", fake_get)
+    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
     client = PerfectGymClient()
     resp = client.get_class("1")  # string ID

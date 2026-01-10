@@ -152,6 +152,13 @@ def lambda_handler(event, context):
     - wywołuje RoutingService.handle,
     - dla akcji typu "reply" publikuje komunikat do kolejki outbound.
     """
+    # limiter w CRMService jest w pamięci procesu (warm container),
+    # więc resetujemy go na początku invokacji żeby działał "per invoke"
+    try:
+        ROUTER.crm.reset_invocation_limits()
+    except Exception:
+        pass
+
     records = event.get("Records") or []
     if not records:
         logger.info({"handler": "message_router", "event": "no_records"})

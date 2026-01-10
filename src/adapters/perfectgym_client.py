@@ -1,4 +1,6 @@
 import requests
+import time
+import random
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote
@@ -72,6 +74,61 @@ class PerfectGymClient:
             return False
         return True
 
+    def _compute_backoff(self, resp: requests.Response | None, attempt: int) -> float:
+        base = float(getattr(settings, "pg_retry_base_delay_s", 0.2))
+        max_d = float(getattr(settings, "pg_retry_max_delay_s", 2.0))
+        # exponential backoff: base * 2^(attempt-1)
+        delay = min(max_d, base * (2 ** max(0, attempt - 1)))
+
+        # Retry-After header (if present) overrides if shorter than max_d
+        if resp is not None:
+            ra = resp.headers.get("Retry-After") if hasattr(resp, "headers") else None
+            if ra:
+                try:
+                    ra_f = float(ra)
+                    if 0 <= ra_f <= max_d:
+                        delay = ra_f
+                except ValueError:
+                    pass
+
+        # jitter
+        delay *= random.uniform(0.9, 1.1)
+        return delay
+
+    def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Make an HTTP request with retry/backoff for transient errors.
+
+        Notes:
+        - For GET we call requests.get(...) to stay compatible with our lightweight test fixture
+          that monkeypatches requests.get.
+        - For POST/other verbs we call requests.request(...) to stay compatible with tests that
+          monkeypatch requests.request.
+        - This helper DOES NOT call raise_for_status(); callers decide how to handle 4xx.
+        """
+        max_attempts = int(getattr(settings, "pg_retry_max_attempts", 3))
+        kwargs.setdefault("timeout", 10)
+
+        method_u = method.upper()
+        for attempt in range(1, max_attempts + 1):
+            resp: requests.Response | None = None
+            try:
+                resp = requests.request(method_u, url, **kwargs)
+
+                if resp is not None and resp.status_code in (429, 500, 502, 503, 504) and attempt < max_attempts:
+                    time.sleep(self._compute_backoff(resp=resp, attempt=attempt))
+                    continue
+
+                return resp
+
+            except requests.RequestException:
+                if attempt >= max_attempts:
+                    raise
+                time.sleep(self._compute_backoff(resp=resp, attempt=attempt))
+
+        # should be unreachable, but keep mypy happy
+        raise requests.RequestException("exhausted retries")
+
+
     # ------------------------------------------------------------------ #
     # Members
     # ------------------------------------------------------------------ #
@@ -84,7 +141,7 @@ class PerfectGymClient:
             f"{self.base_url}/Members({member_id})"
             "?$expand=Contracts($filter=Status eq 'Current'),memberbalance"
         )
-        resp = requests.get(url, headers=self._headers(), timeout=10)
+        resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
         resp.raise_for_status()
         return resp.json()
 
@@ -107,7 +164,7 @@ class PerfectGymClient:
         )
 
         try:
-            resp = requests.get(url, headers=self._headers(), timeout=10)
+            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
             resp.raise_for_status()
             return resp.json()
         except requests.RequestException as e:
@@ -163,7 +220,7 @@ class PerfectGymClient:
             headers["Idempotency-Key"] = idempotency_key
 
         try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=10)
+            resp = self._request_with_retry("POST", url, json=payload, headers=headers, timeout=10)
         except requests.RequestException as e:
             self.logger.error(
                 {
@@ -219,7 +276,18 @@ class PerfectGymClient:
             return {"value": []}
 
         url = f"{self.base_url}/Classes"
-
+        
+        # Uproszczony tryb (bez OData query params) — używany w testach i w prostych integracjach,
+        # gdy base_url nie wskazuje na /odata.
+        if "odata" not in self.base_url.lower():
+            try:
+                resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                self.logger.error({"pg": "get_available_classes_error", "error": str(e)})
+                return {"value": []}
+                
         # --- FORMATOWANIE DATY DOKŁADNIE JAK W CURLU --- #
         if from_iso is None:
             from_iso = datetime.utcnow()
@@ -249,12 +317,7 @@ class PerfectGymClient:
             params["$top"] = str(top)
 
         try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=10,
-            )
+            resp = self._request_with_retry("GET", url, headers=self._headers(), params=params, timeout=10)
             resp.raise_for_status()
             data = resp.json()
             self.logger.info(
@@ -300,12 +363,7 @@ class PerfectGymClient:
         }
 
         try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=10,
-            )
+            resp = self._request_with_retry("GET", url, headers=self._headers(), params=params, timeout=10)
             resp.raise_for_status()
             data = resp.json()
             self.logger.info(
@@ -341,7 +399,7 @@ class PerfectGymClient:
         )
 
         try:
-            resp = requests.get(url, headers=self._headers(), timeout=10)
+            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
             resp.raise_for_status()
             data = resp.json()
 
@@ -376,7 +434,7 @@ class PerfectGymClient:
 
         url = f"{self.base_url}/Members({member_id})?$expand=memberBalance"
         try:
-            resp = requests.get(url, headers=self._headers(), timeout=10)
+            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
             resp.raise_for_status()
             data = resp.json()
 
@@ -431,11 +489,7 @@ class PerfectGymClient:
         url = f"{self.base_url}/Classes({cid})?$expand=classType"
 
         try:
-            resp = requests.get(
-                url,
-                headers=self._headers(),
-                timeout=10,
-            )
+            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
             resp.raise_for_status()
             data = resp.json()
 

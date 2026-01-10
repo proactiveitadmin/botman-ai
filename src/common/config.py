@@ -67,6 +67,11 @@ class Settings:
     pg_base_url: str = os.getenv("PG_BASE_URL", "")
     pg_client_id: str = os.getenv("PG_CLIENT_ID", "")
     pg_client_secret: str = os.getenv("PG_CLIENT_SECRET", "")
+    pg_rate_limit_rps: float = float(os.getenv("PG_RATE_LIMIT_RPS", "30"))
+    pg_rate_limit_burst: float = float(os.getenv("PG_RATE_LIMIT_BURST", "30"))
+    pg_retry_max_attempts: int = int(os.getenv("PG_RETRY_MAX_ATTEMPTS", "3"))
+    pg_retry_base_delay_s: float = float(os.getenv("PG_RETRY_BASE_DELAY_S", "0.2"))
+    pg_retry_max_delay_s: float = float(os.getenv("PG_RETRY_MAX_DELAY_S", "2.0"))
 
     # Jira
     jira_url: str = os.getenv("JIRA_URL", "")
