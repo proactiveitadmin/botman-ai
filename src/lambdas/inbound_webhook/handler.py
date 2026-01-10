@@ -14,6 +14,7 @@ import re
 
 from ...services.spam_service import SpamService
 from ...repos.tenants_repo import TenantsRepo
+from ...services.tenant_config_service import TenantConfigService
 from ...common.utils import new_id
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.security import verify_twilio_signature
@@ -25,6 +26,7 @@ from ...common.security import user_hmac
 NGROK_HOST_HINTS = (".ngrok-free.app", ".ngrok.io")
 spam_service = SpamService()
 tenants_repo = TenantsRepo()
+tenant_cfg = TenantConfigService()
 
 
 def _build_public_url(event, headers_in) -> str:
@@ -142,15 +144,39 @@ def lambda_handler(event, context):
 
         params = _parse_params(body_raw, content_type)
         
+        # 1) resolve tenant first (token is per-tenant)
+        try:
+            tenant_id = _resolve_tenant_id(event, params)
+        except Exception as e:
+            logger.error({
+                "webhook": "tenant_unresolved",
+                "to": mask_phone(params.get("To")),
+                "pathParameters": event.get("pathParameters"),
+                "error": str(e),
+            })
+            # 200 for Twilio (do not retry), but do not enqueue
+            return {
+                "statusCode": 200,
+                "headers": {"Content-Type": "text/xml"},
+                "body": "<Response></Response>",
+            }
+
+        # 2) per-tenant signature verification
         url = _build_public_url(event, headers_in)
         signature = headers_in.get("X-Twilio-Signature", "")
-        
-        # Weryfikacja sygnatury Twilio (jeśli nie wyłączona flagą)
-        if not verify_twilio_signature(url, params, signature):
-            logger.warning({"webhook": "invalid_signature"})
-            return {"statusCode": 403, "body": "Forbidden"}
 
-        tenant_id = _resolve_tenant_id(event, params)
+        token = None
+        try:
+            cfg = tenant_cfg.get(tenant_id)
+            token = ((cfg.get("twilio") or {}).get("auth_token") or "").strip() or None
+        except Exception as e:
+            logger.error({"webhook": "tenant_cfg_load_failed", "tenant_id": tenant_id, "error": str(e)})
+            token = None  # fallback to global token in verify_twilio_signature
+
+        if not verify_twilio_signature(url, params, signature, auth_token=token):
+            logger.warning({"webhook": "invalid_signature", "tenant_id": tenant_id})
+            return {"statusCode": 403, "body": "Forbidden"}
+        
         if not tenant_id:
             logger.error({
                 "webhook": "tenant_unresolved",

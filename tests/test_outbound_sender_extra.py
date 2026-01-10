@@ -1,19 +1,7 @@
 import json
+import os
 
 from src.lambdas.outbound_sender import handler
-
-
-class DummyTwilio:
-    def __init__(self, should_fail=False):
-        self.calls = []
-        self.should_fail = should_fail
-
-    def send_text(self, to, body):
-        self.calls.append({"to": to, "body": body})
-        if self.should_fail:
-            raise RuntimeError("Twilio error")
-        return {"status": "OK", "sid": "sid-1"}
-
 
 def test_lambda_no_records(monkeypatch):
     event = {}
@@ -23,9 +11,25 @@ def test_lambda_no_records(monkeypatch):
 
 
 def test_lambda_bad_json_is_skipped(monkeypatch):
-    twilio = DummyTwilio()
-    monkeypatch.setattr(handler, "twilio", twilio)
+    os.environ["DEV_MODE"] = "true"
 
+    # 1) Mock idempotency: pierwsze acquire=True, drugie=False
+    it = iter([True, False])
+    monkeypatch.setattr(handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
+
+    # 2) Mock Twilio via factory
+    calls = []
+
+    class DummyTwilio:
+        def send_text(self, to, body):
+            calls.append({"to": to, "body": body})
+            return {"status": "OK", "sid": "fake"}
+
+    class DummyFactory:
+        def twilio(self, tenant_id):
+            return DummyTwilio()
+
+    monkeypatch.setattr(handler, "clients", DummyFactory())
     bad_body = "{not-json"
     good_payload = {"to": "whatsapp:+48123", "body": "hello"}
 
@@ -39,13 +43,30 @@ def test_lambda_bad_json_is_skipped(monkeypatch):
     res = handler.lambda_handler(event, None)
     assert res["statusCode"] == 200
     # mimo pierwszego złego body, drugi rekord został wysłany
-    assert len(twilio.calls) == 1
-    assert twilio.calls[0]["to"] == "whatsapp:+48123"
+    assert len(calls) == 1
+    assert calls[0]["to"] == "whatsapp:+48123"
 
 
 def test_lambda_invalid_payload_missing_to(monkeypatch):
-    twilio = DummyTwilio()
-    monkeypatch.setattr(handler, "twilio", twilio)
+    os.environ["DEV_MODE"] = "true"
+
+    # 1) Mock idempotency: pierwsze acquire=True, drugie=False
+    it = iter([True, False])
+    monkeypatch.setattr(handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
+
+    # 2) Mock Twilio via factory
+    calls = []
+
+    class DummyTwilio:
+        def send_text(self, to, body):
+            calls.append({"to": to, "body": body})
+            return {"status": "OK", "sid": "fake"}
+
+    class DummyFactory:
+        def twilio(self, tenant_id):
+            return DummyTwilio()
+
+    monkeypatch.setattr(handler, "clients", DummyFactory())
 
     event = {
         "Records": [
@@ -56,13 +77,29 @@ def test_lambda_invalid_payload_missing_to(monkeypatch):
     res = handler.lambda_handler(event, None)
     assert res["statusCode"] == 200
     # nie powinno być prób wysyłki
-    assert twilio.calls == []
+    assert calls == []
 
 
 def test_lambda_twilio_exception_is_caught(monkeypatch):
-    twilio = DummyTwilio(should_fail=True)
-    monkeypatch.setattr(handler, "twilio", twilio)
+    os.environ["DEV_MODE"] = "true"
 
+    # 1) Mock idempotency: pierwsze acquire=True, drugie=False
+    it = iter([True, False])
+    monkeypatch.setattr(handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
+
+    # 2) Mock Twilio via factory
+    calls = []
+
+    class DummyTwilio:
+        def send_text(self, to, body):
+            calls.append({"to": to, "body": body})
+            return {"status": "OK", "sid": "fake"}
+
+    class DummyFactory:
+        def twilio(self, tenant_id):
+            return DummyTwilio()
+
+    monkeypatch.setattr(handler, "clients", DummyFactory())
     event = {
         "Records": [
             {"body": json.dumps({"to": "whatsapp:+48123", "body": "hello"})},
@@ -72,4 +109,4 @@ def test_lambda_twilio_exception_is_caught(monkeypatch):
     res = handler.lambda_handler(event, None)
     assert res["statusCode"] == 200
     # mimo wyjątku nie ma crasha, a Twilio było wywołane
-    assert len(twilio.calls) == 1
+    assert len(calls) == 1

@@ -31,12 +31,29 @@ BASE_CLASS_FIELDS = [
 
 
 class PerfectGymClient:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
+    ) -> None:
         # np. "https://<club>.perfectgym.com/api/v2.2/odata"
-        self.base_url: str = (settings.pg_base_url or "").rstrip("/")
-        self.client_id: str = settings.pg_client_id or ""
-        self.client_secret: str = settings.pg_client_secret or ""
+        self.base_url: str = ((base_url or settings.pg_base_url or "")).rstrip("/")
+        self.client_id: str = (client_id or settings.pg_client_id or "")
+        self.client_secret: str = (client_secret or settings.pg_client_secret or "")
         self.logger = logger
+    
+    @classmethod
+    def from_tenant_config(cls, tenant_cfg: dict) -> "PerfectGymClient":
+        pg = (tenant_cfg or {}).get("pg") or {}
+        if not isinstance(pg, dict):
+            pg = {}
+        return cls(
+            base_url=pg.get("base_url"),
+            client_id=pg.get("client_id"),
+            client_secret=pg.get("client_secret"),
+        )
 
     # ------------------------------------------------------------------ #
     # Helpers

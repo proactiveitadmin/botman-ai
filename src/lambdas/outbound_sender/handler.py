@@ -1,14 +1,14 @@
 import json
 
-from ...adapters.twilio_client import TwilioClient
 from ...common.aws import sqs_client, resolve_optional_queue_url
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
 from ...services.metrics_service import MetricsService
 from ...repos.idempotency_repo import IdempotencyRepo
+from ...services.clients_factory import ClientsFactory
 
 
-twilio = TwilioClient()
+clients = ClientsFactory()
 metrics = MetricsService()
 IDEMPOTENCY = IdempotencyRepo()
 
@@ -90,7 +90,7 @@ def lambda_handler(event, context):
                 logger.warning({"sender": "invalid_payload", "payload": payload})
                 continue
 
-            res = twilio.send_text(to=to, body=text)
+            res = clients.twilio(tenant_id).send_text(to=to, body=text)
             res_status = res.get("status", "UNKNOWN")
 
             metrics.incr("message_sent", channel="whatsapp", status=res_status)

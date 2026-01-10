@@ -1,9 +1,0 @@
-{
-  "pk":            {"S": "default"},                      // albo "template#default"
-  "sk":            {"S": "handover_to_staff#pl"},         // jeĹ›li tabela ma teĹĽ sort key
-  "tenant_id":     {"S": "default"},
-  "template_code": {"S": "handover_to_staff"},
-  "language_code": {"S": "pl"},
-  "body":          {"S": "ĹÄ…czÄ™ CiÄ™ z pracownikiem klubu..."},
-  "placeholders":  {"L": []}
-}

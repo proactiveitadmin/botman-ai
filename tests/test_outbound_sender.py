@@ -14,7 +14,6 @@ def test_outbound_sender_dev_mode_whatsapp(monkeypatch):
             # w tym teście nie powinno polecieć do prawdziwego Twilio
             return {"status": "OK", "sid": "fake-sid"}
 
-    monkeypatch.setattr(handler, "twilio", DummyTwilio())
 
     event = {
         "Records": [
@@ -54,7 +53,6 @@ def test_outbound_sender_web_with_queue(monkeypatch):
         def send_text(self, *args, **kwargs):
             raise AssertionError("Twilio nie powinno być wołane dla channel=web")
 
-    monkeypatch.setattr(handler, "twilio", DummyTwilio())
 
     event = {
         "Records": [
@@ -102,7 +100,6 @@ def test_outbound_sender_web_without_queue(monkeypatch):
         def send_text(self, *args, **kwargs):
             raise AssertionError("Twilio nie powinno być wołane dla channel=web")
 
-    monkeypatch.setattr(handler, "twilio", DummyTwilio())
 
     event = {
         "Records": [

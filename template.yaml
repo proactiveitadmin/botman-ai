@@ -12,6 +12,9 @@ Parameters:
   OtpHashPepperParam:
     Type: String
     Default: /botman/prod/otp_hash_pepper
+  TenantSecretsPrefix:
+    Type: String
+    Default: /botman/prod/
 
   SesFromEmail:
     Type: String
@@ -97,6 +100,7 @@ Globals:
         DDB_TABLE_MESSAGES:      !Sub 'Messages-${AWS::StackName}'
         DDB_TABLE_TEMPLATES:     !Sub 'Templates-${AWS::StackName}'
         DDB_TABLE_CAMPAIGNS:     !Sub 'Campaigns-${AWS::StackName}'
+        DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN: tenant_next_run_at
         DDB_TABLE_CONSENTS:      !Sub 'Consents-${AWS::StackName}'
         DDB_TABLE_INTENTS_STATS: !Sub 'IntentsStats-${AWS::StackName}'
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
@@ -114,6 +118,8 @@ Globals:
         MESSAGES_RETENTION_DAYS: "5"
         CONVERSATIONS_RETENTION_DAYS: "5"
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
+        
+        TENANT_CONFIG_CACHE_TTL: "600"
            
 
 Resources:
@@ -305,10 +311,36 @@ Resources:
       AttributeDefinitions:
         - AttributeName: pk
           AttributeType: S
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: next_run_at
+          AttributeType: N
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
-
+      GlobalSecondaryIndexes:
+        - IndexName: tenant_next_run_at
+          KeySchema:
+            - AttributeName: tenant_id
+              KeyType: HASH
+            - AttributeName: next_run_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              # Tylko pola potrzebne do wysyłki (pipeline campaign_runner -> outbound)
+              - campaign_id
+              - active
+              - tenant_id
+              - next_run_at
+              - send_from
+              - send_to
+              - recipients
+              - include_tags
+              - exclude_tags
+              - template_name
+              - body
+              - language_code
   Consents:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -418,6 +450,8 @@ Resources:
       Policies:
         - SQSSendMessagePolicy:
             QueueName: !GetAtt InboundEventsQueue.QueueName
+        - DynamoDBReadPolicy:
+            TableName: !Ref Tenants
         - DynamoDBCrudPolicy:             
             TableName: !Ref IntentsStats
         - Statement:
@@ -427,6 +461,7 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
             - Effect: Allow
               Action: kms:Decrypt
               Resource: "*"
@@ -530,6 +565,8 @@ Resources:
             QueueName: !GetAtt OutboundQueue.QueueName      
         - DynamoDBCrudPolicy:
             TableName: !Ref Idempotency
+        - DynamoDBReadPolicy:
+            TableName: !Ref Tenants           
         - Statement:
             - Effect: Allow
               Action: ssm:GetParameter
@@ -537,6 +574,7 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
             - Effect: Allow
               Action: kms:Decrypt
               Resource: "*"
@@ -546,6 +584,7 @@ Resources:
       Environment:
         Variables:    
           WebOutboundEventsQueueUrl: !Ref OutboundQueue
+
       Events:
         SQSEvent:
           Type: SQS
@@ -582,6 +621,18 @@ Resources:
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt Tenants.Arn
+                - !GetAtt Templates.Arn
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub '${Tenants.Arn}/index/*'
+                - !Sub '${Templates.Arn}/index/*'
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue
@@ -712,6 +763,54 @@ Resources:
             RestApiId: !Ref MyApi
             Path: /health
             Method: get
+
+  InboundWebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/inbound-webhook-${AWS::StackName}'
+      RetentionInDays: 30
+
+  MessageRouterLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/message-router-${AWS::StackName}'
+      RetentionInDays: 30
+
+  OutboundSenderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/outbound-sender-${AWS::StackName}'
+      RetentionInDays: 30
+
+  CampaignRunnerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/campaign-runner-${AWS::StackName}'
+      RetentionInDays: 30
+
+  HousekeepingLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/housekeeping-${AWS::StackName}'
+      RetentionInDays: 30
+
+  PgReservationsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/pg-reservations-${AWS::StackName}'
+      RetentionInDays: 30
+
+  WebWidgetLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/web-widget-${AWS::StackName}'
+      RetentionInDays: 30
+
+  HealthLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/health-${AWS::StackName}'
+      RetentionInDays: 30
 
 Outputs:
   ApiUrl:

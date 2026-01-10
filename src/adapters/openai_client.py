@@ -132,8 +132,8 @@ class OpenAIClient:
         tylko powodują szybki powrót z fallbackiem.
         """
         last_api_error: Optional[APIError] = None
-
-        for attempt in range(5):
+        max_attempts = 3
+        for attempt in range(max_attempts):
             try:
                 return self._chat_once(messages, model=model, max_tokens=max_tokens)
             except RateLimitError:
@@ -142,13 +142,45 @@ class OpenAIClient:
                 # 429/5xx -> retry, inne statusy -> nie ma sensu retry
                 status = getattr(e, "status_code", 0)
                 if status in (429, 500, 502, 503):
-                    time.sleep(min(2**attempt, 8) + random.uniform(0, 0.3))
+                    sleep_s = min(2**attempt, 8) + random.uniform(0, 0.3)
+                    logger.warning(
+                        {
+                            "component": "openai_client",
+                            "event": "retry_sleep",
+                            "reason": "api_status",
+                            "status_code": status,
+                            "attempt": attempt + 1,
+                            "max_attempts": max_attempts,
+                            "sleep_s": round(sleep_s, 3),
+                        }
+                    )
+                    time.sleep(sleep_s)
                 else:
                     last_api_error = e
+                    logger.error(
+                        {
+                            "component": "openai_client",
+                            "event": "non_retryable_status",
+                            "status_code": status,
+                            "attempt": attempt + 1,
+                            "max_attempts": max_attempts,
+                        }
+                    )
                     break
             except APIConnectionError:
                 # problemy sieciowe — próbujemy jeszcze raz
-                time.sleep(1.0 + random.uniform(0, 0.3))
+                sleep_s = 1.0 + random.uniform(0, 0.3)
+                logger.warning(
+                    {
+                        "component": "openai_client",
+                        "event": "retry_sleep",
+                        "reason": "connection_error",
+                        "attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "sleep_s": round(sleep_s, 3),
+                    }
+                )
+                time.sleep(sleep_s)
             except APIError as e:
                 # „logiczny” błąd API — raczej nie ustąpi po retry
                 last_api_error = e
@@ -161,8 +193,16 @@ class OpenAIClient:
                     }
                 )
                 break
-
+        
         # ostateczny fallback (json, żeby parser po drugiej stronie nie padł)
+        logger.error(
+            {
+                "component": "openai_client",
+                "event": "chat_failed_after_retries",
+                "max_attempts": max_attempts,
+                "had_last_api_error": bool(last_api_error),
+            }
+        )
         note = "LLM unavailable (retries exhausted)"
         if last_api_error is not None:
             note = f"LLM error: {type(last_api_error).__name__}: {last_api_error}"

@@ -3,14 +3,35 @@ from ..common.config import settings
 from ..common.logging import logger
 
 class JiraClient:
-    def __init__(self):
-        self.url = settings.jira_url.rstrip("/") if settings.jira_url else ""
-        self.project = settings.jira_project_key
-        self.issue_type_name = settings.jira_default_issue_type
+    def __init__(
+        self,
+        *,
+        url: str | None = None,
+        token: str | None = None,
+        project_key: str | None = None,
+        issue_type_name: str | None = None,
+    ):
+        self.url = (url or settings.jira_url or "").rstrip("/")
+        self.project = (project_key or settings.jira_project_key or "").strip()
+        self.issue_type_name = (issue_type_name or settings.jira_default_issue_type or "").strip() or "Task"
+        self.token = (token or settings.jira_token or "").strip()
+
+    @classmethod
+    def from_tenant_config(cls, tenant_cfg: dict) -> "JiraClient":
+        j = (tenant_cfg or {}).get("jira") or {}
+        if not isinstance(j, dict):
+            j = {}
+        return cls(
+            url=j.get("url"),
+            token=j.get("token"),
+            project_key=j.get("project_key"),
+            issue_type_name=j.get("issue_type_name") or j.get("issue_type") or j.get("issue_type_name"),
+        )
 
     def _auth_header(self):
-        if ":" in settings.jira_token:
-            token = base64.b64encode(settings.jira_token.encode()).decode()
+        # Jira Cloud commonly uses Basic auth: email:api_token
+        if self.token and ":" in self.token:
+            token = base64.b64encode(self.token.encode()).decode()
             return {"Authorization": f"Basic {token}"}
         return {}
         

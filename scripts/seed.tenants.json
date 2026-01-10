@@ -1,0 +1,90 @@
+{
+  "Tenants": [
+	{
+      "PutRequest": {
+        "Item": {
+			"tenant_id": { "S": "clubProactiveIT" },
+			"language_code": { "S": "pl" },
+			"twilio_to": { "S": "whatsapp:+14155238886" },
+
+			"email": {
+			  "M": {
+				"enabled": { "BOOL": true },
+				"from_email": { "S": "no-reply@proactiveit.pl" },
+				"from_name": { "S": "ProActive" },
+				"region": { "S": "eu-central-1" }
+			  }
+			},
+
+			"twilio": {
+			  "M": {
+				"account_sid_param": { "S": "/botman/prod/clubProactiveIT/twilio_sid" },
+				"auth_token_param": { "S": "/botman/prod/clubProactiveIT/twilio_token" },
+				"messaging_service_sid": { "S": "" }
+			  }
+			},
+
+			"pg": {
+			  "M": {
+				"base_url": { "S": "https://fth.perfectgym.com/api/v2.2/odata" },
+				"client_id_param": { "S": "/botman/prod/clubProactiveIT/pg_client_id" },
+				"client_secret_param": { "S": "/botman/prod/clubProactiveIT/pg_client_secret" }
+			  }
+			},
+
+			"jira": {
+			  "M": {
+				"url": { "S": "https://gym-proactiveit.atlassian.net" },
+				"token_param": { "S": "/botman/prod/clubProactiveIT/jira_token" },
+				"project_key": { "S": "KAN" },
+				"issue_type_name": { "S": "Task" }
+			  }
+			}
+		}
+	  }
+	},
+    {
+      "PutRequest": {
+        "Item": {
+			"tenant_id": { "S": "default" },
+			"language_code": { "S": "pl" },
+			"twilio_to": { "S": "whatsapp:+1400000000" },
+
+			"email": {
+			  "M": {
+				"enabled": { "BOOL": true },
+				"from_email": { "S": "no-reply@default.pl" },
+				"from_name": { "S": "default" },
+				"region": { "S": "eu-central-1" }
+			  }
+			},
+
+			"twilio": {
+			  "M": {
+				"account_sid_param": { "S": "/botman/prod/default/twilio_sid" },
+				"auth_token_param": { "S": "/botman/prod/default/twilio_token" },
+				"messaging_service_sid": { "S": "" }
+			  }
+			},
+
+			"pg": {
+			  "M": {
+				"base_url": { "S": "https://fth.perfectgym.com/api/v2.2/odata" },
+				"client_id_param": { "S": "/botman/prod/default/pg_client_id" },
+				"client_secret_param": { "S": "/botman/prod/default/pg_client_secret" }
+			  }
+			},
+
+			"jira": {
+			  "M": {
+				"url": { "S": "https://gym-proactiveit.atlassian.net" },
+				"token_param": { "S": "/botman/prod/default/jira_token" },
+				"project_key": { "S": "KAN" },
+				"issue_type_name": { "S": "Task" }
+			}
+		  }
+		}
+	  }
+	}
+  ]
+}

@@ -6,6 +6,7 @@ from datetime import datetime
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..common.logging import logger
 from ..common.logging_utils import mask_phone
+from .clients_factory import ClientsFactory
 
 
 class CRMService:
@@ -16,8 +17,20 @@ class CRMService:
     tylko z tej klasy. Dzięki temu łatwo podmienić CRM w przyszłości.
     """
 
-    def __init__(self, client: Optional[PerfectGymClient] = None) -> None:
-        self.client = client or PerfectGymClient()
+    def __init__(
+        self,
+        client: Optional[PerfectGymClient] = None,
+        *,
+        clients_factory: ClientsFactory | None = None,
+    ) -> None:
+        # Backward-compatible: if factory not provided, use a single global client
+        self._client = client or PerfectGymClient()
+        self._factory = clients_factory
+
+    def _client_for(self, tenant_id: str) -> PerfectGymClient:
+        if self._factory:
+            return self._factory.perfectgym(tenant_id)
+        return self._client
 
     # ------------------------------------------------------------------ #
     # Helpers
@@ -47,7 +60,7 @@ class CRMService:
         Normalizuje numer (usuwa prefix 'whatsapp:').
         """
         norm_phone = self._normalize_phone(phone)
-        return self.client.get_member_by_phone(phone=norm_phone)
+        return self._client_for(tenant_id).get_member_by_phone(phone=norm_phone)
 
     def get_available_classes(
         self,
@@ -62,7 +75,7 @@ class CRMService:
         """
         Zwraca raw JSON z PG (dict z kluczem 'value').
         """
-        return self.client.get_available_classes(
+        return self._client_for(tenant_id).get_available_classes(
             club_id=club_id,
             from_iso=from_iso,
             to_iso=to_iso,
@@ -82,7 +95,7 @@ class CRMService:
         tenant_id na razie jest ignorowany (konfiguracja PG jest globalna),
         ale zostawiamy go w sygnaturze na przyszłość.
         """
-        return self.client.get_class(class_id)
+        return self._client_for(tenant_id).get_class(class_id)
 
 
     def get_contracts_by_email_and_phone(
@@ -91,7 +104,7 @@ class CRMService:
         email: str,
         phone_number: str,
     ) -> dict:
-        return self.client.get_contracts_by_email_and_phone(
+        return self._client_for(tenant_id).get_contracts_by_email_and_phone(
             email=email,
             phone_number=phone_number,
         )
@@ -104,14 +117,14 @@ class CRMService:
         """
         Zwraca raw JSON z PG (dict z 'value').
         """
-        return self.client.get_contracts_by_member_id(member_id=member_id)
+        return self._client_for(tenant_id).get_contracts_by_member_id(member_id=member_id)
 
     def get_member_balance(
         self,
         tenant_id: str,
         member_id: int,
     ) -> dict:
-        return self.client.get_member_balance(member_id=member_id)
+        return self._client_for(tenant_id).get_member_balance(member_id=member_id)
 
     def reserve_class(
         self,
@@ -126,7 +139,7 @@ class CRMService:
         Rezerwacja zajęć w CRM – zawija PerfectGymClient.reserve_class.
         RoutingService oczekuje, że zwrócony dict będzie miał pole "ok" (True/False).
         """
-        return self.client.reserve_class(
+        return self._client_for(tenant_id).reserve_class(
             member_id=member_id,
             class_id=class_id,
             idempotency_key=idempotency_key,
