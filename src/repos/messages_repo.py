@@ -1,12 +1,14 @@
-import os, time
+import os, time, json
 from boto3.dynamodb.conditions import Key
-from ..common.aws import ddb_resource
+from ..common.aws import ddb_resource, s3_client
 from ..common.security import phone_hmac, phone_last4
 
 class MessagesRepo:
     def __init__(self):
         self.table = ddb_resource().Table(os.environ.get("DDB_TABLE_MESSAGES", "Messages"))
         self.retention_days: int = int(os.getenv("CONVERSATIONS_RETENTION_DAYS", "365"))
+        self.archive_bucket: str | None = os.getenv("ARCHIVE_BUCKET")
+        self.archive_prefix: str = os.getenv("ARCHIVE_PREFIX", "archive/")
         
     def put(self, item: dict):
         self.table.put_item(Item=item)
@@ -72,6 +74,32 @@ class MessagesRepo:
             UpdateExpression="SET delivery_status = :ds",
             ExpressionAttributeValues={":ds": delivery_status},
         )
+        
+    def _hydrate_archived(self, item: dict) -> dict:
+        """Jeśli wiadomość jest zarchiwizowana i nie ma treści, dociąga ją z S3 (read-only)."""
+        if not item:
+            return item
+        if item.get("archived_status") != "Archived":
+            return item
+        if item.get("body"):
+            return item
+        bucket = item.get("archive_bucket") or self.archive_bucket
+        key = item.get("archive_key")
+        if not bucket or not key:
+            return item
+        try:
+            s3 = s3_client()
+            resp = s3.get_object(Bucket=bucket, Key=key)
+            data = resp["Body"].read()
+            doc = json.loads(data.decode("utf-8"))
+            # w DDB trzymamy tylko "szkielet"; do wyniku wstrzykujemy pełną wersję
+            hydrated = dict(item)
+            hydrated["body"] = doc.get("body")
+            hydrated["archived_payload"] = {k: v for k, v in doc.items() if k not in ("body",)}
+            return hydrated
+        except Exception:
+            # Nie blokujemy krytycznych ścieżek (ticketing/router) – w razie błędu zwracamy "szkielet"
+            return item
     
     def get_last_messages(
         self,
@@ -89,4 +117,5 @@ class MessagesRepo:
             ScanIndexForward=False,  # od najnowszych
             Limit=limit,
         )
-        return resp.get("Items") or []
+        items = resp.get("Items") or []
+        return [self._hydrate_archived(it) for it in items]

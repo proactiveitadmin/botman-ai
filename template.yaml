@@ -106,6 +106,11 @@ Globals:
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
         DDB_TABLE_LEADS:         !Sub 'Leads-${AWS::StackName}'
         DDB_TABLE_IDEMPOTENCY:   !Sub 'Idempotency-${AWS::StackName}'
+        ARCHIVE_BUCKET: !Ref MessagesArchiveBucket
+        ARCHIVE_PREFIX: archive/
+        ARCHIVE_HOT_DAYS: "30"
+        ARCHIVE_MAX_ITEMS: "1000"
+        ARCHIVE_SCAN_PAGE_LIMIT: "500"
         
         KB_BUCKET: !Ref KnowledgeBaseBucket
         
@@ -164,7 +169,6 @@ Resources:
   ApiWebAclAssociation:
     Type: AWS::WAFv2::WebACLAssociation
     DependsOn:
-      - ApiWebAcl
       - MyApiProdStage
     Properties:
       WebACLArn: !GetAtt ApiWebAcl.Arn
@@ -434,6 +438,36 @@ Resources:
       BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
       VersioningConfiguration:
         Status: Enabled
+        
+  
+  MessagesArchiveBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${AWS::StackName}-messages-archive-${AWS::AccountId}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          # Archiwum: Standard -> IA -> Glacier (dla prefixu archive/)
+          - Id: ArchiveTransitions
+            Status: Enabled
+            Prefix: archive/
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 30
+              - StorageClass: GLACIER
+                TransitionInDays: 90
 
   # --- IAM snippets (inline via Policies) ---
   # Shared SSM+KMS access policy (copy/paste into each function Policies)
@@ -642,6 +676,27 @@ Resources:
           Properties:
             Schedule: rate(1 day)
 
+  ArchiveMessagesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'messages-archive-${AWS::StackName}'
+      CodeUri: .
+      Handler: src/lambdas/archive_messages/handler.lambda_handler
+      Description: Scheduled archiver for Messages -> S3
+      Timeout: 900
+      MemorySize: 1024
+      Events:
+        DailySchedule:
+          Type: Schedule
+          Properties:
+            Schedule: "cron(0 2 * * ? *)"
+            Enabled: true
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Messages
+        - S3CrudPolicy:
+            BucketName: !Ref MessagesArchiveBucket
+
   HousekeepingFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -766,7 +821,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: !Sub 'health-${AWS::StackName}'
-      CodeUri: src
+      CodeUri: .
       Handler: src/lambdas/health/handler.lambda_handler
       Policies:
         - Statement:
