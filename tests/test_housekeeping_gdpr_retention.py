@@ -1,4 +1,5 @@
 import os
+import datetime
 import boto3
 from boto3.dynamodb.conditions import Key
 from src.common.security import phone_hmac, normalize_phone
@@ -23,8 +24,10 @@ def _put_intents_stat(ddb, tenant_id: str, bucket: str, phone: str, last_ts: int
 def test_housekeeping_ttl_mode_noop_does_not_delete(aws_stack, monkeypatch):
     from src.lambdas.housekeeping import handler as hk
 
-    fixed_now = 1_700_000_000
+    # 2025-01-01 01:01:00 UTC => bucket "202501010101"
+    fixed_now = 1_735_693_260
     monkeypatch.setattr(hk.time, "time", lambda: fixed_now)
+    monkeypatch.setenv("SPAM_STATS_MAX_AGE_SECONDS", "86400")
 
     ddb = boto3.resource("dynamodb", region_name="eu-central-1")
 
@@ -50,6 +53,7 @@ def test_housekeeping_gdpr_delete_by_user_hmac(aws_stack, monkeypatch):
 
     fixed_now = 1_700_000_000
     monkeypatch.setattr(hk.time, "time", lambda: fixed_now)
+    monkeypatch.setenv("SPAM_STATS_MAX_AGE_SECONDS", "86400")
 
     ddb = boto3.resource("dynamodb", region_name="eu-central-1")
 
@@ -59,15 +63,20 @@ def test_housekeeping_gdpr_delete_by_user_hmac(aws_stack, monkeypatch):
     _put_message(ddb, "default#conv#whatsapp#u1", "2#outbound#m2", created_at=fixed_now)
 
     # IntentsStats for that phone (stored as phone_hmac)
-    phone_u1 = "whatsapp:+48123456789"
-    bucket1 = "202501010101"
+    phone_u1 = "whatsapp:+48123456789"   
+    # Bucket musi być w oknie wyliczanym z fixed_now (UTC, YYYYMMDDHHMM, minuta)
+    base_minute = fixed_now - (fixed_now % 60)
+    bucket1 = datetime.datetime.utcfromtimestamp(base_minute).strftime("%Y%m%d%H%M")
+     
     sk_u1 = _put_intents_stat(ddb, "default", bucket1, phone_u1, last_ts=fixed_now)
 
     # Another user stays
     _put_conversation(ddb, "tenant#default", "conv#whatsapp#u2", updated_at=fixed_now)
     _put_message(ddb, "default#conv#whatsapp#u2", "1#inbound#m3", created_at=fixed_now)
     phone_u2 = "whatsapp:+48200000000"
-    bucket2 = "202501010102"
+    # Drugi bucket obok (następna minuta)
+    bucket2 = datetime.datetime.utcfromtimestamp(base_minute + 60).strftime("%Y%m%d%H%M")
+ 
     sk_u2 = _put_intents_stat(ddb, "default", bucket2, phone_u2, last_ts=fixed_now)
 
     # Act
@@ -90,7 +99,7 @@ def test_housekeeping_gdpr_delete_by_user_hmac(aws_stack, monkeypatch):
 
     # IntentsStats for u1 deleted
     assert "Item" not in ddb.Table("IntentsStats").get_item(
-        Key={"pk": "default#202501010101", "sk": sk_u1}
+        Key={"pk": f"default#{bucket1}", "sk": sk_u1}
     )
 
     # other user untouched
@@ -98,5 +107,5 @@ def test_housekeeping_gdpr_delete_by_user_hmac(aws_stack, monkeypatch):
         Key={"pk": "tenant#default", "sk": "conv#whatsapp#u2"}
     )
     assert "Item" in ddb.Table("IntentsStats").get_item(
-        Key={"pk": "default#202501010102", "sk": sk_u2}
+        Key={"pk": f"default#{bucket2}", "sk": sk_u2}
     )

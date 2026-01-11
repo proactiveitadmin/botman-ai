@@ -38,6 +38,7 @@ from ..common.constants import (
     STATE_AWAITING_CHALLENGE,
     STATE_AWAITING_CLASS_SELECTION,
     SESSION_TIMEOUT_SECONDS,
+    STATE_AWAITING_MESSAGE,
 )
 
 logger = logging.getLogger(__name__)
@@ -336,6 +337,22 @@ class RoutingService:
             # brak class_id → najpierw lista zajęć
             if not class_id:
                 # tu ustawiamy stan ręcznie
+                if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
+                    self.conv.upsert_conversation(
+                        tenant_id=msg.tenant_id,
+                        channel=msg.channel or "whatsapp",
+                        channel_user_id=msg.channel_user_id or msg.from_phone,
+                        last_intent="crm_available_classes",
+                        state_machine_status=STATE_AWAITING_MESSAGE,
+                        language_code=lang,
+                    )
+                    return self.crm_flow.build_available_classes_response(
+                        msg,
+                        lang,
+                        auto_confirm_single=False,
+                        allow_selection=False,
+                    )
+
                 self.conv.upsert_conversation(
                     tenant_id=msg.tenant_id,
                     channel=msg.channel or "whatsapp",
@@ -348,6 +365,22 @@ class RoutingService:
 
             # class_id to nie ID tylko nazwa typu zajęć (np. 'pilates') → lista z filtrem
             if class_id and not class_id.isdigit():
+                if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
+                    self.conv.upsert_conversation(
+                        tenant_id=msg.tenant_id,
+                        channel=msg.channel or "whatsapp",
+                        channel_user_id=msg.channel_user_id or msg.from_phone,
+                        last_intent="crm_available_classes",
+                        state_machine_status=STATE_AWAITING_MESSAGE,
+                        language_code=lang,
+                    )
+                    return self.crm_flow.build_available_classes_response(
+                        msg,
+                        lang,
+                        auto_confirm_single=False,
+                        class_type_query=class_id,
+                        allow_selection=False,
+                    )
                 self.conv.upsert_conversation(
                     tenant_id=msg.tenant_id,
                     channel=msg.channel or "whatsapp",

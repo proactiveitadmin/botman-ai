@@ -39,6 +39,10 @@ class FakeCRMService:
     def __init__(self):
         self.reserve_calls = []
         self.available_classes_calls = []
+        
+    def get_member_type_by_phone(self, tenant_id: str, phone: str) -> str | None:
+        # W testach traktujemy użytkownika jako klubowicza (PG member), chyba że test podmieni zachowanie.
+        return "member"
 
     def get_available_classes(
         self,

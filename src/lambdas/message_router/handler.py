@@ -171,6 +171,23 @@ def lambda_handler(event, context):
         pass
 
     records = event.get("Records") or []
+    
+    # Defensive ordering: SQS FIFO guarantees ordering per MessageGroupId,
+    # but event source mapping may deliver Records[] in arbitrary order within a batch.
+    # If SequenceNumber is present, sort by (MessageGroupId, SequenceNumber).
+    def _fifo_sort_key(rec: dict):
+        attrs = rec.get("attributes") or {}
+        gid = attrs.get("MessageGroupId") or ""
+        seq = attrs.get("SequenceNumber")
+        try:
+            seq_i = int(seq) if seq is not None else -1
+        except Exception:
+            seq_i = -1
+        return (gid, seq_i)
+
+    if any(((r.get("attributes") or {}).get("SequenceNumber") is not None) for r in records):
+        records = sorted(records, key=_fifo_sort_key)
+
     if not records:
         logger.info({"handler": "message_router", "event": "no_records"})
         return {"statusCode": 200, "body": "no-records"}
@@ -186,6 +203,41 @@ def lambda_handler(event, context):
             continue
 
         if not msg_body:
+            continue
+            
+        # FIFO validation (ordering key + deduplication id)
+        attrs = r.get("attributes") or {}
+        gid = attrs.get("MessageGroupId")
+        dedup_id = attrs.get("MessageDeduplicationId")
+
+        # ordering key: MessageGroupId should match conversation_id when present
+        conv_id = msg_body.get("conversation_id")
+        if gid and conv_id and gid != conv_id:
+            logger.error(
+                {
+                    "handler": "message_router",
+                    "event": "ordering_key_mismatch",
+                    "messageId": r.get("messageId"),
+                    "MessageGroupId": gid,
+                    "conversation_id": conv_id,
+                }
+            )
+            batch_failures.append({"itemIdentifier": r.get("messageId")})
+            continue
+
+        # deduplication: if FIFO dedup id is set and we can derive expected, enforce it
+        expected_dedup = msg_body.get("message_sid") or msg_body.get("event_id")
+        if dedup_id and expected_dedup and dedup_id != expected_dedup:
+            logger.error(
+                {
+                    "handler": "message_router",
+                    "event": "deduplication_id_mismatch",
+                    "messageId": r.get("messageId"),
+                    "MessageDeduplicationId": dedup_id,
+                    "expected": expected_dedup,
+                }
+            )
+            batch_failures.append({"itemIdentifier": r.get("messageId")})
             continue
 
         # inbound idempotency

@@ -1154,7 +1154,11 @@ class CRMFlowService:
         )
 
         return [self._reply(msg, lang, body)]
-        
+
+    def is_crm_member(self, tenant_id: str, phone: str) -> bool:
+        mt = self.crm.get_member_type_by_phone(tenant_id, phone)
+        return bool(mt) and mt.lower() == "member"
+  
     def build_available_classes_response(
         self,
         msg: Message,
@@ -1162,6 +1166,7 @@ class CRMFlowService:
         *,
         auto_confirm_single: bool = False,
         class_type_query: str | None = None,
+        allow_selection: bool = True
     ) -> List[Action]:
         """
         Pobiera listę dostępnych zajęć z PG, buduje listę tekstową
@@ -1172,8 +1177,12 @@ class CRMFlowService:
             top=10,
             class_type_query=class_type_query,
         )
+        
         classes = classes_resp.get("value") or []
-
+        
+        if not allow_selection:
+            auto_confirm_single = False
+            
         if not classes:
             body = self.tpl.render_named(
                 msg.tenant_id,
@@ -1182,7 +1191,8 @@ class CRMFlowService:
                 {},
             )
             return [self._reply(msg, lang, body)]
-        
+            classes = classes_resp.get("value") or []
+
         # Jeśli jest dokładnie 1 pozycja, nie pokazujemy listy.
         # Od razu przechodzimy do standardowego flow rezerwacji (w tym weryfikacji PG).
         if auto_confirm_single and len(classes) == 1:
@@ -1276,29 +1286,30 @@ class CRMFlowService:
             {"classes": "\n".join(lines)},
         )
 
-        # zapis listy klas do późniejszego wyboru
-        self.conv.put(
-            {
-                "pk": self._pending_key(msg.from_phone),
-                "sk": "classes",
-                "items": simplified,
-            }
-        )
-
-        try:
-            extra = self.tpl.render_named(
-                msg.tenant_id,
-                "crm_available_classes_select_by_number",
-                lang,
-                {},
+        if allow_selection:
+            # zapis listy klas do późniejszego wyboru
+            self.conv.put(
+                {
+                    "pk": self._pending_key(msg.from_phone),
+                    "sk": "classes",
+                    "items": simplified,
+                }
             )
-        except Exception:
-            extra = ""
-        
-        full_body = f"{body}\n\n{extra}" if extra else body
-        
-        return [self._reply(msg, lang, full_body)]
 
+            try:
+                extra = self.tpl.render_named(
+                    msg.tenant_id,
+                    "crm_available_classes_select_by_number",
+                    lang,
+                    {},
+                )
+            except Exception:
+                extra = ""
+            
+            full_body = f"{body}\n\n{extra}" if extra else body
+            
+            return [self._reply(msg, lang, full_body)]
+        return [self._reply(msg, lang, body)]
 
 
     def handle_class_selection(self, msg: Message, lang: str) -> List[Action]:      

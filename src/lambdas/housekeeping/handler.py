@@ -11,15 +11,15 @@ Uwagi implementacyjne:
 - GDPR delete:
   - Messages: Query po PK (paginacja) + Batch delete (25)
   - Conversations: delete_item po kluczu (pk, sk)
-  - IntentsStats: bez GSI nie da się Query po sk => Scan po sk==phone_hmac (paginacja) + Batch delete
+  - IntentsStats: bez GSI nie da się Query po sk => BatchGet po wyliczonych bucketach (okno SPAM_STATS_MAX_AGE_SECONDS) + Batch delete
 """
 
 import os
 import time
+import datetime
 from typing import Iterable
 
-import boto3
-from boto3.dynamodb.conditions import Attr, Key
+from boto3.dynamodb.conditions import Key
 
 from ...common.aws import ddb_resource
 from ...common.logging import logger
@@ -78,33 +78,57 @@ def _query_all_keys(table_name: str, *, pk: str) -> list[dict]:
     return keys
 
 
-def _scan_intentsstats_by_phone_hmac(*, tenant_id: str, phone: str) -> list[dict]:
-    """Scan IntentsStats for all buckets where sk == phone_hmac(tenant_id, normalize_phone(phone))."""
+def _intentsstats_keys_for_phone_last_window(*, tenant_id: str, phone: str) -> list[dict]:
+    """Find IntentsStats items to delete for a given phone.
+
+    Zamiast Scan (koszt zależny od rozmiaru tabeli) robimy deterministyczne BatchGet po kluczach,
+    wyliczając buckety czasowe dla okna retencji (SPAM_STATS_MAX_AGE_SECONDS, domyślnie 24h).
+
+    Założenie: format bucketa jest taki sam jak w SpamService: YYYYMMDDHHMM (UTC, 1 minuta).
+    """
     stats_table = ddb_resource().Table(INTENTS_STATS_TABLE)
 
     canonical_phone = normalize_phone(phone)
     ph = phone_hmac(tenant_id, canonical_phone)
 
-    keys: list[dict] = []
-    last_evaluated_key = None
+    now_ts = int(time.time())
+    stats_max_age = int(os.getenv("SPAM_STATS_MAX_AGE_SECONDS", "86400"))
+    start_ts = max(0, now_ts - stats_max_age)
 
-    while True:
-        kwargs = {
-            "FilterExpression": Attr("sk").eq(ph),
-            "ProjectionExpression": "pk, sk",
+    # bucket granularity = 60s (minute)
+    start_minute = start_ts - (start_ts % 60)
+    end_minute = now_ts - (now_ts % 60)
+
+    # Przygotuj wszystkie klucze (pk, sk) dla ostatniego okna czasowego
+    keys_to_check: list[dict] = []
+    for ts in range(start_minute, end_minute + 1, 60):
+        bucket = datetime.datetime.utcfromtimestamp(ts).strftime("%Y%m%d%H%M")
+        keys_to_check.append({"pk": f"{tenant_id}#{bucket}", "sk": ph})
+
+    if not keys_to_check:
+        return []
+
+    client = ddb_resource().meta.client
+    found_keys: list[dict] = []
+
+    # BatchGetItem: max 100 keys / request; obsłuż UnprocessedKeys
+    for chunk in _chunks(keys_to_check, 100):
+        request_items = {
+            INTENTS_STATS_TABLE: {
+                "Keys": chunk,
+                "ProjectionExpression": "pk, sk",
+                "ConsistentRead": False,
+            }
         }
-        if last_evaluated_key:
-            kwargs["ExclusiveStartKey"] = last_evaluated_key
 
-        resp = stats_table.scan(**kwargs)
-        items = resp.get("Items") or []
-        keys.extend({"pk": i["pk"], "sk": i["sk"]} for i in items)
+        while request_items:
+            resp = client.batch_get_item(RequestItems=request_items)
+            items = (resp.get("Responses") or {}).get(INTENTS_STATS_TABLE) or []
+            found_keys.extend({"pk": i["pk"], "sk": i["sk"]} for i in items)
 
-        last_evaluated_key = resp.get("LastEvaluatedKey")
-        if not last_evaluated_key:
-            break
+            request_items = resp.get("UnprocessedKeys") or {}
 
-    return keys
+    return found_keys
 
 
 def _gdpr_delete(
@@ -118,7 +142,7 @@ def _gdpr_delete(
 
     - Conversations: pk = tenant#<tenant_id>, sk = conv#<channel>#<user_hmac>
     - Messages: pk = <tenant_id>#conv#<channel>#<user_hmac> (Query + batch delete)
-    - IntentsStats: sk == phone_hmac(tenant_id, normalize_phone(phone)) (Scan + batch delete) if phone provided
+    - IntentsStats: sk == phone_hmac(tenant_id, normalize_phone(phone)) (BatchGet + batch delete) if phone provided
     """
     channels = channels or ["whatsapp", "web"]
     ddb = ddb_resource()
@@ -149,7 +173,7 @@ def _gdpr_delete(
     # 2) IntentsStats (opcjonalnie, jeśli mamy phone)
     if phone:
         try:
-            stats_keys = _scan_intentsstats_by_phone_hmac(tenant_id=tenant_id, phone=phone)
+            stats_keys = _intentsstats_keys_for_phone_last_window(tenant_id=tenant_id, phone=phone)
             deleted_intentsstats = _batch_delete(INTENTS_STATS_TABLE, stats_keys)
         except Exception as e:
             logger.error(

@@ -144,6 +144,22 @@ class PerfectGymClient:
         resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
         resp.raise_for_status()
         return resp.json()
+        
+    def get_member_type_by_phone(self, phone: str) -> Optional[str]:
+        """Zwraca memberType dla numeru telefonu (PerfectGym-specific).
+
+        W PG pobieramy memberów z endpointu /Members filtrowanego po phoneNumber,
+        a następnie odczytujemy pole memberType (czasem zwracane jako membertype).
+        """
+        try:
+            resp = self.get_member_by_phone(phone=phone)
+            items = (resp or {}).get("value") or []
+            if not items:
+                return None
+            mt = items[0].get("memberType") or items[0].get("membertype")
+            return (str(mt).strip() if mt is not None else None)
+        except Exception:
+            return None
 
     def get_member_by_phone(self, phone: str) -> Dict[str, Any]:
         """

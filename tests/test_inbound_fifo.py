@@ -110,3 +110,36 @@ def test_web_widget_wysyla_na_fifo_z_group_id_i_dedup(monkeypatch, dummy_sqs):
     assert body["conversation_id"] == f"conv#web#{user_hmac('t1', 'web', 'user-abc')}"
     assert call["MessageGroupId"] == body["conversation_id"]
     assert call["MessageDeduplicationId"] == body["event_id"]
+
+
+def test_web_widget_umożliwia_event_id_klienta_do_dedup(monkeypatch, dummy_sqs):
+    """
+    web_widget: jeśli klient poda stabilne event_id (np. UUID per wiadomość),
+    to używamy go jako event_id i MessageDeduplicationId (retry z klienta nie zrobi duplikatu).
+    """
+    from src.lambdas.web_widget import handler as h
+
+    monkeypatch.setattr(h, "sqs_client", lambda: dummy_sqs)
+    monkeypatch.setattr(h, "resolve_queue_url", lambda _name: "https://example.com/inbound.fifo")
+
+    event = {
+        "body": json.dumps(
+            {
+                "tenant_id": "t1",
+                "channel_user_id": "user-abc",
+                "body": "hello from web",
+                "event_id": "client-uuid-123",
+            }
+        ),
+        "isBase64Encoded": False,
+        "headers": {"content-type": "application/json"},
+    }
+
+    response = h.lambda_handler(event, context=types.SimpleNamespace())
+    assert response["statusCode"] in (200, 201, 204)
+
+    assert len(dummy_sqs.calls) == 1
+    call = dummy_sqs.calls[0]
+    body = json.loads(call["MessageBody"])
+    assert body["event_id"] == "client-uuid-123"
+    assert call["MessageDeduplicationId"] == "client-uuid-123"

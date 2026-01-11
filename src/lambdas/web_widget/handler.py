@@ -29,7 +29,7 @@ def lambda_handler(event, context):
         uid = user_hmac(tenant_id, "web", channel_user_id)
         conv_id = f"conv#web#{uid}"
         msg = {
-            "event_id": new_id("evt-web-"),
+            "event_id": (body.get("event_id") or body.get("client_message_id") or new_id("evt-web-")),
             "from": None,  # brak telefonu
             "to": None,
             "body": text,

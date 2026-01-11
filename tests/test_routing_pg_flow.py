@@ -4,6 +4,7 @@ from src.common.security import otp_hash
 from src.domain.models import Message
 from src.services.language_service import LanguageService
 from src.services.routing_service import RoutingService
+from src.common.constants import STATE_AWAITING_MESSAGE
 
 from tests.fakes_routing import (
     InMemoryConversations,
@@ -337,7 +338,7 @@ def test_reserve_class_with_class_type_name_returns_list_not_confirmation(
     Oczekujemy:
     - zapytania do PG o listę zajęć z filtrem classType/name contains 'pilates'
     - odpowiedzi z listą zajęć
-    - stanu rozmowy: awaiting_class_selection
+    - non-member: brak wejścia w flow wyboru klasy (pozostajemy w awaiting_message)
     - brak pytania o potwierdzenie (TAK/NIE)
     """
     router, conv = _build_router(monkeypatch)
@@ -410,4 +411,37 @@ def test_reserve_class_with_class_type_name_returns_list_not_confirmation(
         channel="whatsapp",
         channel_user_id="whatsapp:+48123123123",
     )
-    assert conv_state["state_machine_status"] == "awaiting_class_selection"
+    assert conv_state["state_machine_status"] == "awaiting_message"
+
+def test_lead_reserve_class_shows_info_list_without_selection(monkeypatch):
+    router, conv = _build_router(monkeypatch)
+
+    monkeypatch.setattr(
+        router.crm_flow.crm,
+        "get_member_by_phone",
+        lambda tenant_id, phone: {"value": [{"id": "L-1", "memberType": "Lead"}]},
+        raising=False,
+    )
+
+    msg = Message(
+        tenant_id="tenantA",
+        from_phone="whatsapp:+48123123123",
+        to_phone="whatsapp:+48000000000",
+        body="zapisz mnie na zajęcia",
+        channel="whatsapp",
+        channel_user_id="whatsapp:+48123123123",
+        intent="reserve_class",
+        slots={},
+    )
+
+    actions = router.handle(msg)
+    body = actions[0].payload["body"]
+
+    assert "Dostępne zajęcia:" in body
+    assert "wybierz" not in body.lower()
+
+    pk = "pending#" + msg.from_phone
+    assert pk not in conv.pending
+
+    stored = conv.get_conversation("tenantA", "whatsapp", msg.channel_user_id)
+    assert stored["state_machine_status"] == "awaiting_message"

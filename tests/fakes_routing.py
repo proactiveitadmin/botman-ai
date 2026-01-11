@@ -142,6 +142,10 @@ class FakeCRM:
             }
         )
         return True
+        
+    def get_member_type_by_phone(self, tenant_id: str, phone: str) -> str | None:
+        # w testach domyślnie brak dopasowania → nie jest klubowiczem
+        return None
 
     def get_member_by_phone(self, tenant_id: str, phone: str) -> dict:
         return {"value": []}

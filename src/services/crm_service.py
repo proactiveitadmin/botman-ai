@@ -99,7 +99,22 @@ class CRMService:
             fields=fields,
             top=top,
         )
+        
+    def get_member_type_by_phone(self, tenant_id: str, phone: str) -> Optional[str]:
+        """Zwraca typ użytkownika w CRM (dla PerfectGym: memberType).
 
+        Logika specyficzna dla danego CRM powinna być zaimplementowana po stronie klienta,
+        np. PerfectGymClient.get_member_type_by_phone().
+        """
+        norm_phone = self._normalize_phone(phone)
+        self._pg_gate(tenant_id)
+        client = self._client_for(tenant_id)
+        getter = getattr(client, "get_member_type_by_phone", None)
+        if callable(getter):
+            return getter(phone=norm_phone)
+        # Inne CRM-y powinny dostarczyć analogiczną metodę w swoim kliencie.
+        return None
+        
     def get_class_by_id(
         self,
         tenant_id: str,
