@@ -14,6 +14,7 @@ import time
 from boto3.dynamodb.conditions import Key
 
 from ...services.campaign_service import CampaignService
+from ...repos.conversations_repo import ConversationsRepo
 from ...common.aws import sqs_client, ddb_resource, resolve_queue_url
 from ...services.consent_service import ConsentService
 from ...repos.members_index_repo import MembersIndexRepo
@@ -26,6 +27,7 @@ CAMPAIGNS_TENANT_NEXT_RUN_INDEX = os.getenv("DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN
 svc = CampaignService()
 consents = ConsentService()
 members_index = MembersIndexRepo()
+conv_repo = ConversationsRepo()
 
 
 def _resolve_outbound_queue_url() -> str:
@@ -116,6 +118,12 @@ def lambda_handler(event, context):
                 continue
             if not consents.has_opt_in(tenant_id_item, phone):
                 continue
+ 
+            # Opt-out per tenant/channel blocks campaigns regardless of opt-in
+            wa_uid = phone if str(phone).startswith('whatsapp:') else f"whatsapp:{phone}"
+            conv = conv_repo.get_conversation(tenant_id_item, 'whatsapp', wa_uid) or {}
+            if conv.get('opt_out') is True:
+                continue
 
             # tutaj w przyszłości możesz zbudować context z danych odbiorcy (imię, saldo, klub itd.)
             msg = svc.build_message(
@@ -129,6 +137,7 @@ def lambda_handler(event, context):
                 "to": phone,
                 "body": msg["body"],
                 "tenant_id": tenant_id_item,
+                "message_type": "campaign",
             }
             if msg.get("language_code"):
                 payload["language_code"] = msg["language_code"]

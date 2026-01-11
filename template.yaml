@@ -735,6 +735,32 @@ Resources:
             RestApiId: !Ref MyApi
             Path: /web/widget
             Method: post
+            
+  OptOutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'optout-link-${AWS::StackName}'
+      CodeUri: .
+      Handler: src/lambdas/optout/handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /optout
+            Method: get
 
   HealthFunction:
     Type: AWS::Serverless::Function

@@ -80,7 +80,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Dostępne zajęcia:\n\n{classes}\n\nNapisz numer wybranych zajęć (np. 1)."},
+    "body":          {"S": "Dostępne zajęcia:\n\n{classes}\n"},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -192,7 +192,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes_today"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Dzisiaj mamy takie zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć."},
+    "body":          {"S": "Dzisiaj mamy takie zajęcia:\n{classes}\n"},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -218,7 +218,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes_select_by_number"},
     "language_code": {"S": "pl"},
-    "body":          {"S": "Tego dnia są różne zajęcia. Napisz numer zajęć, które chcesz zarezerwować."},
+    "body":          {"S": "Tego dnia są różne zajęcia. Napisz numer zajęć, które chcesz zarezerwować(np 1)."},
     "placeholders":  {"L": []}
   }'
 

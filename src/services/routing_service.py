@@ -28,6 +28,7 @@ from ..services.ticketing_service import TicketingService
 from ..services.metrics_service import MetricsService
 from ..services.crm_flow_service import CRMFlowService
 from ..services.language_service import LanguageService
+from ..services.opt_out_service import OptOutService
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..repos.messages_repo import MessagesRepo
@@ -77,6 +78,7 @@ class RoutingService:
         self.tpl = tpl or TemplateService()
         self.metrics = metrics or MetricsService()
         self.conv = conv or ConversationsRepo()
+        self.optout = OptOutService(self.conv)
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
         self.members_index = members_index or MembersIndexRepo()
@@ -169,6 +171,27 @@ class RoutingService:
         channel = msg.channel or "whatsapp"
         channel_user_id = msg.channel_user_id or msg.from_phone
         conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
+        # 2a) Opt-out / opt-in commands (full flow)
+        opt_action = self.optout.parse_command(text_raw)
+        if opt_action == "optout":
+            self.optout.set_opt_out(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                opt_out=True,
+                source="text_command",
+            )
+            return [self._reply(msg, lang, "OK — wstrzymuję kampanie i powiadomienia. Jeśli zechcesz wrócić, wyślij START.")]
+        if opt_action == "optin":
+            self.optout.set_opt_out(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                opt_out=False,
+                source="text_command",
+            )
+            return [self._reply(msg, lang, "OK — ponownie włączono kampanie i powiadomienia.")]
+        
         state = conv.get("state_machine_status")
 
         now_ts = int(time.time())

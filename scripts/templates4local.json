@@ -64,7 +64,7 @@
           "tenant_id": { "S": "default" },
           "template_code": { "S": "crm_available_classes" },
           "language_code": { "S": "pl" },
-          "body": { "S": "Dostępne zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć (np. 1)." },
+          "body": { "S": "Dostępne zajęcia:\n{classes}\n" },
           "placeholders": { "L": [ { "S": "classes" } ] }
         }
       }
@@ -161,7 +161,7 @@
           "tenant_id": { "S": "default" },
           "template_code": { "S": "crm_available_classes_today" },
           "language_code": { "S": "pl" },
-          "body": { "S": "Dzisiaj mamy takie zajęcia:\n{classes}\n\nNapisz numer wybranych zajęć." },
+          "body": { "S": "Dzisiaj mamy takie zajęcia:\n{classes}\n" },
           "placeholders": { "L": [ { "S": "classes" } ] }
         }
       }

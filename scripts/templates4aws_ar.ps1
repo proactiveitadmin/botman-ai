@@ -78,7 +78,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "الحصص المتاحة:\n\n{classes}\n\nاكتب رقم الحصة التي تختارها (مثلاً 1)."},
+    "body":          {"S": "الحصص المتاحة:\n\n{classes}\n"},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -190,7 +190,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes_today"},
     "language_code": {"S": "ar"},
-    "body":          {"S": "لدينا اليوم الحصص التالية:\n{classes}\n\nاكتب رقم الحصة التي تريدها."},
+    "body":          {"S": "لدينا اليوم الحصص التالية:\n{classes}\n"},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 

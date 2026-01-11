@@ -78,7 +78,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes"},
     "language_code": {"S": "en"},
-    "body":          {"S": "Available classes:\n\n{classes}\n\nPlease type the number of the class you choose (e.g. 1)."},
+    "body":          {"S": "Available classes:\n\n{classes}\n"
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 
@@ -190,7 +190,7 @@ aws dynamodb put-item `
     "tenant_id":     {"S": "clubProactiveIT"},
     "template_code": {"S": "crm_available_classes_today"},
     "language_code": {"S": "en"},
-    "body":          {"S": "Today we have these classes:\n{classes}\n\nPlease type the number of the class you choose."},
+    "body":          {"S": "Today we have these classes:\n{classes}\n"},
     "placeholders":  {"L": [ { "S": "classes" } ]}
   }'
 

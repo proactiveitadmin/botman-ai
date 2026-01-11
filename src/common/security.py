@@ -1,4 +1,4 @@
-import os, hmac, hashlib, base64
+import os, hmac, hashlib, base64, time
 from typing import Dict
 from .config import settings
 from .logging import logger
@@ -90,6 +90,43 @@ def otp_hash(tenant_id: str, purpose: str, otp_code: str) -> str:
     pepper = _get_pepper("OTP_HASH_PEPPER", "OTP_HASH_PEPPER_PARAM") or _get_pepper("PHONE_HASH_PEPPER","PHONE_HASH_PEPPER_PARAM")
     msg = f"{tenant_id}|{purpose}|{(otp_code or '').strip()}"
     return _hmac_b64url(pepper, msg)
+
+# ---------------------------------------------------------------------------
+#  Opt-out link signing (WWW link flow)
+# ---------------------------------------------------------------------------
+
+def _hmac_b64url_raw(secret: str, msg: str) -> str:
+    """Internal: base64url(HMAC-SHA256(secret, msg)) without padding."""
+    mac = hmac.new(secret.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(mac).decode("utf-8").rstrip("=")
+
+def sign_optout_token(tenant_id: str, channel: str, user_id: str, action: str, ts: int) -> str:
+    """Signs opt-out / opt-in link parameters.
+
+    Token is derived from USER_HASH_PEPPER (same secret family as user_hmac).
+    It does NOT reveal PII and can be safely used as a query param.
+    """
+    pepper = _get_pepper("USER_HASH_PEPPER", "USER_HASH_PEPPER_PARAM")
+    payload = f"{tenant_id}|{channel}|{user_id}|{action}|{int(ts)}"
+    return _hmac_b64url_raw(pepper, payload)
+
+def verify_optout_token(tenant_id: str, channel: str, user_id: str, action: str, ts: int, token: str, *, max_age_seconds: int = 86400 * 30) -> bool:
+    """Verifies opt-out / opt-in token with replay window."""
+    try:
+        ts_int = int(ts)
+    except Exception:
+        return False
+
+    now = int(time.time())
+    if ts_int <= 0 or abs(now - ts_int) > int(max_age_seconds):
+        return False
+
+    expected = sign_optout_token(tenant_id, channel, user_id, action, ts_int)
+    # constant-time compare
+    try:
+        return hmac.compare_digest(expected, (token or "").strip())
+    except Exception:
+        return False
 
 def phone_last4(phone: str) -> str:
     if not phone:

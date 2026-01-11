@@ -45,5 +45,6 @@ def build_reply_action(
             "channel": channel or msg.channel,
             "channel_user_id": channel_user_id or msg.channel_user_id,
             "language_code": lang,
+            "message_type": "reply",
         },
     )
