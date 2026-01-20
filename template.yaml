@@ -3,6 +3,27 @@ Transform: AWS::Serverless-2016-10-31
 Description: Botman AI – Etap 1 (prod-ready)
 
 Parameters:
+  PineconeApiKey:
+    Type: String
+    Default: ""
+  PineconeIndexHost:
+    Type: String
+    Default: ""
+  EmbeddingModel:
+    Type: String
+    Default: text-embedding-3-small
+  EmbeddingDimensions:
+    Type: String
+    Default: ""   # np. "1024" aby dopasować do indeksu Pinecone
+  KBVectorEnabled:
+    Type: String
+    Default: "1"
+  KBReindexS3Prefix:
+    Type: String
+    Default: ""     # np. "tenantA/" jeśli chcesz ograniczyć do jednego tenanta
+  KBReindexS3Suffix:
+    Type: String
+    Default: ".json"
   PhoneHashPepperParam:
     Type: String
     Default: /botman/prod/phone_hash_pepper
@@ -82,6 +103,11 @@ Globals:
 
         OPENAI_API_KEY:  !Ref OpenAiApiKey
         LLM_MODEL:       !Ref LlmModel
+        EMBEDDING_MODEL: !Ref EmbeddingModel
+        EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
+        KB_VECTOR_ENABLED: !Ref KBVectorEnabled
+        PINECONE_API_KEY: !Ref PineconeApiKey
+        PINECONE_INDEX_HOST: !Ref PineconeIndexHost
         PHONE_HASH_PEPPER: !Ref PhoneHashPepperParam
         USER_HASH_PEPPER: !Ref UserHashPepperParam
         OTP_HASH_PEPPER: !Ref OtpHashPepperParam
@@ -438,7 +464,9 @@ Resources:
       BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
       VersioningConfiguration:
         Status: Enabled
-        
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: true
   
   MessagesArchiveBucket:
     Type: AWS::S3::Bucket
@@ -468,7 +496,35 @@ Resources:
                 TransitionInDays: 30
               - StorageClass: GLACIER
                 TransitionInDays: 90
+                
+  KBReindexerInvokePermissionFromEventBridge:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt KBReindexerFunction.Arn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt KBReindexFaqUploadRule.Arn
 
+  KBReindexFaqUploadRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub 'kb-reindex-on-upload-${AWS::StackName}'
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - Object Created
+        detail:
+          bucket:
+            name:
+              - !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
+          object:
+            key:
+              # suffix/prefix robimy po stronie kodu, bo EventBridge pattern ma ograniczenia na wildcardy
+              - prefix: !Ref KBReindexS3Prefix
+      Targets:
+        - Arn: !GetAtt KBReindexerFunction.Arn
+          Id: KBReindexerTarget
   # --- IAM snippets (inline via Policies) ---
   # Shared SSM+KMS access policy (copy/paste into each function Policies)
   # NOTE: using kms:Decrypt with ViaService constraint (works with default SSM key + most setups)
@@ -529,7 +585,6 @@ Resources:
             QueueName: !GetAtt InboundEventsQueue.QueueName
         - SQSSendMessagePolicy:
             QueueName: !GetAtt OutboundQueue.QueueName
-
         - DynamoDBCrudPolicy:
             TableName: !Ref Messages
         - DynamoDBCrudPolicy:
@@ -544,16 +599,13 @@ Resources:
             TableName: !Ref Tenants
         - DynamoDBReadPolicy:
             TableName: !Ref MembersIndex
-
         - S3ReadPolicy:
-            BucketName: !Ref KnowledgeBaseBucket
-
+            BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
         - Statement:
             - Effect: Allow
               Action:
                - comprehend:DetectDominantLanguage
               Resource: "*"
-
             - Effect: Allow
               Action:
                 - ssm:GetParameter
@@ -561,7 +613,6 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
-
             - Effect: Allow
               Action:
                 - kms:Decrypt
@@ -618,7 +669,6 @@ Resources:
       #Environment:
         #Variables:    
           #WebOutboundEventsQueueUrl: !Ref OutboundQueue
-
       Events:
         SQSEvent:
           Type: SQS
@@ -723,7 +773,6 @@ Resources:
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
-
       Events:
         DailySchedule:
           Type: Schedule
@@ -845,6 +894,34 @@ Resources:
             Path: /health
             Method: get
 
+  # --- KB reindexer (S3 PUT -> Lambda) ---
+  KBReindexerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'kb-reindexer-${AWS::StackName}'
+      CodeUri: .
+      Handler: src/lambdas/kb_reindexer/handler.lambda_handler
+      Timeout: 60
+      MemorySize: 512
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+
+
   InboundWebhookLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -900,3 +977,6 @@ Outputs:
   PgTestUrl:
     Description: API Gateway endpoint URL for PerfectGym manual test
     Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/pg/test'
+  KBReindexerFunctionArn:
+    Description: KB reindexer lambda ARN
+    Value: !GetAtt KBReindexerFunction.Arn

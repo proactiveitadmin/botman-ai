@@ -13,8 +13,10 @@ import random
 from typing import Dict, Optional, List
 
 from botocore.exceptions import ClientError
+from .kb_vector_service import KBVectorService, build_kb_prompt
 
 from ..common.logging import logger
+from ..repos.tenants_repo import TenantsRepo
 from ..domain.templates import DEFAULT_FAQ
 from ..common.aws import s3_client
 from ..common.config import settings
@@ -36,6 +38,8 @@ class KBService:
         qa_cache_ttl_seconds: int = 3600,
         style_variants_per_answer: int = 3,
     ) -> None:
+        #tenants repo
+        self.tenants = TenantsRepo()
         # bucket z ENV / Settings
         self.bucket = bucket or settings.kb_bucket
 
@@ -54,10 +58,14 @@ class KBService:
         
         # klient OpenAI – opcjonalny, żeby w dev/offline dalej działało
         self._client = openai_client or OpenAIClient()
-
+        # vector retrieval (Pinecone). If not configured, KBService falls back to legacy retrieval.
+        self._vector = KBVectorService(openai_client=self._client)
     # -------------------------------------------------------------------------
     # Helpery cache
     # -------------------------------------------------------------------------
+    def _tenant_default_lang(self, tenant_id: str) -> str:
+        tenant = self.tenants.get(tenant_id) or {}
+        return tenant.get("language_code") or settings.get_default_language()
 
     def _faq_key(self, tenant_id: str, language_code: str | None) -> str:
         # np. "tenantA/faq_pl.json" albo "tenantA/faq_en.json"
@@ -193,6 +201,13 @@ class KBService:
             None w pozostałych przypadkach.
         """
         if not self.bucket:
+            logger.warning(
+                {
+                    "component": "kb_service",
+                    "tenant_id": tenant_id,
+                    "warn": "FAQ bucket not found",
+                }
+            )
             return None
 
         cache_key = self._cache_key(tenant_id, language_code)
@@ -215,10 +230,11 @@ class KBService:
             if e.response["Error"]["Code"] != "NoSuchKey":
                 logger.warning(
                     {
-                        "kb_error": "s3_get_failed",
+                        "component": "kb_service",
                         "tenant_id": tenant_id,
                         "key": key,
-                        "err": str(e),
+                        "err": "s3_get_failed",
+                        "error details": str(e),
                     }
                 )
             self._cache[cache_key] = None
@@ -294,6 +310,9 @@ class KBService:
             return None
 
         tenant_faq = self._load_tenant_faq(tenant_id, language_code)
+        if not tenant_faq:
+            tenant_language = self._tenant_default_lang(tenant_id)
+            tenant_faq = self._load_tenant_faq(tenant_id, tenant_language)
         if tenant_faq and topic in tenant_faq:
             return tenant_faq[topic]
 
@@ -323,60 +342,115 @@ class KBService:
         # NEW: szybka ścieżka — powtarzające się pytanie
         cached = self._get_cached_answer(tenant_id, language_code, question)
         if cached is not None:
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "cached answer",
+                    "cached": cached,
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                }
+            )
             return cached
 
         # 1) FAQ z S3 lub domyślne
         tenant_faq = self._load_tenant_faq(tenant_id, language_code)
         if not tenant_faq:
+            tenant_language = self._tenant_default_lang(tenant_id)
+            tenant_faq = self._load_tenant_faq(tenant_id, tenant_language)
+        if not tenant_faq:
+            logger.warning(
+                {
+                    "component": "kb_service",
+                    "event": "no FAQ used default",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                }
+            )
             tenant_faq = DEFAULT_FAQ
 
         if not tenant_faq:
             return None
 
-        # 2) wybierz kilka wpisów FAQ pasujących do pytania
-        relevant_faq = self._select_relevant_faq_entries(
-            question=question,
-            tenant_faq=tenant_faq,
-            k=3,
-        )
-
-        # 3) zbuduj kontekst FAQ jako Q/A
-        lines: list[str] = []
-        for key, answer in relevant_faq.items():
-            if not answer:
-                continue
-            lines.append(f"Q: {key}")
-            lines.append(f"A: {answer}")
-        faq_context = "\n".join(lines)
-
-        if not faq_context:
-            return None
-
-        system_prompt = (
-            "You are a helpful assistant for a fitness club.\n"
-            "You answer the user's question ONLY using the FAQ entries below.\n"
-            "Always respond as a json object with a single key \"answer\".\n"
-            "In the \"answer\" value, explain the information in your own words, "
-            "If the FAQ does not contain the information needed to answer the question,"
-            "reply that you don't know AND ask the user if there is anything else you can help with.\n"
-            "FAQ entries:\n"
-            f"{faq_context}\n"
-        )
-
-        if language_code:
-            system_prompt += (
-                f"\nAnswer in the language {language_code} (ISO language code)."
+        # 2) retrieval: prefer Pinecone (vector DB) when configured;
+        #    otherwise fall back to legacy keyword-overlap retrieval.
+        retrieved_chunks = []
+        if self._vector.enabled():
+            retrieved_chunks = self._vector.retrieve(
+                tenant_id=tenant_id,
+                language_code=language_code,
+                question=question,
             )
-        else:
-            system_prompt += "\nAnswer in the same language as the user's question."
 
+        if retrieved_chunks:
+            system_prompt = build_kb_prompt(chunks=retrieved_chunks, language_code=language_code)
+        else:
+            logger.warning(
+                {
+                    "component": "kb_service",
+                    "event": "no retrieved_chunks",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "vector enabled": self._vector.enabled(),
+                }
+            )
+            # legacy retrieval (backward-compatible)
+            relevant_faq = self._select_relevant_faq_entries(
+                question=question,
+                tenant_faq=tenant_faq,
+                k=3,
+            )
+
+            # build Q/A context
+            lines: list[str] = []
+            for key, answer in relevant_faq.items():
+                if not answer:
+                    continue
+                lines.append(f"Q: {key}")
+                lines.append(f"A: {answer}")
+            faq_context = "\n".join(lines)
+
+            if not faq_context:
+                return None
+
+            system_prompt = (
+                "You are a helpful assistant for a fitness club.\n"
+                "You answer the user's question ONLY using the FAQ entries below.\n"
+                "Always respond as a json object with a single key \"answer\".\n"
+                "In the \"answer\" value, explain the information in your own words, "
+                "If the FAQ does not contain the information needed to answer the question,"
+                "reply that you don't know AND ask the user if there is anything else you can help with.\n"
+                "FAQ entries:\n"
+                f"{faq_context}\n"
+            )
+
+            if language_code:
+                system_prompt += (
+                    f"\nAnswer in the language {language_code} (ISO language code)."
+                )
+            else:
+                system_prompt += "\nAnswer in the same language as the user's question."
+ 
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
         ]
-
+        logger.info(
+            {
+                "sender": "temp kb answer ai",
+                "tenant_id": tenant_id,
+                "history": history,
+            }
+        )
         # 4) opcjonalna historia rozmowy (user / assistant)
         if history:
             messages.extend(history)
+            logger.info(
+                {
+                    "sender": "temp kb answer ai history",
+                    "tenant_id": tenant_id,
+                    "history": history,
+                }
+            )
 
         # 5) aktualne pytanie
         messages.append(
@@ -422,112 +496,26 @@ class KBService:
         # fallback: jeśli model jednak zwrócił czysty tekst
         self._store_cached_answer(tenant_id, language_code, question, raw)
         return raw
+   
     # -------------------------------------------------------------------------
-    # stylizacja odpowiedzi (warstwa 2)
+    # Vector indexing helpers (optional)
     # -------------------------------------------------------------------------
-
-    def stylize_answer(
+    def reindex_faq(
         self,
         *,
-        base_answer: str,
         tenant_id: str,
         language_code: Optional[str] = None,
-        tag: Optional[str] = None,
-        last_user_message: Optional[str] = None,
-    ) -> str:
+    ) -> bool:
+        """Load tenant FAQ and push it to Pinecone (chunking + embeddings + upsert).
+
+        Safe to call multiple times. If vector mode is disabled, returns False.
         """
-        Przyjmuje bazową odpowiedź z FAQ (faktycznie poprawną)
-        i zwraca wersję "ludzką", z lekką wariacją językową.
-
-        - jeśli mamy już zapisane warianty dla (tenant, lang, tag) → losujemy jeden,
-        - jeśli nie, wołamy raz LLM o kilka wariantów, zapisujemy i losujemy.
-        """
-        base_answer = (base_answer or "").strip()
-        if not base_answer:
-            return ""
-
-        # jeśli mamy wariant w cache – szybka ścieżka
-        variant = self._get_style_variant(tenant_id, language_code, tag)
-        if variant:
-            return variant
-
-        # tu faktycznie wołamy LLM (tylko gdy brakuje wariantów)
-        system_prompt = (
-            "Jesteś uprzejmym asystentem klubu fitness.\n"
-            "Masz gotową odpowiedź FACTS, której NIE WOLNO Ci zmieniać merytorycznie.\n"
-            "Twoim zadaniem jest przygotować kilka naturalnych, rozmownych wersji "
-            "tej odpowiedzi po polsku, używając synonimów i innego szyku zdań.\n"
-            "Nie dodawaj nowych informacji, których nie ma w FACTS.\n"
-            "Zwróć JSON {\"variants\": [\"wersja1\", \"wersja2\", ...]}.\n"
-        )
-
-        if language_code:
-            system_prompt += (
-                f"Odpowiadaj w języku: {language_code} (kod ISO). "
-                "Jeśli to polski, pisz naturalną polszczyzną, jak pracownik recepcji klubu.\n"
-            )
-
-        user_parts = [
-            "FACTS (oryginalna odpowiedź, nie zmieniaj faktów):",
-            base_answer,
-            "",
-            f"Wygeneruj proszę {self._style_variants_per_answer} różnych wersji "
-            "tej odpowiedzi po polsku. Nie dopisuj nic poza JSON-em.",
-        ]
-
-        if last_user_message:
-            user_parts.insert(
-                0,
-                f"To jest ostatnia wiadomość użytkownika (dla kontekstu, nie cytuj jej wprost): {last_user_message}",
-            )
-
-        user_content = "\n".join(user_parts)
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ]
-
-        try:
-            raw = self._client.chat(
-                messages=messages,
-                max_tokens=256,
-                temperature=0.4,  # trochę kreatywności, ale nie za dużo
-            )
-        except Exception as e:
-            logger.error(
-                {
-                    "sender": "kb_style_failed",
-                    "tenant_id": tenant_id,
-                    "err": str(e),
-                }
-            )
-            # fallback: jak nie uda się wystylizować – zwróć bazową odpowiedź
-            return base_answer
-
-        if not raw:
-            return base_answer
-
-        raw = raw.strip()
-
-        variants: List[str] = []
-
-        # próbujemy sparsować JSON { "variants": ["...", "..."] }
-        try:
-            data = json.loads(raw)
-            maybe_variants = data.get("variants")
-            if isinstance(maybe_variants, list):
-                variants = [v for v in maybe_variants if isinstance(v, str)]
-        except Exception:
-            # jak nie JSON, to traktujemy cały output jako jeden wariant
-            variants = [raw]
-
-        if not variants:
-            return base_answer
-
-        # zapisujemy do cache, jeśli mamy tag
-        self._store_style_variants(tenant_id, language_code, tag, variants)
-
-        return random.choice(variants)
-        
-        
+        if not self._vector.enabled():
+            return False
+        tenant_faq = self._load_tenant_faq(tenant_id=tenant_id, language_code=language_code)
+        if not tenant_faq:
+            tenant_language = self._tenant_default_lang(tenant_id)
+            tenant_faq = self._load_tenant_faq(tenant_id, tenant_language)
+            return self._vector.index_faq(tenant_id=tenant_id, language_code=tenant_language, faq=tenant_faq)
+        return self._vector.index_faq(tenant_id=tenant_id, language_code=language_code, faq=tenant_faq)
+      

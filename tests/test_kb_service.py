@@ -7,7 +7,6 @@ from src.domain.templates import DEFAULT_FAQ
 from src.common.config import settings
 import src.services.kb_service as kb_mod
 
-
 class DummyBody:
     def __init__(self, text: str):
         self._text = text
@@ -134,7 +133,8 @@ def test_answer_ai_happy_path_with_json(monkeypatch):
     # prosty FAQ – tylko jedna odpowiedź
     svc = KBService(bucket=None, openai_client=None)
     svc._cache[svc._cache_key("t1", "pl")] = {"hours": "8-20"}
-
+    monkeypatch.setattr(svc, "_tenant_default_lang", lambda *_: "en", raising=False) 
+    
     class DummyClient:
         def __init__(self):
             self.last_messages = None
@@ -155,7 +155,8 @@ def test_answer_ai_llm_failure_returns_none(monkeypatch):
     monkeypatch.setattr(settings, "kb_bucket", "", raising=False)
     svc = KBService(bucket=None, openai_client=None)
     svc._cache[svc._cache_key("t1", None)] = {"hours": "8-20"}
-
+    monkeypatch.setattr(svc, "_tenant_default_lang", lambda *_: "en", raising=False) 
+    
     class DummyClient:
         def chat(self, *a, **k):
             raise RuntimeError("boom")
@@ -163,55 +164,3 @@ def test_answer_ai_llm_failure_returns_none(monkeypatch):
     svc._client = DummyClient()
     ans = svc.answer_ai(question="q", tenant_id="t1")
     assert ans is None
-
-
-def test_stylize_answer_empty_base_returns_empty():
-    svc = KBService(bucket=None, openai_client=None)
-    assert svc.stylize_answer(base_answer="", tenant_id="t1") == ""
-
-
-def test_stylize_answer_uses_cached_variant_first(monkeypatch):
-    svc = KBService(bucket=None, openai_client=None)
-    svc._store_style_variants("t1", "pl", "tag1", ["A", "B"])
-
-    class DummyClient:
-        def chat(self, *a, **k):
-            raise AssertionError("LLM should not be called when variant cached")
-
-    svc._client = DummyClient()
-    ans = svc.stylize_answer(base_answer="base", tenant_id="t1", language_code="pl", tag="tag1")
-    assert ans in ["A", "B"]
-
-
-def test_stylize_answer_llm_failure_returns_base(monkeypatch):
-    svc = KBService(bucket=None, openai_client=None)
-
-    class DummyClient:
-        def chat(self, *a, **k):
-            raise RuntimeError("boom")
-
-    svc._client = DummyClient()
-    ans = svc.stylize_answer(base_answer="Base answer", tenant_id="t1", language_code="pl")
-    assert ans == "Base answer"
-
-
-def test_stylize_answer_parses_variants_and_caches(monkeypatch):
-    svc = KBService(bucket=None, openai_client=None)
-
-    class DummyClient:
-        def chat(self, messages, max_tokens=None, temperature=None):
-            return json.dumps({"variants": ["v1", "v2"]})
-
-    svc._client = DummyClient()
-    ans = svc.stylize_answer(
-        base_answer="Base",
-        tenant_id="t1",
-        language_code="pl",
-        tag="tag-x",
-        last_user_message="ok",
-    )
-    assert ans in ["v1", "v2"]
-    # warianty powinny być zapisane w cache
-    key = svc._variants_key("t1", "pl", "tag-x")
-    assert key in svc._style_variants
-    assert svc._style_variants[key] == ["v1", "v2"]

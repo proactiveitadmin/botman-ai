@@ -63,6 +63,21 @@ class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
+    # OpenAI embeddings
+    embedding_model: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    embedding_dimensions: int | None = (
+        int(os.getenv("EMBEDDING_DIMENSIONS")) if os.getenv("EMBEDDING_DIMENSIONS", "").strip() else None
+    )
+    
+    # Vector DB (Pinecone)
+    pinecone_api_key: str = os.getenv("PINECONE_API_KEY", "")
+    # Data-plane host of the Pinecone index, e.g. "my-index-xxxxx.svc.eu-west1-gcp.pinecone.io"
+    pinecone_index_host: str = os.getenv("PINECONE_INDEX_HOST", "")
+    pinecone_namespace_prefix: str = os.getenv("PINECONE_NAMESPACE_PREFIX", "kb")
+    pinecone_top_k: int = int(os.getenv("PINECONE_TOP_K", "6"))
+    # Optional: force-disable vector retrieval (use legacy keyword retrieval)
+    kb_vector_enabled: bool = os.getenv("KB_VECTOR_ENABLED", "1").lower() not in ("0", "false", "no")
+ 
     # PerfectGym
     pg_base_url: str = os.getenv("PG_BASE_URL", "")
     pg_client_id: str = os.getenv("PG_CLIENT_ID", "")

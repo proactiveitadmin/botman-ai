@@ -22,7 +22,7 @@ from ...domain.models import Message
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
 from ...common.utils import new_id
-from ...common.security import user_hmac
+from ...common.security import conversation_key
 
 IDEMPOTENCY = IdempotencyRepo()
 
@@ -86,10 +86,13 @@ def _publish_actions(actions, original_body: dict):
 
         payload = a.payload
 
-        conv_key = (
-            original_body.get("conversation_id")
-            or original_body.get("channel_user_id")
-            or original_body.get("from")
+        # Canonical Messages conversation key (no PII): if caller doesn't provide
+        # a conversation_id, derive stable key from (tenant, channel, user).
+        conv_key = conversation_key(
+            original_body.get("tenant_id", "default"),
+            original_body.get("channel", "whatsapp"),
+            original_body.get("channel_user_id") or original_body.get("from"),
+            original_body.get("conversation_id"),
         )
         
         from_phone = payload.get("from") or original_body.get("to")
@@ -111,6 +114,7 @@ def _publish_actions(actions, original_body: dict):
                 ai_confidence=None,
                 channel=payload.get("channel")
                     or original_body.get("channel", "whatsapp"),
+                    channel_user_id=original_body.get("channel_user_id") or original_body.get("from"),
                 language_code=payload.get("language_code")
                     or original_body.get("language_code"),
             )
@@ -248,36 +252,6 @@ def lambda_handler(event, context):
             if not IDEMPOTENCY.try_acquire(inbound_key, meta={"scope": "inbound"}):
                 logger.info({"handler": "message_router", "event": "duplicate_inbound", "tenant_id": tenant_id})
                 continue
-        event_id = msg_body.get("event_id")
-        tenant_id = msg_body.get("tenant_id", "default")
-        from_phone = msg_body.get("from")
-        channel = msg_body.get("channel", "whatsapp")
-        channel_user_id = msg_body.get("channel_user_id") or from_phone
-        #conversation key used for Messages pk/sk and idempotency markers (no PII)
-        uid = user_hmac(tenant_id, channel, channel_user_id)
-        conv_key = msg_body.get("conversation_id") or f"conv#{channel}#{uid}"
-
-        # Prosta idempotencja: jeśli ten event już przerobiliśmy, skip
-        if event_id:
-            # np. pk = tenant_id#from_phone, sk = event#event_id
-            existing = MESSAGES.table.get_item(
-                Key={
-                    "pk": f"{tenant_id}#{conv_key}",
-                    "sk": f"event#{event_id}",
-                }
-            ).get("Item")
-            if existing:
-                # już było – pomijamy
-                continue
-
-            # zapisujemy event jako przetworzony
-            MESSAGES.table.put_item(
-                Item={
-                    "pk": f"{tenant_id}#{conv_key}",
-                    "sk": f"event#{event_id}",
-                    "created_at": int(time.time()),
-                }
-            )
         logger.info(
             {
                 "handler": "message_router",
@@ -291,9 +265,13 @@ def lambda_handler(event, context):
         )
 
         msg = _build_message(msg_body)
-         # klucz rozmowy – tak jak w ticketach (conversation_id lub user)
-        conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
-
+        # Canonical conversation key for Messages history (no PII).
+        conv_key = conversation_key(
+            msg.tenant_id,
+            msg.channel or "whatsapp",
+            msg.channel_user_id or msg.from_phone,
+            msg.conversation_id,
+        )
         # logujemy inbound do Messages
         try:
             MESSAGES.log_message(
@@ -305,6 +283,7 @@ def lambda_handler(event, context):
                 from_phone=msg.from_phone,
                 to_phone=msg.to_phone,
                 channel=msg.channel or "whatsapp",
+                channel_user_id=msg.channel_user_id or msg.from_phone,
                 language_code=None,
             )
         except Exception:

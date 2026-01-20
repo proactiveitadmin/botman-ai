@@ -20,6 +20,7 @@ from botocore.config import Config
 from ..domain.models import Message, Action
 from ..common.utils import build_reply_action
 from ..common.config import settings
+from ..common.security import conversation_key
 from ..services.nlu_service import NLUService
 from ..services.kb_service import KBService
 from ..services.template_service import TemplateService
@@ -122,7 +123,7 @@ class RoutingService:
                 slots = getattr(nlu, "slots", {}) or {}
                 confidence = float(getattr(nlu, "confidence", 1.0))
 
-        if intent not in ("clarify", "greeting") and confidence < 0.3:
+        if intent not in ("clarify") and confidence < 0.3:
             intent = "clarify"
 
         return intent, slots, confidence
@@ -243,19 +244,14 @@ class RoutingService:
 
         # 6) Routing po intencji
 
-        # 6.1 Powitanie
-        if intent == "greeting":
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "greeting",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
-
-        # 6.2 FAQ
+        # 6.1 FAQ
         if intent == "faq":
-            conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
+            conv_key = conversation_key(
+                msg.tenant_id,
+                msg.channel or "whatsapp",
+                msg.channel_user_id or msg.from_phone,
+                msg.conversation_id,
+            )
             chat_history: list[dict] = []
 
             # historia potrzebna nam tylko jako fallback do answer_ai
@@ -311,17 +307,6 @@ class RoutingService:
                     language_code=lang,
                 )
 
-            #if base_answer:
-                # 2) mamy "fakty" z FAQ -> teraz stylizacja (drugie, lekkie AI)
-             #   styled = self.kb.stylize_answer(
-              #      base_answer=base_answer,
-               #     tenant_id=msg.tenant_id,
-                #    language_code=lang,
-                 #   tag=faq_tag,
-                  #  last_user_message=msg.body,
-             #   )
-              #  return [self._reply(msg, lang, styled)]
-
             # 3) Fallback – jeśli NLU nie podało topic albo FAQ nie ma wpisu,
             #    używamy dotychczasowego AI-FAQ (answer_ai) z historią
             ai_body = self.kb.answer_ai(
@@ -353,7 +338,7 @@ class RoutingService:
 
             return [self._reply(msg, lang, body)]
 
-        # 6.3 Rezerwacja zajęć
+        # 6.2 Rezerwacja zajęć
         if intent == "reserve_class":
             class_id = (slots.get("class_id") or "").strip()
 
@@ -447,7 +432,7 @@ class RoutingService:
                 member_id=member_id,
             )
 
-        # 6.4 Handover do człowieka
+        # 6.3 Handover do człowieka
         if intent == "handover":
             self.conv.assign_agent(
                 tenant_id=msg.tenant_id,
@@ -463,9 +448,14 @@ class RoutingService:
             )
             return [self._reply(msg, lang, body)]
 
-        # 6.5 Ticket do systemu ticketowego
+        # 6.4 Ticket do systemu ticketowego
         if intent == "ticket":
-            conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
+            conv_key = conversation_key(
+                msg.tenant_id,
+                msg.channel or "whatsapp",
+                msg.channel_user_id or msg.from_phone,
+                msg.conversation_id,
+            )
 
             history_items: list[dict] = []
             if self.messages:
@@ -497,7 +487,7 @@ class RoutingService:
 
             description = (
                 slots.get("description")
-                or f"Zgłoszenie z chatu.\n\nOstatnia wiadomość:\n{msg.body}\n\nHistoria:\n{history_block}"
+                or f"Request from chat.\n\Last message:\n{msg.body}\n\History:\n{history_block}"
             )
 
             meta = {
@@ -538,11 +528,11 @@ class RoutingService:
 
             return [self._reply(msg, lang, body)]
 
-        # 6.6 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
+        # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
         if intent == "crm_available_classes":
             return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=False)
 
-        # 6.7 Status kontraktu
+        # 6.6 Status kontraktu
         if intent == "crm_contract_status":
             verify_resp = self.crm_flow.ensure_crm_verification(
                 msg,
@@ -566,7 +556,7 @@ class RoutingService:
 
             return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
 
-        # 6.8 Saldo członkowskie
+        # 6.7 Saldo członkowskie
         if intent == "crm_member_balance":
             verify_resp = self.crm_flow.ensure_crm_verification(
                 msg,
@@ -590,7 +580,7 @@ class RoutingService:
 
             return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
 
-        # 6.9 Domyślny clarify
+        # 6.8 Domyślny clarify
         body = self.tpl.render_named(
             msg.tenant_id,
             "clarify_generic",

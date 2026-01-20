@@ -1,554 +1,1286 @@
-# ==== CONFIG ====
-$tableName = "Templates-botman-stage"   # <- غيّر اسم الجدول إذا لزم الأمر
-$region   = "eu-central-1"              # <- غيّر المنطقة إذا كنت تستخدم أخرى
-
+# ==== KONFIGURACJA ====
+$tableName = "Templates-botman-stage"   # <- PODMIEŃ NA SWOJĄ NAZWĘ TABELI
+$region   = "eu-central-1"              # <- jeśli używasz innego, zmień
 # ==== 1. handover_to_staff ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#handover_to_staff#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "handover_to_staff"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "سأقوم الآن بتحويلك إلى أحد موظفي النادي (سيتم التحويل خلال لحظات)."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 2. ticket_summary ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#ticket_summary#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "ticket_summary"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "طلب العميل"},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 3. ticket_created_ok ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#ticket_created_ok#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "ticket_created_ok"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لقد أنشأت طلباً جديداً. الرقم: %{ticket}."},
-    "placeholders":  {"L": [ { "S": "ticket" } ]}
-  }'
-
-# ==== 4. ticket_created_failed ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#ticket_created_failed#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "ticket_created_failed"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تعذّر إنشاء الطلب الآن. يرجى المحاولة مرة أخرى لاحقاً."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 5. clarify_generic ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#clarify_generic#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "clarify_generic"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "هل يمكنك توضيح كيف أستطيع مساعدتك؟"},
-    "placeholders":  {"L": []}
-  }'
-
-# ========== PERFECTGYM – LISTA ZAJĘĆ ==========
-
-# ==== 6. crm_available_classes ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "الحصص المتاحة:\n\n{classes}\n"},
-    "placeholders":  {"L": [ { "S": "classes" } ]}
-  }'
-
-# ==== 7. crm_available_classes_empty ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_empty#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_empty"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "حالياً لا توجد أي حصص متاحة في الجدول."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 8. crm_available_classes_capacity_no_limit ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_capacity_no_limit#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_capacity_no_limit"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "دون حد لعدد الأماكن"},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 9. crm_available_classes_capacity_full ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_capacity_full#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_capacity_full"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لا توجد أماكن شاغرة (الحد {limit})"},
-    "placeholders":  {"L": [ { "S": "limit" } ]}
-  }'
-
-# ==== 10. crm_available_classes_capacity_free ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_capacity_free#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_capacity_free"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "*{free}* أماكن شاغرة (الحد {limit})"},
-    "placeholders":  {"L": [ { "S": "free" }, { "S": "limit" } ]}
-  }'
-
-# ==== 11. crm_available_classes_item ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_item#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_item"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "{index}) *{date}* {time} – {name} {capacity}"},
-    "placeholders":  {
-      "L": [
-        { "S": "index" },
-        { "S": "date" },
-        { "S": "time" },
-        { "S": "name" },
-        { "S": "capacity" }
-      ]
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#handover_to_staff#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "handover_to_staff"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "سأقوم الآن بتحويل طلبك إلى الاستقبال. إذا كان الأمر عاجلًا، يمكنك أيضًا زيارة الاستقبال أو الاتصال بالنادي."
+    },
+    "placeholders": {
+        "L": []
     }
-  }'
-
-# ==== 12. crm_available_classes_invalid_index ====
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_invalid_index#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_invalid_index"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لم أفهم اختيارك. يرجى إدخال رقم الحصة من 1 إلى {max_index}."},
-    "placeholders":  {"L": [ { "S": "max_index" } ]}
-  }'
+  --item $item
 
-# ==== 13. crm_available_classes_no_today ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_no_today#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_no_today"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لا توجد أي حصص متاحة اليوم."},
-    "placeholders":  {"L": []}
-  }'
 
-# ==== 14. crm_available_classes_today ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_today#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_today"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لدينا اليوم الحصص التالية:\n{classes}\n"},
-    "placeholders":  {"L": [ { "S": "classes" } ]}
-  }'
-
-# ==== 15. crm_available_classes_no_classes_on_date ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_no_classes_on_date#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_no_classes_on_date"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "في تاريخ {date} لا توجد أي حصص متاحة."},
-    "placeholders":  {"L": [ { "S": "date" } ]}
-  }'
-
-# ==== 16. crm_available_classes_select_by_number ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_available_classes_select_by_number#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_available_classes_select_by_number"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "هناك عدة حصص في ذلك اليوم. يرجى كتابة رقم الحصة التي تود حجزها."},
-    "placeholders":  {"L": []}
-  }'
-
-# ========== PERFECTGYM – KONTRAKT / WERYFIKACJA ==========
-
-# ==== 17. crm_contract_ask_email ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_contract_ask_email#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_contract_ask_email"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "يرجى تزويدي بعنوان البريد الإلكتروني المستخدم في النادي حتى أتمكّن من التحقق من حالة عضويتك."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 18. crm_contract_not_found ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_contract_not_found#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_contract_not_found"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لا أرى أي عضوية مرتبطة بالبريد الإلكتروني {email} ورقم الهاتف {phone}. يرجى التأكد من أن البيانات مطابقة لتلك المسجلة في PerfectGym."},
-    "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
-  }'
-
-# ==== 19. crm_challenge_ask_dob ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_challenge_ask_dob#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_challenge_ask_dob"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لأغراض التحقق، يرجى تقديم تاريخ ميلادك (تحقق مؤقت)."},
-    "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
-  }'
-
-# ==== 20. crm_challenge_success ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_challenge_success#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_challenge_success"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تمّ التحقق من حسابك بنجاح."},
-    "placeholders":  {"L": [ { "S": "email" }, { "S": "phone" } ]}
-  }'
-
-# ==== 21. crm_contract_details ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_contract_details#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_contract_details"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تفاصيل عضويتك:\nالباقة: {plan_name}\nالحالة:\n{status}\nتاريخ البداية: {start_date}\nتاريخ الانتهاء: {end_date}\nالرصيد الحالي: {current_balance}\nفي حالة الدين منذ: {negative_balance_since}"},
-    "placeholders":  {
-      "L": [
-        { "S": "plan_name" },
-        { "S": "status" },
-        { "S": "start_date" },
-        { "S": "end_date" },
-        { "S": "current_balance" },
-        { "S": "negative_balance_since" }
-      ]
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_summary#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_summary"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "طلب إلى الاستقبال"
+    },
+    "placeholders": {
+        "L": []
     }
-  }'
-
-# ========== REZERWACJE ZAJĘĆ ==========
-
-# ==== 22. reserve_class_confirmed ====
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_confirmed#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_confirmed"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تم حجز {class_name} بتاريخ {class_date} الساعة {class_time}. نراك هناك!"},
-    "placeholders":  {
-      "L": [
-        { "S": "class_name" },
-        { "S": "class_date" },
-        { "S": "class_time" }
-      ]
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_created_ok#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_created_ok"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "شكرًا لك — تم إنشاء الطلب. رقم التذكرة: %{ticket}. سنعود إليك بمجرد مراجعته."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "ticket"
+            }
+        ]
     }
-  }'
-
-# ==== 23. reserve_class_failed ====
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_failed#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_failed"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تعذّر إتمام الحجز. يرجى المحاولة مرة أخرى لاحقاً."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 24. reserve_class_declined ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_declined#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_declined"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تم رفض الحجز. أخبرني إذا رغبت في حجز حصة أخرى."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 25. reserve_class_confirm ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_confirm#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_confirm"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "هل تؤكد حجز الحصة {class_name} بتاريخ {class_date} في الساعة {class_time}؟  يرجى الرد: نعم أو لا."},
-    "placeholders":  {"L": [
-      { "S": "class_name" },
-      { "S": "class_date" },
-      { "S": "class_time" }
-    ]}
-  }'
+  --item $item
 
 
-# ==== 26. reserve_class_missing_id ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_missing_id#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_missing_id"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تعذّر تحديد الحصة المطلوب حجزها. يرجى المحاولة مرة أخرى."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 27. reserve_class_confirm_words ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_confirm_words#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_confirm_words"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "نعم,نعم.,ايوه,أيوه,تمام,موافق,أوافق,أكيد,طبعاً,بالطبع"},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 28. reserve_class_decline_words ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#reserve_class_decline_words#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "reserve_class_decline_words"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لا,لا.,إلغاء,ألغِ,أريد الإلغاء,لا أريد,لا أرغب"},
-    "placeholders":  {"L": []}
-  }'
-
-# ========== WERYFIKACJA WWW / FAQ ==========
-
-# ==== 29. www_not_verified ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#www_not_verified#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "www_not_verified"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لم يتم العثور على تحقق فعّال لهذا الرمز."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 30. www_user_not_found ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#www_user_not_found#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "www_user_not_found"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لم يتم العثور على عضوية مرتبطة بهذا الرقم."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 31. www_verified ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#www_verified#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "www_verified"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تمّ التحقق من حسابك. يمكنك الآن العودة إلى محادثة الويب."},
-    "placeholders":  {"L": []}
-  }'
-
-# ==== 32. crm_web_verification_required ====
-aws dynamodb put-item `
-  --table-name $tableName `
-  --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_web_verification_required#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_web_verification_required"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لمتابعة العملية، نحتاج أولاً إلى تأكيد هويتك.\n\nإذا كنت تستخدم محادثة الويب، اضغط على الرابط أدناه لفتح واتساب وإرسال رمز التحقق.\nوإذا كنت بالفعل داخل واتساب، فقط أرسل الرمز الموضح أدناه.\n\nالرمز: {{verification_code}}\nالرابط: {{whatsapp_link}}\n\nبعد إرسال الرمز، عُد إلى هذه المحادثة – سنقوم بالتحقق من حسابك وفتح الوصول إلى بياناتك في PerfectGym."},
-    "placeholders":  {
-      "L": [
-        { "S": "verification_code" },
-        { "S": "whatsapp_link" }
-      ]
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_created_failed#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_created_failed"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "تعذّر إنشاء الطلب. يرجى المحاولة مرة أخرى بعد قليل. إذا تكرر الأمر، أخبرني بما يحدث وسأحوّله إلى الاستقبال."
+    },
+    "placeholders": {
+        "L": []
     }
-  }'
-
-# ==== 33. faq_no_info ====
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#faq_no_info#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "faq_no_info"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "عذراً، لا تتوفر لدي معلومات حول هذا الموضوع. هل يمكنني مساعدتك في شيء آخر؟"},
-    "placeholders":  {"L": []}
-  }'
+  --item $item
 
-# ========== POWITANIE ==========
 
-# ==== 34. greeting ====
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#clarify_generic#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "clarify_generic"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "أكيد — هل يمكنك توضيح الموضوع؟ (مثل: الاشتراك، الدفع، الحصص، الحجز، التطبيق)"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#greeting#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "greeting"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "مرحباً! أنا المساعد الافتراضي لنادي اللياقة. أخبرني كيف يمكنني مساعدتك."},
-    "placeholders":  {"L": []}
-  }'
+  --item $item
 
-# ==== 35. crm_challenge_retry ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "هذه هي الحصص المتاحة:\n\n{classes}\n"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "classes"
+            }
+        ]
+    }
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_challenge_retry#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_challenge_retry"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "فشل التحقق. يرجى المحاولة مرة أخرى."},
-    "placeholders":  {"L": []}
-  }'
+  --item $item
 
-# ==== 36. crm_challenge_fail_handover ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_empty#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_empty"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا أرى حصصًا متاحة حاليًا. جرّب لاحقًا، أو أخبرني باليوم والوقت المفضلين لديك وسأبحث عن بدائل."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_challenge_fail_handover#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_challenge_fail_handover"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "تم إيقاف عملية التحقق مؤقتًا. يرجى المحاولة مرة أخرى بعد 15 دقيقة أو التواصل مع خدمة العملاء."},
-    "placeholders":  {"L": []}
-  }'
+  --item $item
 
-# ==== CRM: crm_challenge_ask_email_code ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_capacity_no_limit#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_capacity_no_limit"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "بدون حد للمقاعد"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_challenge_ask_email_code#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_challenge_ask_email_code"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "لقد أرسلنا رمز التحقق إلى البريد الإلكتروني {{email}}. يرجى إدخال الرمز هنا للمتابعة."},
-    "placeholders":  {"L": [{"S": "email"}]}
-  }'
+  --item $item
 
-# ==== CRM: crm_code_via_email ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_capacity_full#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_capacity_full"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا توجد أماكن متاحة (الحد {limit})"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "limit"
+            }
+        ]
+    }
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_code_via_email#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_code_via_email"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "رمز التحقق الخاص بك هو: {{verification_code}}\n\nالرمز صالح لمدة {{ttl_minutes}} دقيقة.\n\nإذا لم تقم بطلب هذا الرمز، يرجى تجاهل هذه الرسالة."},
-    "placeholders":  {"L": [{"S": "verification_code"}, {"S": "ttl_minutes"}]}
-  }'
+  --item $item
 
-# ==== CRM: crm_challenge_expired ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_capacity_free#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_capacity_free"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "*{free}* أماكن متاحة (الحد {limit})"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "free"
+            },
+            {
+                "S": "limit"
+            }
+        ]
+    }
+}
+'@
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
-  --item '{
-    "pk":            {"S": "clubProactiveIT#crm_challenge_expired#ar"},
-    "tenant_id":     {"S": "clubProactiveIT"},
-    "template_code": {"S": "crm_challenge_expired"},
-    "language_code": {"S": "ar"},
-    "body":          {"S": "انتهت صلاحية التحقق. يرجى طلب رمز جديد للمتابعة."},
-    "placeholders":  {"L": []}
-  }'
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_item#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_item"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "{index}) *{date}* {time} – {name} {capacity}"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "index"
+            },
+            {
+                "S": "date"
+            },
+            {
+                "S": "time"
+            },
+            {
+                "S": "name"
+            },
+            {
+                "S": "capacity"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_invalid_index#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_invalid_index"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لم أتمكن من مطابقة اختيارك. يرجى إرسال رقم من 1 إلى {max_index}."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "max_index"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_no_today#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_no_today"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا أرى حصصًا متاحة اليوم. إذا رغبت، أرسل التاريخ وسأتحقق من يوم آخر."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_today#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_today"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "الحصص المتاحة اليوم:\n\n{classes}\n\nاختر رقمًا من القائمة وسأساعدك في الحجز."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "classes"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_no_classes_on_date#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_no_classes_on_date"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا أرى حصصًا متاحة بتاريخ *{date}*. إذا رغبت، أرسل تاريخًا آخر أو وقتًا مفضلًا وسأتحقق مرة أخرى."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "date"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_available_classes_select_by_number#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_available_classes_select_by_number"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "يرجى اختيار الحصة بإرسال رقمها من القائمة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_contract_not_found#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_contract_not_found"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لم أتمكن من العثور على اشتراك فعّال لك في النظام. إذا كنت تعتقد أن هذا خطأ، تواصل مع الاستقبال — ويمكنني أيضًا إنشاء طلب للتحقق."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "email"
+            },
+            {
+                "S": "phone"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_success#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_success"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "ممتاز — تم التحقق بنجاح ✅ يمكننا المتابعة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_contract_details#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_contract_details"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "هذه تفاصيل اشتراكك:\n\n• الخطة: *{plan_name}*\n• الحالة: *{status}*\n• سارية من: *{start_date}*\n• سارية حتى: *{end_date}*\n\nإذا كانت هناك أي معلومة غير صحيحة، أخبرني وسأساعدك بالتواصل مع الاستقبال."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "plan_name"
+            },
+            {
+                "S": "plan_name"
+            },
+            {
+                "S": "status"
+            },
+            {
+                "S": "start_date"
+            },
+            {
+                "S": "end_date"
+            },
+            {
+                "S": "current_balance"
+            },
+            {
+                "S": "negative_balance_since"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_member_not_linked#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_member_not_linked"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا يمكنني ربط حسابك بملف العضوية بعد. يرجى إكمال التحقق أو التواصل مع الاستقبال لتحديث بياناتك."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_member_balance#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_member_balance"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "رصيدك الحالي هو: *{balance}*.\n\nإذا كانت لديك أسئلة حول المبالغ، يمكنني مساعدتك في توضيح سبب هذا الرصيد."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "balance"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reserve_class_confirmed#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reserve_class_confirmed"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "تم — تم تأكيد الحجز ✅\n\n*{class_name}* — {class_date} الساعة {class_time}\n\nإذا رغبت في الإلغاء أو تغيير الموعد، أخبرني وسأساعدك."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "class_name"
+            },
+            {
+                "S": "class_date"
+            },
+            {
+                "S": "class_time"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reserve_class_already_booked#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reserve_class_already_booked"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "يبدو أنك مسجل/ة بالفعل في هذه الحصة.\n\n*{class_name}* — {class_date} الساعة {class_time}\n\nإذا رغبت، يمكنني التحقق من مواعيد أخرى أو حصص مشابهة بها أماكن متاحة."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "class_id"
+            },
+            {
+                "S": "class_name"
+            },
+            {
+                "S": "class_date"
+            },
+            {
+                "S": "class_time"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reserve_class_failed#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reserve_class_failed"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "تعذّر حجز الحصة. يرجى المحاولة مرة أخرى بعد قليل. إذا تكرر الخطأ، أرسل اسم الحصة والتاريخ وسأحوّله إلى الاستقبال."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reserve_class_declined#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reserve_class_declined"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "حسنًا — لن أقوم بالحجز. إذا غيرت رأيك، أرسل رقم الحصة من القائمة وسنكمل."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reserve_class_confirm#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reserve_class_confirm"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "هل تريد حجز:\n\n*{class_name}* — {class_date} الساعة {class_time}؟\n\nأجب: *نعم* / *لا*."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "class_name"
+            },
+            {
+                "S": "class_date"
+            },
+            {
+                "S": "class_time"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reserve_class_missing_id#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reserve_class_missing_id"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا أملك معرّف الحصة، لذلك لا أستطيع إكمال الحجز. يرجى اختيار الحصة من القائمة (بالرقم) وسنجرب مرة أخرى."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#www_not_verified#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "www_not_verified"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "حسابك غير مُتحقَّق منه بعد. يرجى إكمال التحقق للمتابعة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#www_user_not_found#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "www_user_not_found"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لم أتمكن من العثور على حسابك. تحقق من بياناتك وحاول مرة أخرى، أو تواصل مع الاستقبال للمساعدة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#www_verified#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "www_verified"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "شكرًا لك — تم التحقق من حسابك. يمكننا المتابعة 😊"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_web_verification_required#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_web_verification_required"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "للمتابعة، أحتاج إلى التحقق من حسابك. سأرسل رمز تحقق إلى بريدك الإلكتروني."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "verification_code"
+            },
+            {
+                "S": "whatsapp_link"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#faq_no_info#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "faq_no_info"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا أرى هذه المعلومة في الأسئلة الشائعة. إذا رغبت، يمكنني تحويل السؤال إلى الاستقبال أو إرشادك لمكان التحقق (مثل التطبيق)."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_retry#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_retry"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "يرجى المحاولة مرة أخرى وإدخال رمز التحقق. إذا لم يكن لديك رمز، اطلب رمزًا جديدًا."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_fail_options#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_fail_options"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "تعذّر التحقق من الحساب.\n\nيمكنك: المحاولة مرة أخرى، طلب رمز جديد، أو التواصل مع الدعم."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_fail_handover#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_fail_handover"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "تم حظر التحقق مؤقتًا بعد عدة محاولات غير ناجحة.\n\nيرجى المحاولة بعد حوالي 15 دقيقة أو التواصل مع الاستقبال."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_verification_blocked#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_verification_blocked"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "التحقق محظور مؤقتًا. يرجى الانتظار حوالي {{minutes}} دقيقة ثم المحاولة لاحقًا، أو التواصل مع الاستقبال."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "minutes"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_ask_email_code#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_ask_email_code"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "أرسلنا رمز تحقق إلى {{email}}. أدخله هنا للمتابعة."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "email"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_email_code_already_sent#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_email_code_already_sent"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "تم إرسال رمز تحقق قبل قليل. يرجى التحقق من بريدك الإلكتروني (وأيضًا الرسائل غير المرغوب فيها) ثم المحاولة بعد لحظة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_missing_email#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_missing_email"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "لا أستطيع العثور على عنوان بريدك الإلكتروني في النظام. يرجى تزويدي بالبريد المستخدم عند التسجيل في النادي، أو التواصل مع الاستقبال لتحديث بياناتك."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_code_via_email#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_code_via_email"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "رمز التحقق الخاص بك هو: {{verification_code}}\n\nالرمز صالح لمدة {{ttl_minutes}} دقيقة.\n\nإذا لم تطلب هذا التحقق، يرجى تجاهل هذه الرسالة."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "verification_code"
+            },
+            {
+                "S": "ttl_minutes"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_challenge_expired#ar-AE"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_challenge_expired"
+    },
+    "language_code": {
+        "S": "ar-AE"
+    },
+    "body": {
+        "S": "انتهت صلاحية الرمز. يرجى طلب رمز تحقق جديد للمتابعة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
 

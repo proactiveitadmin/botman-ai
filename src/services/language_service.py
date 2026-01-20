@@ -139,7 +139,7 @@ class LanguageService:
             return None
 
         # bardzo krótkie wiadomości ignorujemy
-        if len(t) < 2:
+        if len(t) < 5:
             return None
 
         sample = t[:4000]  # limit Comprehend

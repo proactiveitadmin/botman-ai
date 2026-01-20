@@ -133,3 +133,31 @@ def phone_last4(phone: str) -> str:
         return ""
     digits = "".join(c for c in phone if c.isdigit())
     return digits[-4:] if len(digits) >= 4 else digits
+
+
+# ---------------------------------------------------------------------------
+# Conversation key (PII-safe) helper
+# ---------------------------------------------------------------------------
+
+def conversation_key(
+    tenant_id: str,
+    channel: str,
+    channel_user_id: str | None,
+    conversation_id: str | None = None,
+) -> str:
+    """Builds the canonical conversation key used in Messages PK.
+
+    We avoid putting PII (phone/session id) directly into DynamoDB keys.
+    If a stable conversation_id exists (e.g. external conversation/thread id),
+    we use it. Otherwise we derive a salted id from (tenant, channel, user).
+
+    Returned format (when derived): "conv#<channel>#<uid>".
+    """
+
+    if conversation_id:
+        return conversation_id
+    # channel_user_id is required to create a stable key; fall back to empty
+    # string so the resulting key remains deterministic (and clearly invalid).
+    cuid = channel_user_id or ""
+    uid = user_hmac(tenant_id, channel or "whatsapp", cuid)
+    return f"conv#{channel or 'whatsapp'}#{uid}"

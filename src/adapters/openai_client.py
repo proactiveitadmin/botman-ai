@@ -21,41 +21,82 @@ from ..common.config import settings
 from ..common.logging import logger
 
 SYSTEM_PROMPT = """
-You are an intent classifier for a fitness club. 
-Return exactly one valid json object with keys:
-- "intent": one of ["reserve_class", "faq", "handover", "clarify", "ticket", "crm_available_classes", "crm_contract_status", "greeting"]
+You are an intent classifier for a fitness club assistant.
+
+Return exactly one valid JSON object with keys:
+- "intent": one of [
+    "reserve_class",
+    "faq",
+    "handover",
+    "clarify",
+    "ticket",
+    "crm_available_classes",
+    "crm_contract_status"
+  ]
 - "confidence": float 0..1
 - "slots": object with extracted parameters.
 
-Intent rules:
-- "greeting": message is only a greeting/polite phrase in any language and contains no request.
-- "faq": user asks for general information on topics [hours price location contact schedule classes trainers membership equipment parking rules facilities age_limit guest_pass lost_and_found cancellation opening_soon].
-- "reserve_class": user wants to sign up/reserve a class (extract class_id, member_id if present).
-- "crm_available_classes": user asks what classes are available.
-- "crm_contract_status": user asks about membership/contract/account status.
-- "ticket": user reports a problem or asks for staff help.
-- "handover": user explicitly wants to speak to a human.
+INTENT DEFINITIONS:
 
-🔧 SPECIAL RULES:
-- If the message is only a number or short numeric selection (e.g. "1", "2", "nr 3", "option 1"), 
-  treat it as: 
+1) "faq"
+Use this intent for ALL informational or knowledge-based content that can be answered
+from static FAQ / knowledge base, including but NOT limited to:
+
+- club information:
+  hours, price, pricing, location, address, contact, schedule, classes, trainers,
+  membership, equipment, parking, rules, facilities, age_limit, guest_pass,
+  lost_and_found, cancellation, opening_soon
+
+- conversational / social FAQ:
+  greetings (hello, hi, hey, salam),
+  farewells (bye, goodbye, see you),
+  thanks and acknowledgements (thanks, thank you, shukran),
+  questions about the bot itself (who are you, what can you do, are you a bot),
+  polite small talk (how are you, nice to meet you),
+  language switching requests (can you speak English/Arabic/Polish)
+
+If the user message can reasonably be answered using FAQ or predefined knowledge,
+ALWAYS choose "faq".
+
+2) "reserve_class"
+User explicitly wants to sign up or reserve a class.
+Extract class_id, class_name, date, time, member_id if present.
+
+3) "crm_available_classes"
+User asks what classes are currently available, today, tomorrow, this week, etc.
+
+4) "crm_contract_status"
+User asks about their membership, contract, subscription, payments, or account status.
+
+5) "ticket"
+User reports a problem, complaint, issue, or asks for staff support/help.
+
+6) "handover"
+User explicitly asks to speak with a human, staff member, or receptionist.
+
+7) "clarify"
+Use ONLY if the message is unclear, incomplete, or cannot be confidently mapped
+to any intent above.
+
+🔧 SPECIAL RULES (IMPORTANT):
+
+- If the message is ONLY a number or short numeric selection
+  (e.g. "1", "2", "nr 3", "option 1"),
+  ALWAYS return:
     { "intent": "clarify", "confidence": 0.01, "slots": {} }
-  This is NOT a class reservation request. Selections are processed by state machine, not NLU.
+  This is NOT a class reservation.
+  Numeric selections are handled by a state machine, not NLU.
 
-- If the message is unclear or does not fit any other intent → "clarify".
+- Prefer "faq" over "clarify" whenever possible.
+  If in doubt between "faq" and "clarify", choose "faq".
 
-Always respond with one minimal json object and nothing else.
+- Always respond with ONE minimal JSON object and NOTHING else.
 """
-
-
-
 
 _VALID_INTENTS = {
     "reserve_class", "faq", "handover", "clarify", "ticket",
-    "crm_available_classes", "crm_contract_status", "greeting",
+    "crm_available_classes", "crm_contract_status",
 }
-
-
 
 class OpenAIClient:
     """
@@ -285,3 +326,31 @@ class OpenAIClient:
             slots = {}
 
         return {"intent": intent, "confidence": conf, "slots": slots}
+
+    # ---------------------------------------------------------------------
+    # Embeddings (for KB / vector retrieval)
+    # ---------------------------------------------------------------------
+    def embed(
+        self,
+        texts: list[str],
+        *,
+        model: str,
+        dimensions: int | None = None,
+    ) -> list[list[float]]:
+        """Return embeddings for the given texts.
+
+        In offline/dev mode (no API key) returns empty list to allow graceful fallback.
+        """
+        if not texts:
+            return []
+        if not self.enabled or not self.client:
+            return []
+
+        # OpenAI Embeddings API: returns a list aligned with inputs.
+        kwargs = {"model": model, "input": texts}
+        # OpenAI pozwala skrócić embeddingi parametrem "dimensions"
+        if dimensions:
+            kwargs["dimensions"] = int(dimensions)
+
+        resp = self.client.embeddings.create(**kwargs)
+        return [d.embedding for d in resp.data]
