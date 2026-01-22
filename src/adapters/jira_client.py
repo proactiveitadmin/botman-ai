@@ -12,6 +12,7 @@ class JiraClient:
         issue_type_name: str | None = None,
     ):
         self.issue_type_name = (issue_type_name or settings.jira_default_issue_type or "").strip() or "Task"
+        self.url = (url or "").rstrip("/")
         self.project = (project_key or "").strip()
         self.token = (token or "").strip()
 
