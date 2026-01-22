@@ -111,23 +111,6 @@ def test_answer_ai_returns_none_for_empty_question():
     svc = KBService(bucket=None, openai_client=None)
     assert svc.answer_ai(question="", tenant_id="t1") is None
 
-
-def test_answer_ai_uses_cache_without_calling_llm(monkeypatch):
-    svc = KBService(bucket=None, openai_client=None)
-
-    # wstawiamy do cache
-    svc._store_cached_answer("t1", "pl", "Godziny?", "cached answer")
-
-    class DummyClient:
-        def chat(self, *a, **k):
-            raise AssertionError("LLM should not be called when cache hit")
-
-    svc._client = DummyClient()
-
-    ans = svc.answer_ai(question="Godziny?", tenant_id="t1", language_code="pl")
-    assert ans == "cached answer"
-
-
 def test_answer_ai_happy_path_with_json(monkeypatch):
     monkeypatch.setattr(settings, "kb_bucket", "", raising=False)
     # prosty FAQ – tylko jedna odpowiedź
@@ -146,10 +129,6 @@ def test_answer_ai_happy_path_with_json(monkeypatch):
     svc._client = DummyClient()
     ans = svc.answer_ai(question="What are your opening hours?", tenant_id="t1", language_code="pl")
     assert "8-20" in ans
-    # odpowiedź powinna też wylądować w cache
-    cached = svc._get_cached_answer("t1", "pl", "What are your opening hours?")
-    assert cached == ans
-
 
 def test_answer_ai_llm_failure_returns_none(monkeypatch):
     monkeypatch.setattr(settings, "kb_bucket", "", raising=False)

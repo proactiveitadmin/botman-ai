@@ -4,7 +4,6 @@ import base64
 import pytest
 
 from src.adapters.jira_client import JiraClient
-from src.common.config import settings
 
 
 class DummyResponseOK:
@@ -28,9 +27,9 @@ class DummyResponseError(DummyResponseOK):
 
 
 def test_auth_header_with_basic_token(monkeypatch):
-    monkeypatch.setattr(settings, "jira_token", "user:pass", raising=False)
     client = JiraClient()
-
+    monkeypatch.setattr(client, "token", "user:pass", raising=False)
+    
     hdr = client._auth_header()
     assert "Authorization" in hdr
     # sprawdźmy, że to faktycznie Basic + base64
@@ -41,14 +40,14 @@ def test_auth_header_with_basic_token(monkeypatch):
 
 
 def test_auth_header_without_colon_returns_empty(monkeypatch):
-    monkeypatch.setattr(settings, "jira_token", "no_colon_here", raising=False)
     client = JiraClient()
+    monkeypatch.setattr(client, "token", "no_colon_here", raising=False)
     assert client._auth_header() == {}
 
 
 def test_build_description_adf_handles_none_description(monkeypatch):
-    monkeypatch.setattr(settings, "jira_token", "t:t", raising=False)
     client = JiraClient()
+    monkeypatch.setattr(client, "token", "t:t", raising=False)
 
     adf = client._build_description_adf(None)
     assert adf["type"] == "doc"
@@ -67,11 +66,12 @@ def test_build_description_adf_multiple_lines(monkeypatch):
 
 def test_create_ticket_dev_mode(monkeypatch):
     """
-    Brak jira_url -> ścieżka DEV (bez requestów HTTP).
+    Brak url -> ścieżka DEV (bez requestów HTTP).
     """
-    monkeypatch.setattr(settings, "jira_url", "", raising=False)
-    monkeypatch.setattr(settings, "jira_project_key", "GI", raising=False)
-    monkeypatch.setattr(settings, "jira_default_issue_type", "Task", raising=False)
+    client = JiraClient()
+    monkeypatch.setattr(client, "url", "", raising=False)
+    monkeypatch.setattr(client, "project_key", "GI", raising=False)
+    monkeypatch.setattr(client, "issue_type_name", "Task", raising=False)
 
     # gdyby jednak create_ticket próbował zrobić POST, to chcemy od razu faila
     import src.adapters.jira_client as jira_mod
@@ -81,7 +81,6 @@ def test_create_ticket_dev_mode(monkeypatch):
 
     monkeypatch.setattr(jira_mod, "requests", type("R", (), {"post": _unexpected_post}))
 
-    client = JiraClient()
     res = client.create_ticket(
         summary="Test ticket",
         description="Desc",
@@ -97,11 +96,12 @@ def test_create_ticket_success(monkeypatch):
     Normalny przypadek z prawdziwym URL – symulujemy udane utworzenie ticketa.
     """
     import src.adapters.jira_client as jira_mod
+    client = JiraClient()
 
-    monkeypatch.setattr(settings, "jira_url", "https://example.atlassian.net", raising=False)
-    monkeypatch.setattr(settings, "jira_project_key", "GI", raising=False)
-    monkeypatch.setattr(settings, "jira_default_issue_type", "Task", raising=False)
-    monkeypatch.setattr(settings, "jira_token", "user:pass", raising=False)
+    monkeypatch.setattr(client, "url", "https://example.atlassian.net", raising=False)
+    monkeypatch.setattr(client, "project_key", "GI", raising=False)
+    monkeypatch.setattr(client, "issue_type_name", "Task", raising=False)
+    monkeypatch.setattr(client, "token", "user:pass", raising=False)
 
     monkeypatch.setattr(
         jira_mod,
@@ -109,7 +109,6 @@ def test_create_ticket_success(monkeypatch):
         type("R", (), {"post": staticmethod(lambda *a, **k: DummyResponseOK())}),
     )
 
-    client = JiraClient()
     res = client.create_ticket(
         summary="Test",
         description="something",
@@ -126,11 +125,12 @@ def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
     (bo raise_for_status w stubie nic nie robi).
     """
     import src.adapters.jira_client as jira_mod
+    client = JiraClient()
 
-    monkeypatch.setattr(settings, "jira_url", "https://example.atlassian.net", raising=False)
-    monkeypatch.setattr(settings, "jira_project_key", "GI", raising=False)
-    monkeypatch.setattr(settings, "jira_default_issue_type", "Task", raising=False)
-    monkeypatch.setattr(settings, "jira_token", "user:pass", raising=False)
+    monkeypatch.setattr(client, "url", "https://example.atlassian.net", raising=False)
+    monkeypatch.setattr(client, "project_key", "GI", raising=False)
+    monkeypatch.setattr(client, "issue_type_name", "Task", raising=False)
+    monkeypatch.setattr(client, "token", "user:pass", raising=False)
 
     monkeypatch.setattr(
         jira_mod,
@@ -138,7 +138,6 @@ def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
         type("R", (), {"post": staticmethod(lambda *a, **k: DummyResponseError())}),
     )
 
-    client = JiraClient()
     res = client.create_ticket(
         summary="Test err",
         description="desc",
@@ -146,8 +145,8 @@ def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
         meta=None,
     )
 
-    out = capsys.readouterr().out
-    assert "Jira error status" in out
-    assert "Jira error body" in out
+    captured = capsys.readouterr()
+    combined = (captured.out or "") + (captured.err or "")
+    assert "Jira error status" in combined
     assert res["ok"] is True
     assert res["ticket"] == "JIRA-ERR"

@@ -14,7 +14,8 @@ from typing import Dict, Optional, List
 
 from botocore.exceptions import ClientError
 from .kb_vector_service import KBVectorService, build_kb_prompt
-
+from .clients_factory import ClientsFactory
+from .tenant_config_service import TenantConfigService
 from ..common.logging import logger
 from ..repos.tenants_repo import TenantsRepo
 from ..domain.templates import DEFAULT_FAQ
@@ -35,8 +36,7 @@ class KBService:
         self,
         bucket: Optional[str] = None,
         openai_client: Optional[OpenAIClient] = None,
-        qa_cache_ttl_seconds: int = 3600,
-        style_variants_per_answer: int = 3,
+        clients_factory: ClientsFactory | None = None
     ) -> None:
         #tenants repo
         self.tenants = TenantsRepo()
@@ -45,21 +45,15 @@ class KBService:
 
         # cache FAQ z S3: { "tenant#lang": {topic: answer, ...} }
         self._cache: Dict[str, Dict[str, str] | None] = {}
-
-        # cache odpowiedzi Q->A
-        # klucz: tenant|lang|normalized_question -> (timestamp, answer)
-        self._answer_cache: Dict[str, tuple[float, str]] = {}
-        self._answer_cache_ttl = qa_cache_ttl_seconds
-
-        #cache wariantów stylizowanych odpowiedzi per (tenant, lang, tag)
-        # key: "tenant|lang|tag" -> ["wersja 1", "wersja 2", ...]
-        self._style_variants: Dict[str, List[str]] = {}
-        self._style_variants_per_answer = style_variants_per_answer
         
         # klient OpenAI – opcjonalny, żeby w dev/offline dalej działało
         self._client = openai_client or OpenAIClient()
         # vector retrieval (Pinecone). If not configured, KBService falls back to legacy retrieval.
-        self._vector = KBVectorService(openai_client=self._client)
+        self._clients_factory = clients_factory or ClientsFactory(TenantConfigService())
+        self._vector = KBVectorService(
+            openai_client=self._client,
+            clients_factory=self._clients_factory,
+        )
     # -------------------------------------------------------------------------
     # Helpery cache
     # -------------------------------------------------------------------------
@@ -77,115 +71,7 @@ class KBService:
     def _cache_key(self, tenant_id: str, language_code: str | None) -> str:
         return f"{tenant_id}#{language_code or 'en'}"
 
-    # klucz do cache odpowiedzi
-    def _answer_cache_key(
-        self,
-        tenant_id: str,
-        language_code: Optional[str],
-        question: str,
-    ) -> str:
-        # mocno znormalizowane pytanie – żeby „Godziny otwarcia?” i „godziny  otwarcia”
-        # trafiały pod ten sam klucz
-        normalized = re.sub(r"\s+", " ", (question or "").strip().lower())
-        lang = (language_code or "unknown").lower()
-        return f"{tenant_id}|{lang}|{normalized}"
 
-    # pobranie z cache Q->A z TTL
-    def _get_cached_answer(
-        self,
-        tenant_id: str,
-        language_code: Optional[str],
-        question: str,
-    ) -> Optional[str]:
-        if not self._answer_cache_ttl:
-            return None
-
-        key = self._answer_cache_key(tenant_id, language_code, question)
-        item = self._answer_cache.get(key)
-        if not item:
-            return None
-
-        ts, answer = item
-        if ts + self._answer_cache_ttl < time.time():
-            # wygasło – czyścimy
-            self._answer_cache.pop(key, None)
-            return None
-
-        logger.debug(
-            {
-                "component": "kb_service",
-                "event": "qa_cache_hit",
-                "tenant_id": tenant_id,
-                "lang": language_code,
-            }
-        )
-        return answer
-
-    # zapis do cache Q->A
-    def _store_cached_answer(
-        self,
-        tenant_id: str,
-        language_code: Optional[str],
-        question: str,
-        answer: str,
-    ) -> None:
-        if not self._answer_cache_ttl or not answer:
-            return
-        key = self._answer_cache_key(tenant_id, language_code, question)
-        self._answer_cache[key] = (time.time(), answer)
-    # -------------------------------------------------------------------------
-    #  cache wariantów stylizowanych odpowiedzi
-    # -------------------------------------------------------------------------
-
-    def _variants_key(
-        self,
-        tenant_id: str,
-        language_code: Optional[str],
-        tag: Optional[str],
-    ) -> Optional[str]:
-        if not tag:
-            return None
-        lang = (language_code or "unknown").lower()
-        t = tag.strip().lower()
-        return f"{tenant_id}|{lang}|{t}"
-
-    def _get_style_variant(
-        self,
-        tenant_id: str,
-        language_code: Optional[str],
-        tag: Optional[str],
-    ) -> Optional[str]:
-        key = self._variants_key(tenant_id, language_code, tag)
-        if not key:
-            return None
-
-        variants = self._style_variants.get(key)
-        if not variants:
-            return None
-
-        # losujemy jedną wersję
-        return random.choice(variants)
-
-    def _store_style_variants(
-        self,
-        tenant_id: str,
-        language_code: Optional[str],
-        tag: Optional[str],
-        variants: List[str],
-    ) -> None:
-        key = self._variants_key(tenant_id, language_code, tag)
-        if not key or not variants:
-            return
-
-        clean_variants = [v.strip() for v in variants if isinstance(v, str) and v.strip()]
-        if not clean_variants:
-            return
-
-        # prosty limit globalny
-        if len(self._style_variants) > 500:
-            self._style_variants.clear()
-
-        self._style_variants[key] = clean_variants
     # -------------------------------------------------------------------------
     # FAQ z S3
     # -------------------------------------------------------------------------
@@ -339,20 +225,6 @@ class KBService:
         if not question:
             return None
 
-        # NEW: szybka ścieżka — powtarzające się pytanie
-        cached = self._get_cached_answer(tenant_id, language_code, question)
-        if cached is not None:
-            logger.info(
-                {
-                    "component": "kb_service",
-                    "event": "cached answer",
-                    "cached": cached,
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                }
-            )
-            return cached
-
         # 1) FAQ z S3 lub domyślne
         tenant_faq = self._load_tenant_faq(tenant_id, language_code)
         if not tenant_faq:
@@ -375,7 +247,7 @@ class KBService:
         # 2) retrieval: prefer Pinecone (vector DB) when configured;
         #    otherwise fall back to legacy keyword-overlap retrieval.
         retrieved_chunks = []
-        if self._vector.enabled():
+        if self._vector.enabled(tenant_id):
             retrieved_chunks = self._vector.retrieve(
                 tenant_id=tenant_id,
                 language_code=language_code,
@@ -391,7 +263,7 @@ class KBService:
                     "event": "no retrieved_chunks",
                     "tenant_id": tenant_id,
                     "lang": language_code,
-                    "vector enabled": self._vector.enabled(),
+                    "vector enabled": self._vector.enabled(tenant_id),
                 }
             )
             # legacy retrieval (backward-compatible)
@@ -434,23 +306,9 @@ class KBService:
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
         ]
-        logger.info(
-            {
-                "sender": "temp kb answer ai",
-                "tenant_id": tenant_id,
-                "history": history,
-            }
-        )
         # 4) opcjonalna historia rozmowy (user / assistant)
         if history:
             messages.extend(history)
-            logger.info(
-                {
-                    "sender": "temp kb answer ai history",
-                    "tenant_id": tenant_id,
-                    "history": history,
-                }
-            )
 
         # 5) aktualne pytanie
         messages.append(
@@ -487,14 +345,10 @@ class KBService:
             ans = data.get("answer")
             if isinstance(ans, str):
                 ans = ans.strip()
-                # NEW: zapisujemy do cache Q->A
-                self._store_cached_answer(tenant_id, language_code, question, ans)
                 return ans
         except Exception:
             pass
 
-        # fallback: jeśli model jednak zwrócił czysty tekst
-        self._store_cached_answer(tenant_id, language_code, question, raw)
         return raw
    
     # -------------------------------------------------------------------------
@@ -510,7 +364,7 @@ class KBService:
 
         Safe to call multiple times. If vector mode is disabled, returns False.
         """
-        if not self._vector.enabled():
+        if not self._vector.enabled(tenant_id):
             return False
         tenant_faq = self._load_tenant_faq(tenant_id=tenant_id, language_code=language_code)
         if not tenant_faq:

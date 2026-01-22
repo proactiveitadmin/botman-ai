@@ -39,6 +39,12 @@
 				"project_key": { "S": "KAN" },
 				"issue_type_name": { "S": "Task" }
 			  }
+			},
+
+			"pinecone": {
+			  "M": {
+				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+			  }
 			}
 		}
 	  }
@@ -82,7 +88,13 @@
 				"project_key": { "S": "KAN" },
 				"issue_type_name": { "S": "Task" }
 			}
-		  }
+		  },
+
+			"pinecone": {
+			  "M": {
+				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+			  }
+			}
 		}
 	  }
 	}

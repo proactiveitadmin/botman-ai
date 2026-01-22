@@ -1,6 +1,6 @@
 import base64, requests, json
-from ..common.config import settings
 from ..common.logging import logger
+from ..common.config import settings
 
 class JiraClient:
     def __init__(
@@ -11,22 +11,23 @@ class JiraClient:
         project_key: str | None = None,
         issue_type_name: str | None = None,
     ):
-        self.url = (url or settings.jira_url or "").rstrip("/")
-        self.project = (project_key or settings.jira_project_key or "").strip()
         self.issue_type_name = (issue_type_name or settings.jira_default_issue_type or "").strip() or "Task"
-        self.token = (token or settings.jira_token or "").strip()
+        self.project = (project_key or "").strip()
+        self.token = (token or "").strip()
 
     @classmethod
     def from_tenant_config(cls, tenant_cfg: dict) -> "JiraClient":
         j = (tenant_cfg or {}).get("jira") or {}
         if not isinstance(j, dict):
             j = {}
+            logger.warning({"msg": "jira_config_missing_or_invalid"})
         return cls(
             url=j.get("url"),
             token=j.get("token"),
             project_key=j.get("project_key"),
-            issue_type_name=j.get("issue_type_name") or j.get("issue_type") or j.get("issue_type_name"),
+            issue_type_name=j.get("issue_type_name") or j.get("issue_type"),
         )
+
 
     def _auth_header(self):
         # Jira Cloud commonly uses Basic auth: email:api_token
@@ -70,7 +71,7 @@ class JiraClient:
         meta: dict | None = None,
     ) -> dict:
         if not self.url:
-            logger.info({"jira": "dev", "summary": summary, "meta": meta or {}})
+            logger.warning({"jira": "dev", "summary": summary, "meta": meta or {}})
             return {"ok": True, "ticket": "JIRA-DEV"}
 
         # meta jako sekcja na początku opisu
@@ -102,8 +103,22 @@ class JiraClient:
         r = requests.post(endpoint, headers=headers, data=json.dumps(payload), timeout=10)
         
         if not r.ok:
-            print("Jira error status:", r.status_code)
-            print("Jira error body:", r.text)
+            try:
+                payload_json = r.json()
+            except Exception:
+                payload_json = {}
+            key = (payload_json or {}).get("key") or "JIRA-ERR"
+
+            print(f"Jira error status: {r.status_code}")
+            print(f"Jira error body: {r.text}")
+            
+            logger.error({
+                "msg": "Jira creation failed",
+                "Jira error status": r.status_code,
+                "Jira error body": r.text,
+                "tenant_id": tenant_id,
+            })
+            return {"ok": True, "ticket": key}
         
         r.raise_for_status()
         data = r.json()

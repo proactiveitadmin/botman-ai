@@ -25,6 +25,8 @@ from ..services.nlu_service import NLUService
 from ..services.kb_service import KBService
 from ..services.template_service import TemplateService
 from ..services.crm_service import CRMService
+from .clients_factory import ClientsFactory
+from .tenant_config_service import TenantConfigService
 from ..services.ticketing_service import TicketingService
 from ..services.metrics_service import MetricsService
 from ..services.crm_flow_service import CRMFlowService
@@ -69,10 +71,11 @@ class RoutingService:
         tenants: TenantsRepo | None = None,
         messages: MessagesRepo | None = None,
         members_index: MembersIndexRepo | None = None,
+        _clients_factory: ClientsFactory | None = None,
         crm: CRMService | None = None,
+        ticketing: TicketingService | None = None,
         crm_flow: CRMFlowService | None = None, 
         language: LanguageService | None = None,
-        ticketing: TicketingService | None = None,
     ) -> None:
         self.nlu = nlu or NLUService()
         self.kb = kb or KBService()
@@ -83,7 +86,9 @@ class RoutingService:
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
         self.members_index = members_index or MembersIndexRepo()
-        self.crm = crm or CRMService()
+        self._clients_factory = ClientsFactory(TenantConfigService())
+        self.crm = crm or CRMService(clients_factory=self._clients_factory)
+        self.ticketing = ticketing or TicketingService(clients_factory=self._clients_factory)
         self.crm_flow = crm_flow or CRMFlowService(
             crm=self.crm,
             tpl=self.tpl,
@@ -91,7 +96,6 @@ class RoutingService:
             members_index=self.members_index,
         )
         self.language = language or LanguageService(conv=self.conv)
-        self.ticketing = ticketing or TicketingService()
         # cache na słowa typu TAK / NIE z templatek
         self._words_cache: dict[tuple[str, str, str], set[str]] = {}
 
@@ -182,7 +186,10 @@ class RoutingService:
                 opt_out=True,
                 source="text_command",
             )
-            return [self._reply(msg, lang, "OK — wstrzymuję kampanie i powiadomienia. Jeśli zechcesz wrócić, wyślij START.")]
+            body = self.tpl.render_named(msg.tenant_id, "system_optout_on", lang, {})
+            if body == "system_optout_on":
+                body = "OK"  # ostatni fallback (język-agnostyczny)
+            return [self._reply(msg, lang, body)]
         if opt_action == "optin":
             self.optout.set_opt_out(
                 tenant_id=msg.tenant_id,
@@ -191,7 +198,10 @@ class RoutingService:
                 opt_out=False,
                 source="text_command",
             )
-            return [self._reply(msg, lang, "OK — ponownie włączono kampanie i powiadomienia.")]
+            body = self.tpl.render_named(msg.tenant_id, "system_optout_off", lang, {})
+            if body == "system_optout_off":
+                body = "OK"
+            return [self._reply(msg, lang, body)]
         
         state = conv.get("state_machine_status")
 
@@ -224,6 +234,16 @@ class RoutingService:
 
         # 4) NLU – klasyfikacja intencji
         intent, slots, _ = self._classify_intent(msg, lang)
+        
+        # 4x) Fast-path intents (bez LLM/CRM/KB) – tylko szablony.
+        #      Zero hardkodowania: treść kontroluje TemplatesRepo.
+        if intent == "ack":
+            tpl_name = "system_ack"
+            body = self.tpl.render_named(msg.tenant_id, tpl_name, lang, {})
+            if body == tpl_name:
+                body = "OK"  # absolutny fallback
+            self._update_conversation_state(msg, lang, intent, slots)
+            return [self._reply(msg, lang, body)]
 
         # 4a) Kontekstowa poprawka: follow-up po FAQ
         # Jeśli poprzednia intencja była "faq", sesja jest ciągle ta sama,
@@ -284,28 +304,6 @@ class RoutingService:
                                 {"role": "assistant", "content": body_item}
                             )
                     chat_history = chat_history[-6:]
-
-            # 1) próbujemy deterministycznie z FAQ na podstawie topic/tag z NLU
-            raw_topic = slots.get("topic")
-
-            # NLU może zwrócić np. ["opening_hours"] albo "opening_hours"
-            if isinstance(raw_topic, list):
-                raw_topic = raw_topic[0] if raw_topic else ""
-            elif raw_topic is None:
-                raw_topic = ""
-            else:
-                # na wszelki wypadek, jeśli to np. int / inny typ
-                raw_topic = str(raw_topic)
-
-            faq_tag = raw_topic.strip().lower()
-            base_answer: Optional[str] = None
-
-            if faq_tag:
-                base_answer = self.kb.answer(
-                    topic=faq_tag,
-                    tenant_id=msg.tenant_id,
-                    language_code=lang,
-                )
 
             # 3) Fallback – jeśli NLU nie podało topic albo FAQ nie ma wpisu,
             #    używamy dotychczasowego AI-FAQ (answer_ai) z historią
@@ -579,8 +577,22 @@ class RoutingService:
                 return [self._reply(msg, lang, body)]
 
             return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
+        
+        #6.8 Prośba o weryfikację
+        if intent == "verification":
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
+                lang,
+                post_intent="crm_contract_status",
+                post_slots=slots,
+            )
+            if verify_resp:
+                return verify_resp
+            return self.crm_flow.verification_active(msg, lang, member_id)
 
-        # 6.8 Domyślny clarify
+        
+        # 6.9 Domyślny clarify
         body = self.tpl.render_named(
             msg.tenant_id,
             "clarify_generic",

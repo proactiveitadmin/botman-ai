@@ -19,7 +19,7 @@ def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
 
     # Mock KBVectorService: enabled + zwróć chunk
     class DummyVector:
-        def enabled(self):
+        def enabled(self, tenant_id):
             return True
 
         def retrieve(self, *, tenant_id, language_code, question):

@@ -45,40 +45,17 @@ Parameters:
   LangDefault:
     Type: String
 
-  TwilioAccountSid:
-    Type: String
-  TwilioAuthToken:
-    Type: String
-  TwilioMessagingSid:
-    Type: String
-    Default: ""      
-  TwilioWhatsappNumber:
-    Type: String
-
   OpenAiApiKey:
     Type: String
   LlmModel:
     Type: String
 
-  PgBaseUrl:
-    Type: String
-  PgClientId:
-    Type: String
-  PgClientSecret:
-    Type: String
-
-  JiraUrl:
-    Type: String
-  JiraToken:
-    Type: String
-  JiraProjectKey:
-    Type: String
     
 Globals:
   Function:
     Runtime: python3.11
     Timeout: 25
-    MemorySize: 512
+    MemorySize: 1024
     Tracing: Active
     Environment:
       Variables:
@@ -96,30 +73,16 @@ Globals:
         DEV_MODE:           !Ref DevMode
         LANG_DEFAULT:       !Ref LangDefault
 
-        TWILIO_ACCOUNT_SID:     !Ref TwilioAccountSid 
-        TWILIO_AUTH_TOKEN:      !Ref TwilioAuthToken
-        TWILIO_MESSAGING_SID:   !Ref TwilioMessagingSid
-        TWILIO_WHATSAPP_NUMBER: !Ref TwilioWhatsappNumber
-
         OPENAI_API_KEY:  !Ref OpenAiApiKey
         LLM_MODEL:       !Ref LlmModel
         EMBEDDING_MODEL: !Ref EmbeddingModel
         EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
         KB_VECTOR_ENABLED: !Ref KBVectorEnabled
         PINECONE_API_KEY: !Ref PineconeApiKey
-        PINECONE_INDEX_HOST: !Ref PineconeIndexHost
         PHONE_HASH_PEPPER: !Ref PhoneHashPepperParam
         USER_HASH_PEPPER: !Ref UserHashPepperParam
         OTP_HASH_PEPPER: !Ref OtpHashPepperParam
-
-        PG_BASE_URL:      !Ref PgBaseUrl
-        PG_CLIENT_ID:     !Ref PgClientId
         SES_FROM_EMAIL: !Ref SesFromEmail
-        PG_CLIENT_SECRET: !Ref PgClientSecret
-
-        JIRA_URL:         !Ref JiraUrl
-        JIRA_TOKEN:       !Ref JiraToken
-        JIRA_PROJECT_KEY: !Ref JiraProjectKey
         
         DDB_TABLE_TENANTS: !Sub 'Tenants-${AWS::StackName}'
         DDB_TABLE_CONVERSATIONS: !Sub 'Conversations-${AWS::StackName}'
@@ -151,6 +114,9 @@ Globals:
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
         
         TENANT_CONFIG_CACHE_TTL: "600"
+        OPENAI_TIMEOUT_S: 12
+        OPENAI_MAX_ATTEMPTS: 3
+        OPENAI_RETRY_MAX_DELAY_S: 2
            
 
 Resources:
@@ -613,6 +579,7 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
             - Effect: Allow
               Action:
                 - kms:Decrypt
@@ -635,7 +602,8 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt InboundEventsQueue.Arn
-            BatchSize: 2
+            # Mniejszy batch = mniejszy head-of-line blocking dla rozmów 1:1.
+            BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
 
@@ -674,7 +642,7 @@ Resources:
           Type: SQS
           Properties:
             Queue: !GetAtt OutboundQueue.Arn
-            BatchSize: 5
+            BatchSize: 1
             MaximumBatchingWindowInSeconds: 0
             FunctionResponseTypes:
               - ReportBatchItemFailures
@@ -793,6 +761,7 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
             - Effect: Allow
               Action: kms:Decrypt
               Resource: "*"

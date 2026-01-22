@@ -20,7 +20,7 @@ def _build_msg(body: str, tenant_id: str = "tenant-1", phone: str = "+4812312312
 
 def test_resolve_language_uses_detected_language(monkeypatch):
     conv = InMemoryConversations()
-    tenants = FakeTenantsRepo(lang="pl")
+    tenants = FakeTenantsRepo(lang="auto")
     svc = LanguageService(conv=conv, tenants=tenants)
 
     monkeypatch.setattr(svc, "_detect_language", lambda text: "de")
@@ -56,7 +56,7 @@ def test_resolve_language_uses_tenant_language_when_no_detection_and_no_existing
 
 def test_resolve_language_persists_in_conversation(monkeypatch):
     conv = InMemoryConversations()
-    tenants = FakeTenantsRepo(lang="pl")
+    tenants = FakeTenantsRepo(lang="auto")
     svc = LanguageService(conv=conv, tenants=tenants)
 
     calls: list[str] = []
@@ -76,10 +76,10 @@ def test_resolve_language_persists_in_conversation(monkeypatch):
 
     msg2 = _build_msg("Hi")
     lang2 = svc.resolve_and_persist_language(msg2)
-    assert lang2 == "en"
+    assert lang2 == "pl"
 
     key2 = conv.conversation_pk(msg2.tenant_id, msg2.channel, msg2.channel_user_id)
-    assert conv.data[key2]["language_code"] == "en"
+    assert conv.data[key2]["language_code"] == "pl"
 
 
 def test_explicit_language_code_from_message_overrides(monkeypatch):

@@ -1284,3 +1284,33 @@ aws dynamodb put-item `
   --region $region `
   --item $item
 
+
+# ==== 42. crm_verification_active ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_verification_active#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_verification_active"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "لا تزال عملية التحقق السابقة الخاصة بك نشطة."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+

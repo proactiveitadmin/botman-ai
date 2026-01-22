@@ -32,7 +32,9 @@ class LanguageService:
         # klient Comprehend trzymamy tutaj, żeby go nie tworzyć za każdym razem
         self._comprehend = boto3.client(
             "comprehend",
-            config=Config(read_timeout=2, connect_timeout=2, retries={"max_attempts": 2}),
+            # Detekcja języka jest na ścieżce krytycznej latency.
+            # Preferujemy szybki fallback (tenant/rozmowa) zamiast długiego czekania.
+            config=Config(read_timeout=1, connect_timeout=1, retries={"max_attempts": 1}),
         )
 
     # ------------------------------------------------------------------ #
@@ -89,36 +91,39 @@ class LanguageService:
             if self._looks_like_verification_code(msg.body or ""):
                 return existing_lang
 
-        # 3) spróbuj wykryć język z treści
-        detected = self._detect_language(msg.body or "")
+        # Optymalizacja: Comprehend jest kosztowny (sieć) i nie może odpalać się
+        # dla każdej wiadomości. Zasady:
+        #    - dla istniejących rozmów trzymamy się już ustalonego language_code,
+        #    - dla nowych rozmów preferujemy język tenanta (jeśli jest ustawiony),
+        #    - Comprehend uruchamiamy tylko, gdy tenant ma language_code="auto"
+        #      albo nie ma żadnego języka (fallback do global default).
 
-        # jeżeli detekcja się nie udała, a rozmowa już ma język – używamy go
-        if not detected and existing_lang:
+        tenant = self.tenants.get(msg.tenant_id) or {}
+        tenant_lang_raw = (tenant.get("language_code") or "").strip()
+        tenant_lang = tenant_lang_raw or settings.get_default_language()
+
+        # jeśli rozmowa już ma język – używamy go (bez kosztownej detekcji)
+        if existing_lang:
+            self.conv.upsert_conversation(
+                tenant_id=msg.tenant_id,
+                channel=msg.channel,
+                channel_user_id=msg.channel_user_id,
+                language_code=existing_lang,
+            )
             return existing_lang
 
-        # 4) fallback – język tenanta / global default
-        tenant = self.tenants.get(msg.tenant_id) or {}
-        tenant_lang = tenant.get("language_code") or settings.get_default_language()
+        detected = None
+        if (tenant_lang_raw.lower() == "auto"):
+            detected = self._detect_language(msg.body or "")
 
-        # finalny wybór – preferujemy wykryty
-        lang = detected or existing_lang or tenant_lang
-
-        # 5) zapis do Conversations
-        if existing:
-            self.conv.upsert_conversation(
-                msg.tenant_id,
-                channel,
-                channel_user_id,
-                language_code=lang,
-            )
-        else:
-            self.conv.upsert_conversation(
-                msg.tenant_id,
-                channel,
-                channel_user_id,
-                language_code=lang,
-            )
-
+        # finalny wybór – preferujemy wykryty, ale nie jest wymagany
+        lang = detected or tenant_lang
+        self.conv.upsert_conversation(
+            tenant_id=msg.tenant_id,
+            channel=msg.channel,
+            channel_user_id=msg.channel_user_id,
+            language_code=lang,
+        )        
         return lang
 
     # ------------------------------------------------------------------ #

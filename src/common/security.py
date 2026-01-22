@@ -52,6 +52,10 @@ def _get_pepper(env_value_name: str, env_param_name: str) -> str:
 
     direct = os.getenv(env_value_name, "").strip()
     if direct:
+        if not (os.getenv("DEV_MODE", "false").lower() == "true") and direct.startswith("/"):
+            val = (_load_secure_parameter(direct) or "").strip()
+            _cached_peppers[cache_key] = val
+            return val
         _cached_peppers[cache_key] = direct
         return direct
 

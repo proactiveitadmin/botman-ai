@@ -1,5 +1,5 @@
-from src.common.config import settings
 from src.domain.models import Message
+from src.adapters.perfectgym_client import PerfectGymClient
 from src.services.crm_service import CRMService
 from src.services.language_service import LanguageService
 from src.services.routing_service import RoutingService
@@ -8,11 +8,12 @@ from tests.fakes_routing import InMemoryConversations, FakeTenantsRepo, FakeTemp
 
 
 def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
-    # 1) Ustaw bazowy URL PerfectGym w settings
-    monkeypatch.setattr(settings, "pg_base_url", "https://example.perfectgym.com")
+    # 1) Ustaw bazowy URL PerfectGym 
+    client = PerfectGymClient()
+    monkeypatch.setattr(client, "base_url", "https://example.perfectgym.com")
 
     # 2) Mock dokładnie tego URL, który wywołuje PerfectGymClient
-    url = settings.pg_base_url.rstrip("/") + "/Classes"
+    url = client.base_url.rstrip("/") + "/Classes"
     mock_payload = {
         "value": [
             {
@@ -35,7 +36,7 @@ def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
     tpl = FakeTemplateServicePG()
 
     # 6) CRMService używa PerfectGymClient -> requests_mock przechwyci requests.get
-    crm = CRMService()
+    crm = CRMService(client=client)
 
     # 7) LanguageService z tenants (żeby nie iść do prawdziwego TenantsRepo)
     language = LanguageService(conv=conv, tenants=tenants)

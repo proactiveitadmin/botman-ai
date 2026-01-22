@@ -148,10 +148,6 @@ def env_setup(monkeypatch):
     monkeypatch.setenv("USER_HASH_PEPPER", "test-user")
     monkeypatch.setenv("OTP_HASH_PEPPER", "test-otp")
 
-    monkeypatch.setattr(
-        "src.common.config.settings.ssm_param",
-        lambda key: f"mock-{key.lower()}"
-    )
     
     # AWS fake env
     monkeypatch.setenv("AWS_REGION", "eu-central-1")

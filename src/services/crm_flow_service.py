@@ -10,6 +10,8 @@ from ..common.logging import logger
 from ..common.utils import new_id, build_reply_action
 from ..domain.models import Message, Action
 from ..services.crm_service import CRMService
+from .clients_factory import ClientsFactory
+from .tenant_config_service import TenantConfigService
 from ..services.template_service import TemplateService
 from ..adapters.email_client import EmailClient
 from ..common.security import otp_hash
@@ -38,11 +40,13 @@ class CRMFlowService:
     def __init__(
         self,
         crm: CRMService | None = None,
+        _clients_factory: ClientsFactory | None = None,
         tpl: TemplateService | None = None,
         conv: ConversationsRepo | None = None,
         members_index: MembersIndexRepo | None = None,
     ) -> None:
-        self.crm = crm or CRMService()
+        self._clients_factory = ClientsFactory(TenantConfigService())
+        self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.tpl = tpl or TemplateService()
         self.conv = conv or ConversationsRepo()
         self.members_index = members_index or MembersIndexRepo()
@@ -200,10 +204,6 @@ class CRMFlowService:
         raw = settings.twilio_whatsapp_number  # np. "whatsapp:+48000000000"
         phone = raw.replace("whatsapp:", "") if raw else ""
         return f"https://wa.me/{phone}?text=KOD:{code}"
-
-    
-    
-
 
     def _render_first(
         self,
@@ -831,7 +831,7 @@ class CRMFlowService:
             # automatyczne dokończenie pierwotnej operacji PG
             if post_intent == "crm_member_balance":
                 if member_id:
-                    actions.extend(self._crm_member_balance_core(msg, lang, member_id))
+                    actions.extend(self.crm_member_balance_core(msg, lang, member_id))
                 else:
                     body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
                     actions.append(self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id))
@@ -979,7 +979,7 @@ class CRMFlowService:
         # automatyczne dokończenie pierwotnej operacji PG
         if post_intent == "crm_member_balance":
             if member_id:
-                actions.extend(self._crm_member_balance_core(msg, lang, member_id))
+                actions.extend(self.crm_member_balance_core(msg, lang, member_id))
             else:
                 body = self.tpl.render_named(tenant_id, "crm_member_not_linked", lang, {})
                 actions.append(self._reply(msg, lang, body))
@@ -1062,7 +1062,7 @@ class CRMFlowService:
     #  Flows: saldo, kontrakt, zajęcia
     # ------------------------------------------------------------------ #
 
-    def _crm_member_balance_core(
+    def crm_member_balance_core(
         self, msg: Message, lang: str, member_id: str
     ) -> List[Action]:
         """
@@ -1823,3 +1823,14 @@ class CRMFlowService:
         except Exception:
             # W razie błędu po stronie integracji traktujemy jako niepowodzenie.
             return False
+
+    def verification_active(
+        self, msg: Message, lang: str, member_id: str
+    ) -> List[Action]:
+        body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_verification_active",
+                lang,
+                {},
+            )
+        return [self._reply(msg, lang, body)]

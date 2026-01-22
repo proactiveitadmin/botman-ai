@@ -28,6 +28,7 @@ Return exactly one valid JSON object with keys:
     "reserve_class",
     "faq",
     "handover",
+    "verification",
     "clarify",
     "ticket",
     "crm_available_classes",
@@ -74,7 +75,10 @@ User reports a problem, complaint, issue, or asks for staff support/help.
 6) "handover"
 User explicitly asks to speak with a human, staff member, or receptionist.
 
-7) "clarify"
+7) "verification"
+User asks for account verification or verification code.
+
+8) "clarify"
 Use ONLY if the message is unclear, incomplete, or cannot be confidently mapped
 to any intent above.
 
@@ -94,8 +98,8 @@ to any intent above.
 """
 
 _VALID_INTENTS = {
-    "reserve_class", "faq", "handover", "clarify", "ticket",
-    "crm_available_classes", "crm_contract_status",
+    "reserve_class", "faq", "handover", "verification", "clarify", "ticket",
+    "crm_available_classes", "crm_contract_status", "crm_member_balance", "ack",
 }
 
 class OpenAIClient:
@@ -117,7 +121,16 @@ class OpenAIClient:
         self.api_key = api_key or getattr(settings, "openai_api_key", None)
         self.enabled = bool(self.api_key)
         self.model = model or getattr(settings, "llm_model", "gpt-4o-mini")
-        self.client = OpenAI(api_key=self.api_key) if self.enabled else None
+        # Ustawiamy twardy timeout na requesty do OpenAI, żeby uniknąć długich
+        # zawieszeń (domyślnie httpx potrafi czekać bardzo długo).
+        # Retry robimy sami w metodzie chat(); SDK retry wyłączamy.
+        timeout_s = float(getattr(settings, "openai_timeout_s", 6) or 6)
+        self._timeout_s = max(1.0, timeout_s)
+        self.client = (
+            OpenAI(api_key=self.api_key, timeout=self._timeout_s, max_retries=0)
+            if self.enabled
+            else None
+        )
 
     def _chat_once(
         self,
@@ -152,6 +165,7 @@ class OpenAIClient:
             response_format={"type": "json_object"},
             temperature=0.0,
             max_tokens=max_tokens,
+            timeout=self._timeout_s,
         )
         return resp.choices[0].message.content or "{}"
 
@@ -173,17 +187,20 @@ class OpenAIClient:
         tylko powodują szybki powrót z fallbackiem.
         """
         last_api_error: Optional[APIError] = None
-        max_attempts = 3
+        # Dla latency-sensitive bota wolimy szybki fallback niż długie retry.
+        # W praktyce: 2 próby z krótkim backoffem.
+        max_attempts = 2
         for attempt in range(max_attempts):
             try:
                 return self._chat_once(messages, model=model, max_tokens=max_tokens)
             except RateLimitError:
-                time.sleep(min(2**attempt, 8) + random.uniform(0, 0.3))
+                # Krótki backoff – i tak mamy twardy timeout per request.
+                time.sleep(min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1))
             except APIStatusError as e:
                 # 429/5xx -> retry, inne statusy -> nie ma sensu retry
                 status = getattr(e, "status_code", 0)
                 if status in (429, 500, 502, 503):
-                    sleep_s = min(2**attempt, 8) + random.uniform(0, 0.3)
+                    sleep_s = min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1)
                     logger.warning(
                         {
                             "component": "openai_client",
@@ -209,8 +226,8 @@ class OpenAIClient:
                     )
                     break
             except APIConnectionError:
-                # problemy sieciowe — próbujemy jeszcze raz
-                sleep_s = 1.0 + random.uniform(0, 0.3)
+                # problemy sieciowe — próbujemy jeszcze raz, ale nie czekamy długo
+                sleep_s = 0.3 + random.uniform(0, 0.1)
                 logger.warning(
                     {
                         "component": "openai_client",

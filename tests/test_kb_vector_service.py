@@ -47,14 +47,14 @@ def test_kb_vector_index_faq_upserts_chunks(monkeypatch):
     from src.common.config import settings
     from src.services.kb_vector_service import KBVectorService
 
+    pc = DummyPinecone()
     monkeypatch.setattr(settings, "kb_vector_enabled", True, raising=False)
     monkeypatch.setattr(settings, "pinecone_api_key", "x", raising=False)
-    monkeypatch.setattr(settings, "pinecone_index_host", "my-index.svc.test.pinecone.io", raising=False)
+    monkeypatch.setattr(pc, "index_host", "my-index.svc.test.pinecone.io", raising=False)
     monkeypatch.setattr(settings, "embedding_model", "text-embedding-3-small", raising=False)
     monkeypatch.setattr(settings, "pinecone_namespace_prefix", "kb", raising=False)
 
     oa = DummyOpenAI()
-    pc = DummyPinecone()
     svc = KBVectorService(openai_client=oa, pinecone_client=pc)
 
     faq = {"Hours": "We are open from 8 to 20", "Location": "City center"}

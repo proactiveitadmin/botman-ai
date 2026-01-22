@@ -1,11 +1,13 @@
 import json
-from ...adapters.jira_client import JiraClient
 from ...repos.messages_repo import MessagesRepo
+from ...services.ticketing_service import TicketingService
+from ...services.clients_factory import ClientsFactory
+from ...services.tenant_config_service import TenantConfigService
 from ...common.logging import logger
 from ...common.security import conversation_key
 
-jira = JiraClient()
 messages = MessagesRepo()
+ticketing = TicketingService(clients_factory=ClientsFactory(TenantConfigService()))
 
 def lambda_handler(event, context):
     records = event.get("Records", [])
@@ -23,7 +25,6 @@ def lambda_handler(event, context):
         )
         history_items = messages.get_last_messages(tenant_id, conv_key, limit=10)
         # budujesz description + meta tak jak wyżej
-        ...
-        jira.create_ticket(...)
+        ticketing.create_ticket(tenant_id=tenant_id, summary=..., description=..., meta=...)
 
     return {"statusCode": 200}

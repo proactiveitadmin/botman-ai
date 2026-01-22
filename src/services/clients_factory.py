@@ -5,6 +5,7 @@ from typing import Any
 from ..adapters.jira_client import JiraClient
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..adapters.twilio_client import TwilioClient
+from ..adapters.pinecone_client import PineconeClient
 from ..common.logging import logger
 from .tenant_config_service import TenantConfigService
 
@@ -20,6 +21,7 @@ class ClientsFactory:
         self._twilio: dict[str, TwilioClient] = {}
         self._jira: dict[str, JiraClient] = {}
         self._pg: dict[str, PerfectGymClient] = {}
+        self._pinecone: dict[str, PineconeClient] = {}
 
     def twilio(self, tenant_id: str) -> TwilioClient:
         if tenant_id in self._twilio:
@@ -43,4 +45,12 @@ class ClientsFactory:
         cfg = self.tenant_cfg.get(tenant_id)
         client = PerfectGymClient.from_tenant_config(cfg)
         self._pg[tenant_id] = client
+        return client
+
+    def pinecone(self, tenant_id: str) -> PineconeClient:
+        if tenant_id in self._pinecone:
+            return self._pinecone[tenant_id]
+        cfg = self.tenant_cfg.get(tenant_id)
+        client = PineconeClient.from_tenant_config(cfg)
+        self._pinecone[tenant_id] = client
         return client

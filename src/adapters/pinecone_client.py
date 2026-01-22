@@ -18,6 +18,7 @@ import random
 import requests
 
 from ..common.logging_utils import logger
+from ..common.config import settings
 
 
 @dataclass
@@ -28,12 +29,32 @@ class PineconeMatch:
 
 
 class PineconeClient:
-    def __init__(self, *, api_key: str, index_host: str, timeout_s: float = 10.0) -> None:
-        self.api_key = api_key or ""
+    def __init__(
+        self, 
+        *, 
+        api_key: str | None = None,
+        index_host: str | None = None,
+        timeout_s: float = 10.0
+    ) -> None:
+        self.api_key = api_key or getattr(settings, "pinecone_api_key", None)
         self.index_host = (index_host or "").replace("https://", "").replace("http://", "").strip("/")
         self.timeout_s = timeout_s
         self.enabled = bool(self.api_key and self.index_host)
-
+    
+    @classmethod
+    def from_tenant_config(cls, tenant_cfg: dict) -> "PineconeClient":
+        pc = (tenant_cfg or {}).get("pinecone") or {}
+        if not isinstance(pc, dict):
+            pc = {}
+        return cls(
+            api_key=pc.get("api_key") or getattr(settings, "pinecone_api_key", None),
+            index_host=pc.get("index_host") or getattr(settings, "pinecone_index_host", None),
+            timeout_s=float(getattr(settings, "pinecone_timeout_s", 10.0) or 10.0),
+        )
+        
+    # ------------------------------------------------------------------ #
+    # Helpers
+    # ------------------------------------------------------------------ #        
     def _headers(self) -> Dict[str, str]:
         return {
             "Api-Key": self.api_key,

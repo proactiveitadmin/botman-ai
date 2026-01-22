@@ -26,14 +26,16 @@ class CRMService:
         limiter: InMemoryRateLimiter | None = None,
     ) -> None:
         # Backward-compatible: if factory not provided, use a single global client
-        self._client = client or PerfectGymClient()
         self._factory = clients_factory
+        self._client = client or (None if self._factory else PerfectGymClient())
         self._limiter = limiter or InMemoryRateLimiter()
 
     def _client_for(self, tenant_id: str) -> PerfectGymClient:
         if self._factory:
             return self._factory.perfectgym(tenant_id)
-        return self._client
+        if self._client:
+            return self._client
+        raise RuntimeError("CRMService misconfigured: missing clients_factory or client")
 
     def _pg_gate(self, tenant_id: str) -> None:
         """Rate-limit calls to PG per tenant (per invoke)."""
@@ -123,7 +125,6 @@ class CRMService:
         """
         Zwraca pojedyncze zajęcia po ID.
 
-        tenant_id na razie jest ignorowany (konfiguracja PG jest globalna),
         ale zostawiamy go w sygnaturze na przyszłość.
         """
         self._pg_gate(tenant_id)

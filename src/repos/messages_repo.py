@@ -102,41 +102,13 @@ class MessagesRepo:
     def _hydrate_archived(self, item: dict) -> dict:
         """Jeśli wiadomość jest zarchiwizowana i nie ma treści, dociąga ją z S3 (read-only)."""
         if not item:
-            logger.info(
-                {
-                    "component": "temp _hydrate_archived",
-                    "reason": "not item",
-                    "item": item,
-                }
-            )
             return item
         if item.get("archived_status") != "Archived":
-            logger.info(
-                {
-                    "component": "temp _hydrate_archived",
-                    "reason": "not archived",
-                    "item": item,
-                }
-            )
             return item
         if item.get("body"):
-            logger.info(
-                {
-                    "component": "temp _hydrate_archived",
-                    "reason": "get body",
-                    "item": item,
-                }
-            )
             return item
         bucket = item.get("archive_bucket") or self.archive_bucket
         key = item.get("archive_key")
-        logger.info(
-            {
-                "component": "temp _hydrate_archived",
-                "reason": "get bucket, key",
-                "item": item,
-            }
-        )
         if not bucket or not key:
             return item
         try:
@@ -150,13 +122,6 @@ class MessagesRepo:
             hydrated["archived_payload"] = {k: v for k, v in doc.items() if k not in ("body",)}
             return hydrated
         except Exception:
-            logger.warning(
-                {
-                    "component": "temp _hydrate_archived",
-                    "reason": "try failed",
-                    "item": item,
-                }
-            )
             # Nie blokujemy krytycznych ścieżek (ticketing/router) – w razie błędu zwracamy "szkielet"
             return item
     
@@ -177,11 +142,4 @@ class MessagesRepo:
             Limit=limit,
         )
         items = resp.get("Items") or []
-        logger.info(
-            {
-                "component": "temp messages_repo",
-                "tenant_id": tenant_id,
-                "items": items,
-            }
-        )
         return [self._hydrate_archived(it) for it in items]

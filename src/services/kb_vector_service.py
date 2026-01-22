@@ -10,6 +10,7 @@ from ..common.logging_utils import logger
 from ..common.text_chunking import chunk_faq
 from ..adapters.openai_client import OpenAIClient
 from ..adapters.pinecone_client import PineconeClient
+from .clients_factory import ClientsFactory
 
 
 @dataclass(frozen=True)
@@ -27,16 +28,36 @@ class KBVectorService:
         self,
         *,
         openai_client: Optional[OpenAIClient] = None,
+        clients_factory: ClientsFactory | None = None,
         pinecone_client: Optional[PineconeClient] = None,
     ) -> None:
         self._openai = openai_client or OpenAIClient()
-        self._pc = pinecone_client or PineconeClient(
-            api_key=getattr(settings, "pinecone_api_key", ""),
-            index_host=getattr(settings, "pinecone_index_host", ""),
-        )
+        self._factory = clients_factory
+        self._pinecone = pinecone_client or (None if self._factory else PineconeClient())
+    
+    def _client_for(self, tenant_id: str) -> PineconeClient:
+        if self._factory:
+            return self._factory.pinecone(tenant_id)
+        if self._pinecone:
+            return self._pinecone
+        raise RuntimeError("KBVectorService misconfigured: missing clients_factory or client")
 
-    def enabled(self) -> bool:
-        return bool(getattr(settings, "kb_vector_enabled", True) and self._openai and self._pc and self._pc.enabled)
+    def _enabled_for(self, tenant_id: str) -> bool:
+        if not getattr(settings, "kb_vector_enabled", True):
+            return False
+        pc = self._client_for(tenant_id)
+        logger.warning({
+          "component": "kb_vector_service",
+          "event": "enabled_check",
+          "tenant_id": tenant_id,
+          "has_api_key": bool(getattr(pc, "api_key", "")),
+          "index_host": bool(getattr(pc, "index_host", "")),
+          "pc_enabled": bool(getattr(pc, "enabled", False)),
+        })
+        return bool(self._openai and pc and pc.enabled)
+
+    def enabled(self, tenant_id) -> bool:
+        return self._enabled_for(tenant_id)
 
     def _namespace(self, tenant_id: str, language_code: Optional[str]) -> str:
         lang = (language_code or "").strip() or "default"
@@ -55,7 +76,7 @@ class KBVectorService:
 
         This is idempotent: chunk IDs are deterministic so re-running updates vectors.
         """
-        if not self.enabled():
+        if not self.enabled(tenant_id):
             return False
 
         chunks = chunk_faq(faq, max_chars=max_chars)
@@ -90,7 +111,7 @@ class KBVectorService:
                         },
                     }
                 )
-            ok = self._pc.upsert(vectors=payload_vectors, namespace=ns)
+            ok = self._client_for(tenant_id).upsert(vectors=payload_vectors, namespace=ns)
             ok_all = ok_all and ok
 
         logger.info(
@@ -114,7 +135,7 @@ class KBVectorService:
         top_k: Optional[int] = None,
     ) -> List[RetrievedChunk]:
         """Retrieve relevant FAQ chunks for the user question."""
-        if not self.enabled():
+        if not self.enabled(tenant_id):
             logger.warning(
                 {
                     "component": "kb_vector_service",
@@ -138,7 +159,7 @@ class KBVectorService:
         ns = self._namespace(tenant_id, language_code)
         k = int(top_k or getattr(settings, "pinecone_top_k", 6) or 6)
 
-        matches = self._pc.query(vector=q_vecs[0], namespace=ns, top_k=k, include_metadata=True)
+        matches = self._client_for(tenant_id).query(vector=q_vecs[0], namespace=ns, top_k=k, include_metadata=True)
         out: List[RetrievedChunk] = []
         for m in matches:
             md = m.metadata or {}
@@ -182,7 +203,7 @@ def build_kb_prompt(
     sys = (
         "You are a helpful assistant for a fitness club.\n"
         "Answer the user's question ONLY using the knowledge snippets below.\n"
-        "If the snippets do not contain the needed information, say you don't know and ask a follow-up question.\n"
+        "If the snippets do not contain the needed information, say you don't know AND ask the user if there is anything else you can help with.\n"
         "Always respond as a JSON object with a single key \"answer\".\n"
         "Knowledge snippets:\n"
         f"{context}\n"

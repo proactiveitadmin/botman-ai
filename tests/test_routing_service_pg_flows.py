@@ -126,7 +126,7 @@ def test_pg_member_balance_core_happy_path():
     )
 
     msg = _make_msg("Saldo?")
-    actions = svc._crm_member_balance_core(msg, lang="pl", member_id="123")
+    actions = svc.crm_member_balance_core(msg, lang="pl", member_id="123")
     assert len(actions) == 1
     a = actions[0]
     assert a.type == "reply"

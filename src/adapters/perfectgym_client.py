@@ -41,9 +41,9 @@ class PerfectGymClient:
         client_secret: str | None = None,
     ) -> None:
         # np. "https://<club>.perfectgym.com/api/v2.2/odata"
-        self.base_url: str = ((base_url or settings.pg_base_url or "")).rstrip("/")
-        self.client_id: str = (client_id or settings.pg_client_id or "")
-        self.client_secret: str = (client_secret or settings.pg_client_secret or "")
+        self.base_url: str = ((base_url or "")).rstrip("/")
+        self.client_id: str = (client_id or "")
+        self.client_secret: str = (client_secret or "")
         self.logger = logger
     
     @classmethod
@@ -247,11 +247,15 @@ class PerfectGymClient:
         Rezerwacja zajęć w PerfectGym – endpoint:
         POST /api/v2.2/ClassBooking/BookClass
 
-        Zakładamy, że settings.pg_base_url wskazuje na /api/v2.2/odata
+        Zakładamy, że pg_base_url wskazuje na /api/v2.2/odata
         → dlatego usuwamy /odata na potrzeby BookClass.
         """
         if not self._ensure_base_url():
-            # Fallback w trybie "dev" bez PG – udajemy sukces
+            # Fallback w trybie "dev" bez PG – udajemy sukces          
+            logger.warning({
+                "msg": "PG disabled (dev mode)", 
+                "class_id": class_id, 
+                "member_id": member_id})
             return {
                 "ok": True,
                 "status_code": 200,
