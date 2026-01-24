@@ -17,17 +17,17 @@ def test_lambda_bad_json_is_skipped(monkeypatch):
     it = iter([True, False])
     monkeypatch.setattr(handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
 
-    # 2) Mock Twilio via factory
+    # 2) Mock WhatsApp client via factory
     calls = []
 
-    class DummyTwilio:
+    class DummyWhatsApp:
         def send_text(self, to, body):
             calls.append({"to": to, "body": body})
             return {"status": "OK", "sid": "fake"}
 
     class DummyFactory:
-        def twilio(self, tenant_id):
-            return DummyTwilio()
+        def whatsapp(self, tenant_id):
+            return DummyWhatsApp()
 
     monkeypatch.setattr(handler, "clients", DummyFactory())
     bad_body = "{not-json"
@@ -54,17 +54,17 @@ def test_lambda_invalid_payload_missing_to(monkeypatch):
     it = iter([True, False])
     monkeypatch.setattr(handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
 
-    # 2) Mock Twilio via factory
+    # 2) Mock WhatsApp client via factory
     calls = []
 
-    class DummyTwilio:
+    class DummyWhatsApp:
         def send_text(self, to, body):
             calls.append({"to": to, "body": body})
             return {"status": "OK", "sid": "fake"}
 
     class DummyFactory:
-        def twilio(self, tenant_id):
-            return DummyTwilio()
+        def whatsapp(self, tenant_id):
+            return DummyWhatsApp()
 
     monkeypatch.setattr(handler, "clients", DummyFactory())
 
@@ -80,24 +80,24 @@ def test_lambda_invalid_payload_missing_to(monkeypatch):
     assert calls == []
 
 
-def test_lambda_twilio_exception_is_caught(monkeypatch):
+def test_lambda_whatsapp_exception_is_caught(monkeypatch):
     os.environ["DEV_MODE"] = "true"
 
     # 1) Mock idempotency: pierwsze acquire=True, drugie=False
     it = iter([True, False])
     monkeypatch.setattr(handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
 
-    # 2) Mock Twilio via factory
+    # 2) Mock WhatsApp client via factory
     calls = []
 
-    class DummyTwilio:
+    class DummyWhatsApp:
         def send_text(self, to, body):
             calls.append({"to": to, "body": body})
             return {"status": "OK", "sid": "fake"}
 
     class DummyFactory:
-        def twilio(self, tenant_id):
-            return DummyTwilio()
+        def whatsapp(self, tenant_id):
+            return DummyWhatsApp()
 
     monkeypatch.setattr(handler, "clients", DummyFactory())
     event = {
@@ -108,5 +108,5 @@ def test_lambda_twilio_exception_is_caught(monkeypatch):
 
     res = handler.lambda_handler(event, None)
     assert res["statusCode"] == 200
-    # mimo wyjątku nie ma crasha, a Twilio było wywołane
+    # brak crasha, a klient WhatsApp był wywołany
     assert len(calls) == 1

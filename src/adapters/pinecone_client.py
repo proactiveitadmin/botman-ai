@@ -19,6 +19,8 @@ import requests
 
 from ..common.logging_utils import logger
 from ..common.config import settings
+from ..common.timing import timed
+
 
 
 @dataclass
@@ -78,15 +80,33 @@ class PineconeClient:
         payload = {"vectors": vectors, "namespace": namespace}
         url = self._url("/vectors/upsert")
 
-        for attempt in range(max_attempts):
-            try:
-                r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
-                if r.status_code >= 200 and r.status_code < 300:
-                    return True
-                logger.info({"component": "pinecone_client","event": "pinecone_upsert_http", "status": r.status_code, "body": r.text[:500]})
-            except Exception as e:
-                logger.error({"component": "pinecone_client","event": "pinecone_upsert_err", "err": str(e)})
-            time.sleep(min(2.0, 0.2 * (2**attempt) + random.random() * 0.2))
+        with timed(
+            "pinecone_upsert_total",
+            logger=logger, 
+            component="pinecone_client",
+            extra={"namespace": namespace, "vectors": len(vectors), "max_attempts": max_attempts},
+        ):
+            for attempt in range(max_attempts):
+                try:
+                    with timed(
+                        "pinecone_upsert_http",
+                        logger=logger, 
+                        component="pinecone_client",
+                        extra={"attempt": attempt + 1, "timeout_s": self.timeout_s},
+                    ):
+                        r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
+
+                    if 200 <= r.status_code < 300:
+                        return True
+
+                    logger.info({"component": "pinecone_client","event": "pinecone_upsert_http", "status": r.status_code, "body": r.text[:500]})
+                except Exception as e:
+                    logger.error({"component": "pinecone_client","event": "pinecone_upsert_err", "err": str(e)})
+
+                sleep_s = min(2.0, 0.2 * (2**attempt) + random.random() * 0.2)
+                with timed("pinecone_retry_sleep", logger=logger, component="pinecone_client", extra={"attempt": attempt + 1, "sleep_s": round(sleep_s, 3)}):
+                    time.sleep(sleep_s)
+
         return False
 
     def query(
@@ -109,21 +129,40 @@ class PineconeClient:
         }
         url = self._url("/query")
 
-        for attempt in range(max_attempts):
-            try:
-                r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
-                if 200 <= r.status_code < 300:
-                    data = r.json() or {}
-                    matches = []
-                    for m in data.get("matches", []) or []:
-                        matches.append(PineconeMatch(
-                            id=m.get("id", ""),
-                            score=float(m.get("score", 0.0) or 0.0),
-                            metadata=m.get("metadata") or {},
-                        ))
-                    return matches
-                logger.info({"component": "pnecone_client","event": "pinecone_query_http", "status": r.status_code, "body": r.text[:500]})
-            except Exception as e:
-                logger.error({"component": "pnecone_client","event": "pinecone_query_err", "err": str(e)})
-            time.sleep(min(2.0, 0.2 * (2**attempt) + random.random() * 0.2))
+        with timed(
+            "pinecone_query_total",
+            logger=logger, 
+            component="pinecone_client",
+            extra={"namespace": namespace, "top_k": top_k, "include_metadata": include_metadata, "max_attempts": max_attempts},
+        ):
+            for attempt in range(max_attempts):
+                try:
+                    with timed(
+                        "pinecone_query_http",
+                        logger=logger, 
+                        component="pinecone_client",
+                        extra={"attempt": attempt + 1, "timeout_s": self.timeout_s},
+                    ):
+                        r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
+
+                    if 200 <= r.status_code < 300:
+                        data = r.json() or {}
+                        matches = []
+                        for m in data.get("matches", []) or []:
+                            matches.append(PineconeMatch(
+                                id=m.get("id", ""),
+                                score=float(m.get("score", 0.0) or 0.0),
+                                metadata=m.get("metadata") or {},
+                            ))
+                        logger.info({"component": "pinecone_client", "event": "pinecone_query_ok", "attempt": attempt + 1, "returned": len(matches)})
+                        return matches
+
+                    logger.info({"component": "pinecone_client","event": "pinecone_query_http", "status": r.status_code, "body": r.text[:500]})
+                except Exception as e:
+                    logger.error({"component": "pinecone_client","event": "pinecone_query_err", "err": str(e)})
+
+                sleep_s = min(2.0, 0.2 * (2**attempt) + random.random() * 0.2)
+                with timed("pinecone_retry_sleep",logger=logger,  component="pinecone_client", extra={"attempt": attempt + 1, "sleep_s": round(sleep_s, 3)}):
+                    time.sleep(sleep_s)
+
         return []

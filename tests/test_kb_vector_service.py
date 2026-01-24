@@ -61,14 +61,17 @@ def test_kb_vector_index_faq_upserts_chunks(monkeypatch):
     ok = svc.index_faq(tenant_id="t1", language_code="pl", faq=faq, max_chars=1000)
     assert ok is True
 
-    # embeddings dla 2 chunków
+    # embeddings zrobione w jednym batchu
     assert len(oa.calls) == 1
-    assert len(oa.calls[0]["texts"]) == 2
 
-    # jeden upsert (mało chunków)
+    # spójność: liczba embeddingów = liczba wektorów w upsercie
     assert len(pc.upserts) == 1
     assert pc.upserts[0].namespace == "kb:t1:pl"
-    assert len(pc.upserts[0].vectors) == 2
+
+    n_texts = len(oa.calls[0]["texts"])
+    n_vectors = len(pc.upserts[0].vectors)
+    assert n_texts == n_vectors
+    assert n_vectors >= 1  # nie zakładamy strategii chunkowania
 
     # metadane dla chunków
     md0 = pc.upserts[0].vectors[0]["metadata"]

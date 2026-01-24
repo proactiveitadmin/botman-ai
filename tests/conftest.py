@@ -76,25 +76,27 @@ def disable_custom_aws_endpoints(monkeypatch):
     
 @pytest.fixture()
 def mock_twilio(monkeypatch):
-    """
-    Mock TwilioClient używany w outbound_sender.handler:
-    - patchujemy modułową zmienną `twilio`,
-      więc nie ma znaczenia, kiedy moduł został zaimportowany.
+    """Backward-compat fixture name.
+
+    W kodzie outbound_sender nie ma już bezpośredniego klienta `twilio` –
+    wysyłka idzie przez ClientsFactory.whatsapp(...).
+
+    Żeby nie przebudowywać wszystkich testów na raz, zostawiamy nazwę
+    `mock_twilio`, ale pod spodem patchujemy `handler.clients.whatsapp`.
     """
     sent = []
 
-    class FakeTwilioClient:
+    class FakeWhatsAppClient:
         def send_text(self, to: str, body: str):
             sent.append({"to": to, "body": body})
-            # symulujemy sukces
             return {"status": "OK", "sid": "fake-sid"}
 
-    # kluczowy patch: nadpisujemy instancję twilio w handlerze
     monkeypatch.setattr(
-        "src.lambdas.outbound_sender.handler.twilio",
-        FakeTwilioClient(),
+        "src.lambdas.outbound_sender.handler.clients.whatsapp",
+        lambda tenant_id: FakeWhatsAppClient(),
         raising=False,
     )
+
     return sent
 
 
@@ -305,6 +307,21 @@ def aws_stack(monkeypatch):
                 {"AttributeName": "tenant_id", "KeyType": "HASH"},
             ],
         )
+
+        # Minimalny rekord "default" – część serwisów zakłada istnienie tenanta.
+        # Dzięki temu testy flow nie wybuchają na "Tenant not found: default".
+        try:
+            ddb.put_item(
+                TableName="Tenants",
+                Item={
+                    "tenant_id": {"S": "default"},
+                    "language_code": {"S": "pl"},
+                },
+            )
+        except Exception:
+            # Moto bywa kapryśne między wersjami; brak tego rekordu wciąż może być
+            # nadpisany w testach/fixture'ach.
+            pass
 
         # Templates – pod TemplateService z DDB
         ensure_table(

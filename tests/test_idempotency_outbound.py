@@ -13,21 +13,21 @@ def test_outbound_sender_idempotency_skips_duplicates(monkeypatch, aws_stack):
     it = iter([True, False])
     monkeypatch.setattr(outbound_handler.IDEMPOTENCY, "try_acquire", lambda *a, **k: next(it))
 
-    # 2) Mock Twilio via factory
+    # 2) Mock WhatsApp via factory
     calls = []
 
-    class DummyTwilio:
+    class DummyWhatsApp:
         def send_text(self, to, body):
             calls.append({"to": to, "body": body})
             return {"status": "OK", "sid": "fake"}
 
     class DummyFactory:
-        def twilio(self, tenant_id):
-            return DummyTwilio()
+        def whatsapp(self, tenant_id):
+            return DummyWhatsApp()
 
     monkeypatch.setattr(outbound_handler, "clients", DummyFactory())
 
-    # same idempotency_key twice -> only one Twilio call
+    # same idempotency_key twice -> only one send call
     msg = {
         "tenant_id": "t1",
         "to": "whatsapp:+48123456789",

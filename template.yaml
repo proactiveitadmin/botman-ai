@@ -3,6 +3,9 @@ Transform: AWS::Serverless-2016-10-31
 Description: Botman AI – Etap 1 (prod-ready)
 
 Parameters:
+  WhatsappVerifyToken:
+    Type: String
+    Default: ""
   PineconeApiKey:
     Type: String
     Default: ""
@@ -79,6 +82,7 @@ Globals:
         EMBEDDING_DIMENSIONS: !Ref EmbeddingDimensions
         KB_VECTOR_ENABLED: !Ref KBVectorEnabled
         PINECONE_API_KEY: !Ref PineconeApiKey
+        WHATSAPP_VERIFY_TOKEN: !Ref WhatsappVerifyToken
         PHONE_HASH_PEPPER: !Ref PhoneHashPepperParam
         USER_HASH_PEPPER: !Ref UserHashPepperParam
         OTP_HASH_PEPPER: !Ref OtpHashPepperParam
@@ -540,6 +544,51 @@ Resources:
             Path: /webhooks/twilio
             Method: post
 
+
+  WhatsAppWebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'whatsapp-webhook-${AWS::StackName}'
+      CodeUri: .
+      Handler: src/lambdas/whatsapp_webhook/handler.lambda_handler
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt InboundEventsQueue.QueueName
+        - DynamoDBReadPolicy:
+            TableName: !Ref Tenants
+        - DynamoDBCrudPolicy:             
+            TableName: !Ref IntentsStats
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+      Environment:
+        Variables:
+          InboundEventsQueueUrl: !Ref InboundEventsQueue
+      Events:
+        ApiPost:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /webhooks/whatsapp
+            Method: post
+        ApiGet:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /webhooks/whatsapp
+            Method: get
+          
   MessageRouterFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -940,12 +989,15 @@ Resources:
       RetentionInDays: 30
 
 Outputs:
-  ApiUrl:
-    Description: API Gateway endpoint URL
+  TwilioApiUrl:
+    Description: API Gateway endpoint URL for Twilio
     Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhooks/twilio'
   PgTestUrl:
     Description: API Gateway endpoint URL for PerfectGym manual test
     Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/api/pg/test'
+  WhatsappUrl:
+    Description: API Gateway endpoint URL for Whatsapp
+    Value: !Sub 'https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/webhooks/whatsapp'
   KBReindexerFunctionArn:
     Description: KB reindexer lambda ARN
     Value: !GetAtt KBReindexerFunction.Arn

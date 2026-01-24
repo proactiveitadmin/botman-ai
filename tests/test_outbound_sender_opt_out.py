@@ -20,13 +20,13 @@ def test_outbound_sender_blocks_campaign_when_opted_out(aws_stack, monkeypatch):
 
     sent = {"n": 0}
 
-    class DummyTwilio:
+    class DummyWhatsApp:
         def send_text(self, *args, **kwargs):
             sent["n"] += 1
             return {"status": "OK", "sid": "fake"}
 
     monkeypatch.setenv("DEV_MODE", "true")
-    monkeypatch.setattr(handler.clients, "twilio", lambda tenant_id: DummyTwilio())
+    monkeypatch.setattr(handler.clients, "whatsapp", lambda tenant_id: DummyWhatsApp())
 
     event = {
         "Records": [
@@ -52,13 +52,13 @@ def test_outbound_sender_blocks_campaign_when_opted_out(aws_stack, monkeypatch):
 def test_outbound_sender_does_not_block_reply(aws_stack, monkeypatch):
     sent = {"n": 0}
 
-    class DummyTwilio:
+    class DummyWhatsApp:
         def send_text(self, *args, **kwargs):
             sent["n"] += 1
             return {"status": "OK", "sid": "fake"}
 
     monkeypatch.setenv("DEV_MODE", "true")
-    monkeypatch.setattr(handler.clients, "twilio", lambda tenant_id: DummyTwilio())
+    monkeypatch.setattr(handler.clients, "whatsapp", lambda tenant_id: DummyWhatsApp())
 
     # reply messages carry channel_user_id and message_type=reply
     event = {

@@ -19,6 +19,8 @@ from openai import APIError, APIConnectionError, APIStatusError, RateLimitError
 
 from ..common.config import settings
 from ..common.logging import logger
+from ..common.timing import timed
+
 
 SYSTEM_PROMPT = """
 You are an intent classifier for a fitness club assistant.
@@ -159,14 +161,21 @@ class OpenAIClient:
             )
 
         mdl = model or self.model
-        resp = self.client.chat.completions.create(
-            model=mdl,
-            messages=messages,
-            response_format={"type": "json_object"},
-            temperature=0.0,
-            max_tokens=max_tokens,
-            timeout=self._timeout_s,
-        )
+
+        with timed(
+            "openai_chat_once",
+            logger=logger, 
+            component="openai_client",
+            extra={"model": mdl, "max_tokens": max_tokens, "timeout_s": self._timeout_s},
+        ):
+            resp = self.client.chat.completions.create(
+                model=mdl,
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0.0,
+                max_tokens=max_tokens,
+                timeout=self._timeout_s,
+            )
         return resp.choices[0].message.content or "{}"
 
     def chat(
@@ -186,71 +195,82 @@ class OpenAIClient:
         Błędy konfiguracyjne (np. brak uprawnień, zły model) nie są retryowane,
         tylko powodują szybki powrót z fallbackiem.
         """
-        last_api_error: Optional[APIError] = None
-        # Dla latency-sensitive bota wolimy szybki fallback niż długie retry.
-        # W praktyce: 2 próby z krótkim backoffem.
-        max_attempts = 2
-        for attempt in range(max_attempts):
-            try:
-                return self._chat_once(messages, model=model, max_tokens=max_tokens)
-            except RateLimitError:
-                # Krótki backoff – i tak mamy twardy timeout per request.
-                time.sleep(min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1))
-            except APIStatusError as e:
-                # 429/5xx -> retry, inne statusy -> nie ma sensu retry
-                status = getattr(e, "status_code", 0)
-                if status in (429, 500, 502, 503):
+        with timed(
+            "openai_chat_total",
+            logger=logger, 
+            component="openai_client",
+            extra={"model": model or self.model, "max_tokens": max_tokens, "enabled": self.enabled},
+        ):
+            last_api_error: Optional[APIError] = None
+            max_attempts = 2
+            for attempt in range(max_attempts):
+                try:
+                    with timed(
+                        "openai_chat_attempt",
+                        logger=logger, 
+                        component="openai_client",
+                        extra={"attempt": attempt + 1, "max_attempts": max_attempts},
+                    ):
+                        return self._chat_once(messages, model=model, max_tokens=max_tokens)
+                except RateLimitError:
                     sleep_s = min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1)
+                    with timed("openai_retry_sleep", logger=logger, component="openai_client", extra={"reason": "rate_limit", "sleep_s": round(sleep_s, 3)}):
+                        time.sleep(sleep_s)
+                except APIStatusError as e:
+                    # 429/5xx -> retry, inne statusy -> nie ma sensu retry
+                    status = getattr(e, "status_code", 0)
+                    if status in (429, 500, 502, 503):
+                        sleep_s = min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1)
+                        logger.warning(
+                            {
+                                "component": "openai_client",
+                                "event": "retry_sleep",
+                                "reason": "api_status",
+                                "status_code": status,
+                                "attempt": attempt + 1,
+                                "max_attempts": max_attempts,
+                                "sleep_s": round(sleep_s, 3),
+                            }
+                        )
+                        time.sleep(sleep_s)
+                    else:
+                        last_api_error = e
+                        logger.error(
+                            {
+                                "component": "openai_client",
+                                "event": "non_retryable_status",
+                                "status_code": status,
+                                "attempt": attempt + 1,
+                                "max_attempts": max_attempts,
+                            }
+                        )
+                        break
+                except APIConnectionError:
+                    # problemy sieciowe — próbujemy jeszcze raz, ale nie czekamy długo
+                    sleep_s = 0.3 + random.uniform(0, 0.1)
                     logger.warning(
                         {
                             "component": "openai_client",
                             "event": "retry_sleep",
-                            "reason": "api_status",
-                            "status_code": status,
+                            "reason": "connection_error",
                             "attempt": attempt + 1,
                             "max_attempts": max_attempts,
                             "sleep_s": round(sleep_s, 3),
                         }
                     )
                     time.sleep(sleep_s)
-                else:
+                except APIError as e:
+                    # „logiczny” błąd API — raczej nie ustąpi po retry
                     last_api_error = e
                     logger.error(
                         {
                             "component": "openai_client",
-                            "event": "non_retryable_status",
-                            "status_code": status,
-                            "attempt": attempt + 1,
-                            "max_attempts": max_attempts,
+                            "event": "api_error",
+                            "error_type": type(e).__name__,
+                            "message": str(e),
                         }
                     )
                     break
-            except APIConnectionError:
-                # problemy sieciowe — próbujemy jeszcze raz, ale nie czekamy długo
-                sleep_s = 0.3 + random.uniform(0, 0.1)
-                logger.warning(
-                    {
-                        "component": "openai_client",
-                        "event": "retry_sleep",
-                        "reason": "connection_error",
-                        "attempt": attempt + 1,
-                        "max_attempts": max_attempts,
-                        "sleep_s": round(sleep_s, 3),
-                    }
-                )
-                time.sleep(sleep_s)
-            except APIError as e:
-                # „logiczny” błąd API — raczej nie ustąpi po retry
-                last_api_error = e
-                logger.error(
-                    {
-                        "component": "openai_client",
-                        "event": "api_error",
-                        "error_type": type(e).__name__,
-                        "message": str(e),
-                    }
-                )
-                break
         
         # ostateczny fallback (json, żeby parser po drugiej stronie nie padł)
         logger.error(
@@ -365,9 +385,15 @@ class OpenAIClient:
 
         # OpenAI Embeddings API: returns a list aligned with inputs.
         kwargs = {"model": model, "input": texts}
-        # OpenAI pozwala skrócić embeddingi parametrem "dimensions"
         if dimensions:
             kwargs["dimensions"] = int(dimensions)
 
-        resp = self.client.embeddings.create(**kwargs)
+        with timed(
+            "openai_embed",
+            logger=logger, 
+            component="openai_client",
+            extra={"model": model, "n_texts": len(texts), "dims": dimensions or "default", "timeout_s": self._timeout_s},
+        ):
+            resp = self.client.embeddings.create(**kwargs)
+
         return [d.embedding for d in resp.data]

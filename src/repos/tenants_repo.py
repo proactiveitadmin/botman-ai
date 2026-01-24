@@ -44,12 +44,47 @@ class TenantsRepo:
         #do not scan if not found - scan is not allowed!
         return None
 
+    
+    def find_by_whatsapp_phone_number_id(self, phone_number_id: str) -> dict | None:
+        """Resolve tenant by WhatsApp Cloud API phone_number_id using GSI WhatsAppPhoneNumberIdIndex."""
+        if not phone_number_id:
+            return None
+        try:
+            resp = self.table.query(
+                IndexName="WhatsAppPhoneNumberIdIndex",
+                KeyConditionExpression=Key("whatsapp_phone_number_id").eq(phone_number_id),
+                Limit=1,
+            )
+            items = resp.get("Items") or []
+            if items:
+                return items[0]
+        except Exception as e:
+            logger.exception({"tenants_repo": "query_failed", "error": str(e), "phone_number_id": phone_number_id})
+        return None
+
+    def find_by_pg_api_key(self, api_key: str) -> dict | None:
+        """Resolve tenant by PerfectGym API key using GSI PgApiKeyIndex."""
+        if not api_key:
+            return None
+        try:
+            resp = self.table.query(
+                IndexName="PgApiKeyIndex",
+                KeyConditionExpression=Key("pg_api_key").eq(api_key),
+                Limit=1,
+            )
+            items = resp.get("Items") or []
+            if items:
+                return items[0]
+        except Exception as e:
+            logger.exception({"tenants_repo": "query_failed", "error": str(e), "pg_api_key": "***"})
+        return None
+
     def set_language(self, tenant_id: str, language_code: str):
-        self.table.update_item(
-            Key={"tenant_id": tenant_id},
-            UpdateExpression="SET language_code = :lang",
-            ExpressionAttributeValues={":lang": language_code},
-        )
+            self.table.update_item(
+                Key={"tenant_id": tenant_id},
+                UpdateExpression="SET language_code = :lang",
+                ExpressionAttributeValues={":lang": language_code},
+            )
 
     def get_email_config(self, tenant_id: str) -> dict | None:
         """Zwraca konfigurację email dla tenanta (lub None jeśli brak/wyłączona)."""

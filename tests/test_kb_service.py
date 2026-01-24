@@ -112,10 +112,14 @@ def test_answer_ai_returns_none_for_empty_question():
     assert svc.answer_ai(question="", tenant_id="t1") is None
 
 def test_answer_ai_happy_path_with_json(monkeypatch):
-    monkeypatch.setattr(settings, "kb_bucket", "", raising=False)
+    # bucket musi być ustawiony, bo _load_tenant_faq zwraca None gdy bucket pusty
+    # (wtedy nie sięga nawet do cache)
+    monkeypatch.setattr(settings, "kb_bucket", "kb-bucket", raising=False)
     # prosty FAQ – tylko jedna odpowiedź
     svc = KBService(bucket=None, openai_client=None)
     svc._cache[svc._cache_key("t1", "pl")] = {"hours": "8-20"}
+    # Testy unit nie powinny iść do Pinecone / Tenants – wyłączamy warstwę vector.
+    monkeypatch.setattr(svc._vector, "enabled", lambda *_: False, raising=False)
     monkeypatch.setattr(svc, "_tenant_default_lang", lambda *_: "en", raising=False) 
     
     class DummyClient:
@@ -131,9 +135,10 @@ def test_answer_ai_happy_path_with_json(monkeypatch):
     assert "8-20" in ans
 
 def test_answer_ai_llm_failure_returns_none(monkeypatch):
-    monkeypatch.setattr(settings, "kb_bucket", "", raising=False)
+    monkeypatch.setattr(settings, "kb_bucket", "kb-bucket", raising=False)
     svc = KBService(bucket=None, openai_client=None)
     svc._cache[svc._cache_key("t1", None)] = {"hours": "8-20"}
+    monkeypatch.setattr(svc._vector, "enabled", lambda *_: False, raising=False)
     monkeypatch.setattr(svc, "_tenant_default_lang", lambda *_: "en", raising=False) 
     
     class DummyClient:

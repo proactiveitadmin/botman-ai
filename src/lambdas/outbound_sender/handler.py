@@ -158,7 +158,7 @@ def lambda_handler(event, context):
                 logger.warning({"sender": "invalid_payload", "payload": payload})
                 continue
 
-            res = clients.twilio(tenant_id).send_text(to=to, body=text)
+            res = clients.whatsapp(tenant_id).send_text(to=to, body=text)
             res_status = res.get("status", "UNKNOWN")
 
             metrics.incr("message_sent", channel="whatsapp", status=res_status)
