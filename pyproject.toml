@@ -5,3 +5,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.poetry.group.dev.dependencies]
+pytest-cov = "^5.0.0"
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]

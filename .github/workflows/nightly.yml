@@ -40,3 +40,5 @@ jobs:
       - name: Run prod-safe canary suite
         run: |
           pytest -m "prod_safe and not slow" -q
+      - name: Tests with coverage
+        run: pytest -m "prod_safe and not slow" -q --cov=src --cov-report=term-missing --cov-report=html

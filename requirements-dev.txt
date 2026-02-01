@@ -2,3 +2,5 @@ pytest==8.3.2
 pytest-mock==3.14.0
 moto[s3,sqs,dynamodb]==5.0.12
 freezegun==1.5.1
+pytest-cov
+
