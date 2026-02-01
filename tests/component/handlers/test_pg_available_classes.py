@@ -4,7 +4,7 @@ from src.services.crm_service import CRMService
 from src.services.language_service import LanguageService
 from src.services.routing_service import RoutingService
 
-from tests.fakes_routing import InMemoryConversations, FakeTenantsRepo, FakeTemplateServicePG
+from tests.helpers.fakes_routing import InMemoryConversations, FakeTenantsRepo, FakeTemplateServicePG
 
 
 def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
@@ -17,6 +17,7 @@ def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
     mock_payload = {
         "value": [
             {
+                "id": "CLASS-1",
                 "startDate": "2025-11-23T10:00:00+01:00",
                 "attendeesCount": 3,
                 "attendeesLimit": 10,
@@ -24,6 +25,8 @@ def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
             }
         ]
     }
+
+
     requests_mock.get(url, json=mock_payload, status_code=200)
 
     # 3) In-memory ConversationsRepo – bez DynamoDB

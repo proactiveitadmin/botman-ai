@@ -6,7 +6,7 @@ from src.services.language_service import LanguageService
 from src.services.routing_service import RoutingService
 from src.common.constants import STATE_AWAITING_MESSAGE
 
-from tests.fakes_routing import (
+from tests.helpers.fakes_routing import (
     InMemoryConversations,
     FakeTenantsRepo,
     FakeTemplateServicePG,

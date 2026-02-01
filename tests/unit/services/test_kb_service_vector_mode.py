@@ -8,6 +8,8 @@ def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
     monkeypatch.setenv("KB_VECTOR_MIN_SCORE_LOW", "0")
     monkeypatch.setenv("KB_VECTOR_FASTPATH_MIN_SCORE", "0.99") 
     monkeypatch.setenv("KB_VECTOR_MIN_SCORE", "0.72")
+    monkeypatch.setenv("KB_VECTOR_FASTPATH_GAP", "1.0")
+
     # --- konfiguracja ---
     monkeypatch.setattr(settings, "kb_bucket", "", raising=False)
 

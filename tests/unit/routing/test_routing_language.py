@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.domain.models import Message
 from src.services.language_service import LanguageService
 
-from tests.fakes_routing import InMemoryConversations, FakeTenantsRepo
+from tests.helpers.fakes_routing import InMemoryConversations, FakeTenantsRepo
 
 
 def _build_msg(body: str, tenant_id: str = "tenant-1", phone: str = "+48123123123", lang: str | None = None):

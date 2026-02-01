@@ -315,11 +315,12 @@ def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
             {
                 "body": json.dumps(
                     {
-                        "event_id": "evt-1",
+                        "event_id": "evt-ticket-1",
                         "from": "whatsapp:+48123123123",
                         "to": "whatsapp:+48000000000",
-                        "body": "Godziny otwarcia",
+                        "body": "Chcę zgłosić problem z karnetem",
                         "tenant_id": "default",
+                       
                     }
                 )
             }
@@ -338,10 +339,7 @@ def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
         for p in payloads
         if p.get("to") == "whatsapp:+48123123123"
         and (
-            "godzin" in p.get("body", "").lower()
-            or "otwar" in p.get("body", "").lower()
-            or "opening hours" in p.get("body", "").lower()
-            or "not yet provided" in p.get("body", "").lower()
+            "doprecyzowa" in p.get("body", "").lower()
         )
     ]
 

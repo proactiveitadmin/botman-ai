@@ -1,0 +1,42 @@
+name: nightly-tests
+on:
+  schedule:
+    # 02:10 Europe/Warsaw in February (CET, UTC+1) => 01:10 UTC
+    - cron: '10 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: stage
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run nightly suite (stage)
+        run: |
+          pytest -m "unit or component or integration or security" -q
+
+  prod_canary:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: prod
+      RUN_ID: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run prod-safe canary suite
+        run: |
+          pytest -m "prod_safe and not slow" -q
