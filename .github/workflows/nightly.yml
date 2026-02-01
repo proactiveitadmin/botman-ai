@@ -78,4 +78,4 @@ jobs:
           USER_HASH_PEPPER: ""
           OTP_HASH_PEPPER: ""
         run: |
-          pytest -m "prod_safe and not slow" -q --cov=src --cov-report=term-missing --cov-report=html
+          pytest -m "prod_safe and not slow" -q --cov=src --cov-report=html
