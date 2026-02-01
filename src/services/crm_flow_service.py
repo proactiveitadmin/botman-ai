@@ -11,7 +11,6 @@ from ..common.utils import new_id, build_reply_action
 from ..domain.models import Message, Action
 from ..services.crm_service import CRMService
 from .clients_factory import ClientsFactory
-from .tenant_config_service import TenantConfigService
 from ..services.template_service import TemplateService
 from ..adapters.email_client import EmailClient
 from ..common.security import otp_hash
@@ -45,7 +44,7 @@ class CRMFlowService:
         conv: ConversationsRepo | None = None,
         members_index: MembersIndexRepo | None = None,
     ) -> None:
-        self._clients_factory = ClientsFactory(TenantConfigService())
+        self._clients_factory = ClientsFactory()
         self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.tpl = tpl or TemplateService()
         self.conv = conv or ConversationsRepo()

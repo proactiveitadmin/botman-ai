@@ -6,6 +6,7 @@ from src.services.kb_service import KBService
 from src.domain.templates import DEFAULT_FAQ
 from src.common.config import settings
 import src.services.kb_service as kb_mod
+from src.services.tenant_config_service import TenantConfigService
 
 class DummyBody:
     def __init__(self, text: str):
@@ -89,7 +90,7 @@ def test_select_relevant_faq_entries_overlap_and_fallback():
 
     # pytanie bez overlapu → fallback: całe FAQ
     selected2 = svc._select_relevant_faq_entries("completely unrelated", tenant_faq, k=1)
-    assert selected2 == tenant_faq
+    assert selected2 == {}
 
 
 def test_answer_uses_s3_and_fallback(monkeypatch):

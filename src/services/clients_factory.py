@@ -8,7 +8,7 @@ from ..adapters.twilio_client import TwilioClient
 from ..adapters.whatsapp_cloud_client import WhatsAppCloudClient
 from ..adapters.pinecone_client import PineconeClient
 from ..common.logging import logger
-from .tenant_config_service import TenantConfigService
+from .tenant_config_service import TenantConfigService, default_tenant_config_service
 
 
 class ClientsFactory:
@@ -18,12 +18,13 @@ class ClientsFactory:
     """
 
     def __init__(self, tenant_cfg: TenantConfigService | None = None) -> None:
-        self.tenant_cfg = tenant_cfg or TenantConfigService()
+        self.tenant_cfg = tenant_cfg or default_tenant_config_service()
         self._twilio: dict[str, TwilioClient] = {}
         self._whatsapp_cloud: dict[str, WhatsAppCloudClient] = {}
         self._jira: dict[str, JiraClient] = {}
         self._pg: dict[str, PerfectGymClient] = {}
         self._pinecone: dict[str, PineconeClient] = {}
+        self._whatsapp_sender: dict[str, Any] = {}
 
     def twilio(self, tenant_id: str) -> TwilioClient:
         if tenant_id in self._twilio:
@@ -50,12 +51,18 @@ class ClientsFactory:
           2) if whatsapp_cloud is configured/enabled -> Cloud API
           3) fallback -> Twilio
         """
+        cached = self._whatsapp_sender.get(tenant_id)
+        if cached is not None:
+            return cached
+
         cfg = self.tenant_cfg.get(tenant_id)
         provider = (cfg.get("whatsapp_provider") or cfg.get("provider") or "").strip().lower()
+
         cloud = self.whatsapp_cloud(tenant_id)
-        if provider == "cloud" or (provider == "" and cloud.enabled):
-            return cloud
-        return self.twilio(tenant_id)
+        sender = cloud if (provider == "cloud" or (provider == "" and cloud.enabled)) else self.twilio(tenant_id)
+
+        self._whatsapp_sender[tenant_id] = sender
+        return sender
 
     def jira(self, tenant_id: str) -> JiraClient:
         if tenant_id in self._jira:

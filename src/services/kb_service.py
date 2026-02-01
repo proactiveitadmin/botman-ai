@@ -6,6 +6,7 @@ Odpowiada za pobieranie odpowiedzi FAQ dla danego tenanta:
 - jeśli nie ma pliku lub nie ma konfiguracji, korzysta z domyślnego DEFAULT_FAQ.
 """
 
+import os
 import json
 import re
 import time  
@@ -15,13 +16,14 @@ from typing import Dict, Optional, List
 from botocore.exceptions import ClientError
 from .kb_vector_service import KBVectorService, build_kb_prompt
 from .clients_factory import ClientsFactory
-from .tenant_config_service import TenantConfigService
+from .tenant_config_service import default_tenant_config_service
 from ..common.logging import logger
 from ..repos.tenants_repo import TenantsRepo
 from ..domain.templates import DEFAULT_FAQ
 from ..common.aws import s3_client
 from ..common.config import settings
 from ..adapters.openai_client import OpenAIClient
+from ..common.timing import timed
 
 
 class KBService:
@@ -49,7 +51,7 @@ class KBService:
         # klient OpenAI – opcjonalny, żeby w dev/offline dalej działało
         self._client = openai_client or OpenAIClient()
         # vector retrieval (Pinecone). If not configured, KBService falls back to legacy retrieval.
-        self._clients_factory = clients_factory or ClientsFactory(TenantConfigService())
+        self._clients_factory = clients_factory or ClientsFactory()
         self._vector = KBVectorService(
             openai_client=self._client,
             clients_factory=self._clients_factory,
@@ -142,7 +144,7 @@ class KBService:
 
         Zwraca:
             dict topic -> answer (maksymalnie K wpisów).
-            Jeśli nic sensownego nie pasuje, zwraca pełne tenant_faq (fallback).
+            Jeśli nic sensownego nie pasuje, zwraca pusty dict (caller powinien obsłużyć brak dopasowania).
         """
         q = (question or "").lower()
         q_tokens = set(re.findall(r"\w+", q))
@@ -166,7 +168,7 @@ class KBService:
 
         if not scored:
             # brak dopasowania → zachowujemy się jak wcześniej: całe FAQ
-            return tenant_faq
+            return {}
 
         scored.sort(key=lambda x: (-x[0], x[1]))
 
@@ -204,6 +206,36 @@ class KBService:
 
         # fallback na domyślne (na razie bez wariantów językowych)
         return DEFAULT_FAQ.get(topic)
+        
+    def answer_by_key(
+        self,
+        *,
+        tenant_id: str,
+        language_code: str,
+        faq_key: str,
+    ) -> str | None:
+        """
+        Deterministic FAQ answer from Pinecone by metadata faq_key.
+        No KB LLM.
+        """
+        try:
+            return self._vector.get_faq_by_key(
+                tenant_id=tenant_id,
+                language_code=language_code,
+                faq_key=faq_key,
+            )
+        except Exception as e:
+            logger.error(
+                {
+                    "component": "kb_service",
+                    "event": "answer_by_key_failed",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "faq_key": faq_key,
+                    "err": str(e),
+                }
+            )
+            return None
 
     def answer_ai(
         self,
@@ -225,48 +257,199 @@ class KBService:
         if not question:
             return None
 
-        # 1) FAQ z S3 lub domyślne
-        tenant_faq = self._load_tenant_faq(tenant_id, language_code)
-        if not tenant_faq:
-            tenant_language = self._tenant_default_lang(tenant_id)
-            tenant_faq = self._load_tenant_faq(tenant_id, tenant_language)
-        if not tenant_faq:
-            logger.warning(
-                {
-                    "component": "kb_service",
-                    "event": "no FAQ used default",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                }
-            )
-            tenant_faq = DEFAULT_FAQ
-
-        if not tenant_faq:
-            return None
-
-        # 2) retrieval: prefer Pinecone (vector DB) when configured;
-        #    otherwise fall back to legacy keyword-overlap retrieval.
+        # 2) retrieval: prefer Pinecone (vector DB) when configured.
+        vector_enabled = self._vector.enabled(tenant_id)
         retrieved_chunks = []
-        if self._vector.enabled(tenant_id):
+        if vector_enabled:
             retrieved_chunks = self._vector.retrieve(
                 tenant_id=tenant_id,
                 language_code=language_code,
                 question=question,
             )
 
+            # Vector confidence gating:
+            # - no matches OR very low score -> deterministic fallback WITHOUT calling the KB LLM
+            # - mid score -> call LLM in a STRICT mode (must return a sentinel when unsure)
+            # - high score -> normal KB LLM (still constrained to provided snippets)
+            try:
+                low_threshold = float(os.getenv("KB_VECTOR_MIN_SCORE_LOW", "0.3"))
+            except Exception:
+                low_threshold = 0.3
+
+            try:
+                high_threshold = float(os.getenv("KB_VECTOR_MIN_SCORE", "0.72"))
+            except Exception:
+                high_threshold = 0.72
+
+            # NEW: gap thresholds (tunable)
+            try:
+                gap_high = float(os.getenv("KB_VECTOR_GAP_HIGH", "0.10"))
+            except Exception:
+                gap_high = 0.10
+
+            try:
+                gap_strict = float(os.getenv("KB_VECTOR_GAP_STRICT", "0.12"))
+            except Exception:
+                gap_strict = 0.12
+
+            try:
+                top1_high_min = float(os.getenv("KB_VECTOR_TOP1_HIGH_MIN", "0.65"))
+            except Exception:
+                top1_high_min = 0.65
+
+            try:
+                top1_strict_min = float(os.getenv("KB_VECTOR_TOP1_STRICT_MIN", "0.55"))
+            except Exception:
+                top1_strict_min = 0.55
+
+            top1 = 0.0
+            top2 = 0.0
+            gap = 0.0
+        
+            if retrieved_chunks:
+                try:
+                    top1 = float(getattr(retrieved_chunks[0], "score", 0.0) or 0.0)
+                except Exception:
+                    top1 = 0.0
+                if len(retrieved_chunks) > 1:
+                    try:
+                        top2 = float(getattr(retrieved_chunks[1], "score", 0.0) or 0.0)
+                    except Exception:
+                        top2 = 0.0
+                gap = max(0.0, top1 - top2)
+
+            # Default behavior: low band -> return None (no KB LLM)
+            below_low = (not retrieved_chunks) or (top1 < low_threshold)
+
+            # NEW override rules based on gap
+            # Rule 1: treat as high confidence even if top1 < high_threshold
+            force_high = (top1 >= top1_high_min and gap >= gap_high)
+
+            # Rule 2: if it would fall below_low, but it's clearly the best vs #2,
+            # do NOT return None; instead go strict LLM.
+            force_strict = (top1 >= top1_strict_min and gap >= gap_strict)
+
+            logger.info({
+                "component": "kb_service",
+                "event": "vector_scores",
+                "tenant_id": tenant_id,
+                "lang": language_code,
+                "matches": len(retrieved_chunks) if retrieved_chunks else 0,
+                "top1": top1,
+                "top2": top2,
+                "gap": gap,
+                "low_threshold": low_threshold,
+                "high_threshold": high_threshold,
+                "force_high": force_high,
+                "force_strict": force_strict,
+            })
+
+            if below_low and not force_strict:
+                logger.info({
+                    "component": "kb_service",
+                    "event": "vector_retrieval_below_threshold",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "matches": len(retrieved_chunks) if retrieved_chunks else 0,
+                    "top1": top1,
+                    "top2": top2,
+                    "gap": gap,
+                    "threshold": low_threshold,
+                    "band": "low",
+                })
+                return None
+
+            # Decide strict_mode:
+            # - If force_high -> not strict
+            # - Else strict if top1 < high_threshold OR force_strict explicitly
+            strict_mode = (not force_high) and (force_strict or (top1 < high_threshold))
+
+
+        # FAST PATH: if vector retrieval returns chunks that already include "A: ...",
+        # return the best-match answer directly and avoid an extra LLM call.
         if retrieved_chunks:
+            best = retrieved_chunks[0]
+            # FAST-PATH safety: only return a direct FAQ answer when similarity is high.
+            # Otherwise fall back to LLM synthesis / explicit "no info" response.
+            try:
+                min_score = float(os.getenv("KB_VECTOR_FASTPATH_MIN_SCORE", "0.80"))
+            except Exception:
+                min_score = 0.80
+
+            # NEW: allow fastpath for clearly dominant match
+            try:
+                fastpath_gap = float(os.getenv("KB_VECTOR_FASTPATH_GAP", "0.12"))
+            except Exception:
+                fastpath_gap = 0.12
+                
+            best_score = getattr(best, "score", 0.0) or 0.0
+            # reuse gap computed earlier
+            if best_score < min_score and gap < fastpath_gap:
+                best = None
+
+            if best is not None:
+                # Extract the answer portion from the chunk (chunk_faq uses "Q:" and "A:").
+                txt = (best.text or "").strip()
+                ans = ""
+                m = re.search(r"\n\s*A:\s*(.*)$", txt, flags=re.IGNORECASE | re.DOTALL)
+                if m:
+                    ans = (m.group(1) or "").strip()
+                else:
+                    # Fallback: try split on 'A:' if newlines differ
+                    parts = re.split(r"\bA:\s*", txt, maxsplit=1, flags=re.IGNORECASE)
+                    if len(parts) == 2:
+                        ans = parts[1].strip()
+                if ans:
+                    if ans == "__NO_INFO__":
+                        logger.info(
+                            {
+                                "component": "kb_service",
+                                "event": "kb_llm_no_info",
+                                "tenant_id": tenant_id,
+                                "lang": language_code,
+                                "band": "mid",
+                            }
+                        )
+                        return None
+                    return ans
+
             system_prompt = build_kb_prompt(chunks=retrieved_chunks, language_code=language_code)
+            if strict_mode:
+                system_prompt += (
+                    "\n\nIf the snippets do not contain enough information to answer, "
+                    "respond with the exact JSON {\"answer\": \"__NO_INFO__\"} and nothing else."
+                )
         else:
+            # legacy retrieval (backward-compatible)
             logger.warning(
                 {
                     "component": "kb_service",
                     "event": "no retrieved_chunks",
                     "tenant_id": tenant_id,
                     "lang": language_code,
-                    "vector enabled": self._vector.enabled(tenant_id),
+                    "vector_enabled": vector_enabled,
                 }
             )
-            # legacy retrieval (backward-compatible)
+            
+            # 1) FAQ z S3 lub domyślne
+            tenant_faq = self._load_tenant_faq(tenant_id, language_code)
+            if not tenant_faq:
+                tenant_language = self._tenant_default_lang(tenant_id)
+                tenant_faq = self._load_tenant_faq(tenant_id, tenant_language)
+            if not tenant_faq:
+                logger.warning(
+                    {
+                        "component": "kb_service",
+                        "event": "no FAQ used default",
+                        "tenant_id": tenant_id,
+                        "lang": language_code,
+                    }
+                )
+                tenant_faq = DEFAULT_FAQ
+
+            if not tenant_faq:
+                return None
+                
             relevant_faq = self._select_relevant_faq_entries(
                 question=question,
                 tenant_faq=tenant_faq,
@@ -283,14 +466,16 @@ class KBService:
             faq_context = "\n".join(lines)
 
             if not faq_context:
-                return None
+                # brak dopasowania w FAQ -> nie przekazujemy całej bazy do modelu
+                # (to powoduje halucynacje lub odpowiedzi grzecznościowe).
+                faq_context = ""
 
             system_prompt = (
-                "You are a helpful assistant for a fitness club.\n"
-                "You answer the user's question ONLY using the FAQ entries below.\n"
-                "Always respond as a json object with a single key \"answer\".\n"
-                "In the \"answer\" value, explain the information in your own words, "
-                "If the FAQ does not contain the information needed to answer the question,"
+                "You are a helpful customer-support assistant.\n"
+                "Answer the user's question ONLY using the FAQ entries below.\n"
+                "Always respond as a JSON object with a single key \"answer\".\n"
+                "In the \"answer\" value, paraphrase the relevant information. "
+                "If the FAQ does not contain the information needed to answer the question, "
                 "reply that you don't know AND ask the user if there is anything else you can help with.\n"
                 "FAQ entries:\n"
                 f"{faq_context}\n"
@@ -303,27 +488,52 @@ class KBService:
             else:
                 system_prompt += "\nAnswer in the same language as the user's question."
  
-        messages: list[dict] = [
-            {"role": "system", "content": system_prompt},
-        ]
-        # 4) opcjonalna historia rozmowy (user / assistant)
-        if history:
-            messages.extend(history)
+        with timed(
+            "prompt_build",
+            logger=logger,
+            component="kb_service",
+            extra={
+                "tenant_id": tenant_id,
+                "lang": language_code,
+            },
+        ):
+            messages: list[dict] = [
+                {"role": "system", "content": system_prompt},
+            ]
+            # 4) opcjonalna historia rozmowy (user / assistant)
+            if history:
+                messages.extend(history)
 
-        # 5) aktualne pytanie
-        messages.append(
-            {
-                "role": "user",
-                "content": (
-                    f"{question}\n\n"
-                    'Respond strictly in json with a single key "answer".'
-                ),
-            }
-        )
+            # 5) aktualne pytanie
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"{question}\n\n"
+                        'Respond strictly in JSON with a single key "answer".'
+                    ),
+                }
+            )
+
+        # Emit prompt_size as a separate log field (measured after building messages).
+        try:
+            prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
+            logger.warning(
+                {
+                    "component": "kb_service",
+                    "event": "prompt_size",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "prompt_size_chars": prompt_chars,
+                    "prompt_messages": len(messages),
+                }
+            )
+        except Exception:
+            pass
 
         # 6) Wołamy LLM – max_tokens mniejsze niż wcześniej, żeby odpowiedź była szybsza
         try:
-            raw = self._client.chat(messages=messages, max_tokens=256)  # było 512
+            raw = self._client.chat(messages=messages, max_tokens=512)  # było 512
         except Exception as e:
             logger.error(
                 {
@@ -333,12 +543,33 @@ class KBService:
                 }
             )
             return None
-
+        
         if not raw:
             return None
 
         raw = raw.strip()
-
+        if raw == "__NO_INFO__":
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "kb_llm_no_info",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "band": "mid",
+                }
+            )
+            return None
+        if "__NO_INFO__" in raw:
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "kb_llm_no_info",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "band": "mid",
+                }
+            )
+            return None
         # 7) próbujemy wyciągnąć "answer" z JSON-a
         try:
             data = json.loads(raw)
@@ -350,7 +581,17 @@ class KBService:
             pass
 
         return raw
-   
+        
+    def list_faq_keys(self, tenant_id: str, language_code: str) -> set[str]:
+        faq = self._load_tenant_faq(tenant_id, language_code) or {}
+        if not faq:
+            tenant_language = self._tenant_default_lang(tenant_id)
+            faq = self._load_tenant_faq(tenant_id, tenant_language) or {}
+        if not faq:
+            faq = DEFAULT_FAQ or {}
+        return set(faq.keys())
+    
+    
     # -------------------------------------------------------------------------
     # Vector indexing helpers (optional)
     # -------------------------------------------------------------------------

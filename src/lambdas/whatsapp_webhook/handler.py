@@ -20,7 +20,7 @@ import hmac
 import hashlib
 
 from ...services.spam_service import SpamService
-from ...services.tenant_config_service import TenantConfigService
+from ...services.tenant_config_service import default_tenant_config_service
 from ...repos.tenants_repo import TenantsRepo
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.utils import new_id
@@ -30,7 +30,7 @@ from ...common.security import user_hmac
 
 
 spam_service = SpamService()
-tenant_cfg = TenantConfigService()
+tenant_cfg = default_tenant_config_service()
 tenants_repo = TenantsRepo()
 
 

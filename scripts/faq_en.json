@@ -1,43 +1,88 @@
 {
-  "age_policy": "People under 16 can use the club only under adult supervision or with a trainer.",
-  "app_help": "If you have issues with the app, try updating to the latest version or contact reception.",
-  "bike_racks": "Bike racks are available in front of the club. Please secure your bike with your own lock.",
-  "cant_answer": "I don’t have that information in the FAQ. If you want, I can route your question to reception or suggest where to check (e.g., in the app).",
-  "classes_booking": "Group classes can be booked via the mobile app or by contacting reception.",
-  "classes_cancellation": "Classes can be cancelled no later than 2 hours before the start. After that, a fee applies according to the price list.",
-  "classes_limit": "Places in classes are limited. Bookings are processed on a first-come, first-served basis.",
-  "cleaning_breaks": "Areas may be temporarily closed for cleaning. Information is provided in advance.",
-  "contract_freeze": "You can freeze your contract once per year for up to 30 days. The freeze fee is 29 PLN.",
-  "contract_termination": "Contract termination requires signing a form at reception. The notice period is 1 month.",
-  "contract_transfer": "You can transfer your membership to another person for an administrative fee of 39 PLN.",
-  "entry_policy": "Entry to the club is via the mobile app or a membership card. Each entry is recorded in the system.",
-  "equipment_rules": "Please put equipment back after your workout and disinfect machines after use.",
-  "farewell": "Thanks for reaching out. See you at the club! 👋 If you need anything else, just message me.",
-  "greeting": "Hi! 👋 How can I help? I can share opening hours, entry rules, membership prices, class bookings, and other club information.",
-  "handoff_reception": "If you need a human or account-specific help, tell me and I’ll pass it to reception.",
-  "hours": "The club is open Monday to Friday from 6:00 to 22:00, and on weekends from 8:00 to 20:00.",
-  "instructors": "Information about instructors is available in the app or on the notice board near the fitness studio.",
-  "invoices": "You can receive an invoice for your membership at reception or by email upon request.",
-  "kids_zone": "The Kids Zone is open on Saturdays and Sundays from 10:00 to 18:00. Children must be accompanied by an adult.",
-  "language_switch": "I can reply in Polish, English, or Arabic. Tell me which language you prefer.",
-  "locker_room": "Lockers use a PIN code. If you forget your code, please contact reception.",
-  "lost_items": "Lost items can be collected at reception. We keep them for 30 days.",
-  "maintenance": "Current maintenance work and temporary area closures are posted on the notice board at the entrance and in the app.",
-  "membership_price": "Monthly membership starts from 139 PLN. Quarterly and annual plans are also available, as well as discounts for students and seniors.",
-  "membership_types": "We offer memberships: Open, Off-Peak, Pool+Gym, and Family. Details are available at reception and on our website.",
-  "parking": "Members get 2 hours of free parking. Take a ticket at the entrance and keep it until you exit.",
+  "greeting": "Hi! 👋 How can I help you? I can provide opening hours, entry rules, membership prices, class bookings, and other club information.",
+  "farewell": "Thank you for contacting us. See you at the club! 👋 If you need anything else, feel free to ask.",
+  "thanks": "No problem — happy to help! 😊",
+  "youre_welcome": "You're welcome! If you have more questions, I'm here to help.",
+  "cant_answer": "I can’t find this information in the FAQ. If you’d like, I can create a request for you.",
+
+  "hours": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
+  "opening_hours": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
+
+  "entry_policy": "Club entry is possible using the mobile app or a membership card. Each entry is registered in the system.",
+  "entry": "You can enter the club using the mobile app or your membership card.",
+
+  "membership_price": "Monthly memberships start from 139 PLN. Quarterly and annual plans are also available, with discounts for students and seniors.",
+  "membership_types": "We offer Open, Off-Peak, Gym+Pool, and Family memberships. Details are available at reception and on our website.",
+  "membership": "The club offers various membership options tailored to different needs.",
+  "carnet": "Monthly, quarterly, and annual memberships are available.",
+
   "payments": "We accept card payments, BLIK, and recurring payments.",
-  "personal_trainer": "Personal training can be arranged at reception or by contacting a chosen trainer directly.",
-  "personal_trainer_prices": "Personal training starts from 120 PLN per session. Packages at a lower price are available.",
-  "pool_hours": "The pool is available daily from 6:00 to 21:30. The last entry is 45 minutes before closing.",
-  "rules": "The club rules are available on our website and at reception.",
-  "safety": "If you feel unwell or get injured, inform staff immediately. The AED defibrillator is located at reception.",
-  "sauna_hours": "The sauna area is open from 14:00 to 22:00 on weekdays and from 10:00 to 20:00 on weekends.",
-  "showers": "Showers are available without limits. Please bring your own flip‑flops.",
-  "smalltalk_how_are_you": "Thanks, I’m doing well! 😊 How can I help you with the club?",
-  "smalltalk_who_are_you": "I’m the club’s virtual assistant. I help you quickly find information like hours, memberships, classes, and policies.",
-  "thanks": "You’re welcome — happy to help! 😊",
-  "towels": "Towels are available at reception for an additional 5 PLN. We recommend using a towel during workouts.",
-  "wifi": "Free Wi‑Fi is available throughout the club. Network name: FITNESS_WIFI, password: trening2024.",
-  "youre_welcome": "My pleasure! If you have more questions, I’m here."
+  "payment_methods": "You can pay by card, BLIK, or via recurring payments.",
+
+  "contract_freeze": "You can freeze your contract once per year for up to 30 days. The freeze fee is 29 PLN.",
+  "contract_termination": "Contract termination requires signing a form at reception. The notice period is one month.",
+  "contract_transfer": "Membership can be transferred to another person for an administrative fee of 39 PLN.",
+  "contract": "All matters related to contracts are handled at the reception desk.",
+  "agreement": "The membership agreement defines the terms of club usage.",
+
+  "classes_booking": "Group classes can be booked via the mobile app or by contacting reception.",
+  "classes_cancellation": "Classes can be canceled up to 2 hours before they start. After that, a fee applies according to the price list.",
+  "classes_limit": "The number of spots in group classes is limited. Bookings are processed on a first-come, first-served basis.",
+  "classes": "The club offers a wide range of group classes.",
+  "group_classes": "Group classes are conducted according to the schedule available in the app.",
+
+  "instructors": "Information about instructors can be found in the app or on the notice board near the fitness studio.",
+  "trainers": "Our trainers conduct both group classes and personal training sessions.",
+
+  "personal_trainer": "Personal training sessions can be booked at reception or directly with the selected trainer.",
+  "personal_trainer_prices": "Personal training prices start from 120 PLN per session. Discounted packages are available.",
+  "pt": "Personal training allows for an individually tailored workout plan.",
+
+  "pool_hours": "The swimming pool is available daily from 6:00 AM to 9:30 PM. Last entry is 45 minutes before closing.",
+  "pool": "The swimming pool is available daily for members.",
+  "swimming_pool": "The swimming pool is located in the wet zone of the club.",
+
+  "sauna_hours": "The sauna area is open from 2:00 PM to 10:00 PM on weekdays and from 10:00 AM to 8:00 PM on weekends.",
+  "sauna": "The sauna area is available for members during designated hours.",
+  "sauna_zone": "The sauna is located in the club’s wellness area.",
+
+  "locker_room": "Lockers operate with a PIN code. If you forget your code, please contact reception.",
+  "lockers": "Lockers are available in the changing rooms and secured with PIN codes.",
+
+  "showers": "Showers are available without limits. Please use your own flip-flops.",
+  "changing_rooms": "Changing rooms are equipped with showers and lockers.",
+
+  "towels": "Towels are available at reception for an additional fee of 5 PLN. We recommend using a towel during workouts.",
+  "equipment_rules": "Please return equipment to its place after use and disinfect machines after training.",
+  "equipment": "Training equipment is available to all club members.",
+
+  "parking": "Members receive 2 hours of free parking. Please collect a ticket upon entry and keep it until exit.",
+  "parking_info": "The club offers up to 2 hours of free parking for members.",
+
+  "bike_racks": "Bike racks are located in front of the club. Please secure your bike with your own lock.",
+  "bikes": "You can access the club by bicycle.",
+
+  "kids_zone": "The Kids Zone is open on Saturdays and Sundays from 10:00 AM to 6:00 PM. Children must be supervised by an adult.",
+  "children": "Children are allowed in the club only under adult supervision.",
+
+  "age_policy": "Persons under 16 years of age may use the club only under adult or trainer supervision.",
+  "rules": "The club regulations are available on our website and at reception.",
+
+  "lost_items": "Lost items can be collected at reception. Items are stored for 30 days.",
+  "maintenance": "Current maintenance works and area closures are announced on the information board and in the app.",
+  "cleaning_breaks": "Areas may be temporarily closed for cleaning. Information is provided in advance.",
+
+  "safety": "In case of injury or discomfort, immediately inform staff. An AED defibrillator is located at reception.",
+
+  "wifi": "Free Wi-Fi is available throughout the club. Network name: FITNESS_WIFI, password: trening2024.",
+  "internet": "Free Wi-Fi is available in the club.",
+
+  "invoices": "You can receive an invoice for your membership at reception or by email upon request.",
+  "billing": "Payment and invoice-related matters are handled by reception.",
+
+  "app_help": "If you experience issues with the app, try updating it to the latest version or contact reception.",
+  "app": "The mobile app allows class bookings and club entry.",
+
+  "smalltalk_how_are_you": "Thanks, I’m doing well! 😊 How can I assist you with the club?",
+  "smalltalk_who_are_you": "I am the club’s virtual assistant. I help you quickly find information about hours, memberships, classes, and rules."
 }

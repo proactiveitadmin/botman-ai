@@ -2,6 +2,9 @@ import os
 import pytest
 from moto import mock_aws
 import boto3
+import src.common.http_client as http_client
+import botocore.session
+import src.common.http_client as http_client
 
 # ============================
 #  MOCKI INTEGRACJI (AI, Twilio, PG, Jira)
@@ -42,6 +45,37 @@ def mock_ai(monkeypatch):
     )
     return fake_classify_intent
 
+import pytest
+import botocore.session
+
+@pytest.fixture(autouse=True)
+def force_aws_no_endpoint_url(monkeypatch):
+    """
+    Test-only: prevent any code from forcing endpoint_url (e.g. LocalStack 4566).
+    Works even if someone passes endpoint_url=... explicitly.
+    """
+    orig_create_client = botocore.session.Session.create_client
+
+    def create_client_no_endpoint(self, service_name, *args, **kwargs):
+        kwargs.pop("endpoint_url", None)
+        return orig_create_client(self, service_name, *args, **kwargs)
+
+    monkeypatch.setattr(
+        botocore.session.Session,
+        "create_client",
+        create_client_no_endpoint,
+        raising=True,
+    )
+    
+@pytest.fixture(autouse=True)
+def reset_http_session_singleton():
+    http_client._SESSION = None
+
+@pytest.fixture(autouse=True)
+def _reset_global_http_session():
+    # ważne: session powstanie ponownie po tym, jak requests_mock się zainstaluje
+    http_client._SESSION = None
+    
 @pytest.fixture(autouse=True)
 def disable_custom_aws_endpoints(monkeypatch):
     """
@@ -57,6 +91,7 @@ def disable_custom_aws_endpoints(monkeypatch):
         "DYNAMODB_ENDPOINT",
         "SQS_ENDPOINT",
         "S3_ENDPOINT",
+        "LOCALSTACK_URL",
         "LOCALSTACK_HOST",
         "LOCALSTACK_HOSTNAME",
         "LOCALSTACK_ENDPOINT",
@@ -72,6 +107,24 @@ def disable_custom_aws_endpoints(monkeypatch):
         _no_endpoint,
         raising=False,
     )
+
+@pytest.fixture(autouse=True)
+def force_boto3_without_endpoint_url(monkeypatch):
+    import boto3
+
+    _orig_client = boto3.client
+    _orig_resource = boto3.resource
+
+    def client(service_name, *args, **kwargs):
+        kwargs.pop("endpoint_url", None)
+        return _orig_client(service_name, *args, **kwargs)
+
+    def resource(service_name, *args, **kwargs):
+        kwargs.pop("endpoint_url", None)
+        return _orig_resource(service_name, *args, **kwargs)
+
+    monkeypatch.setattr(boto3, "client", client, raising=True)
+    monkeypatch.setattr(boto3, "resource", resource, raising=True)
 
     
 @pytest.fixture()
@@ -160,6 +213,7 @@ def env_setup(monkeypatch):
     monkeypatch.setenv("AWS_SESSION_TOKEN", "testing")
     monkeypatch.setenv("MOTO_ALLOW_NONEXISTENT_REGION", "true")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setenv("HTTP_USE_SESSION","0")
 
     for var in [
         "AWS_ENDPOINT_URL",
@@ -416,8 +470,6 @@ def requests_mock(monkeypatch):
             raise AssertionError(f"Unexpected {m} {url!r} in requests_mock fixture")
 
     mock = _RequestsMock()
-    monkeypatch.setattr("requests.get", mock._fake_get)
-    monkeypatch.setattr("requests.request", mock._fake_request)
     return mock
     
 def wire_subservices(svc):

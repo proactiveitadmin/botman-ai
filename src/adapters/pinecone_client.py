@@ -116,19 +116,29 @@ class PineconeClient:
         namespace: str,
         top_k: int = 6,
         include_metadata: bool = True,
-        max_attempts: int = 3,
+        max_attempts: int = 1,
+        filter: Optional[dict] = None,
     ) -> List[PineconeMatch]:
         if not self.enabled:
             return []
-
         payload = {
             "vector": vector,
             "topK": top_k,
             "namespace": namespace,
             "includeMetadata": include_metadata,
         }
+        if filter:
+            payload["filter"] = filter  
         url = self._url("/query")
-
+        expected_dim = getattr(settings, "pinecone_index_dim", None)
+        if expected_dim and len(vector) != int(expected_dim):
+            logger.error({
+                "component": "pinecone_client",
+                "event": "pinecone_vector_dim_mismatch",
+                "expected": int(expected_dim),
+                "got": len(vector),
+            })
+            return []
         with timed(
             "pinecone_query_total",
             logger=logger, 
@@ -154,15 +164,24 @@ class PineconeClient:
                                 score=float(m.get("score", 0.0) or 0.0),
                                 metadata=m.get("metadata") or {},
                             ))
-                        logger.info({"component": "pinecone_client", "event": "pinecone_query_ok", "attempt": attempt + 1, "returned": len(matches)})
+                        logger.warning({
+                            "component": "pinecone_client",
+                            "event": "pinecone_query_ok",
+                            "namespace": namespace,
+                            "filter": filter,
+                            "vec_dim": len(vector),
+                            "returned": len(matches),}
+                        )
                         return matches
 
-                    logger.info({"component": "pinecone_client","event": "pinecone_query_http", "status": r.status_code, "body": r.text[:500]})
+                    logger.warning({"component": "pinecone_client","event": "pinecone_query_http", "status": r.status_code, "body": r.text[:500]})
                 except Exception as e:
                     logger.error({"component": "pinecone_client","event": "pinecone_query_err", "err": str(e)})
 
                 sleep_s = min(2.0, 0.2 * (2**attempt) + random.random() * 0.2)
                 with timed("pinecone_retry_sleep",logger=logger,  component="pinecone_client", extra={"attempt": attempt + 1, "sleep_s": round(sleep_s, 3)}):
                     time.sleep(sleep_s)
-
+        logger.warning({"component": "pinecone_client",
+            "event": "pinecone_query_failed",
+            "max_attempts": max_attempts,})
         return []

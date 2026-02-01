@@ -8,6 +8,7 @@ import logging
 
 from ..common.logging_utils import mask_phone
 from ..common.config import settings
+from ..common.timing import timed
 
 logger = logging.getLogger("botman-ai")
 

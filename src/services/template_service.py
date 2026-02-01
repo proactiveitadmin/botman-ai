@@ -95,5 +95,15 @@ class TemplateService:
             # ŻADNYCH domyślnych tekstów – zwracamy nazwę szablonu
             return name
 
-        template_str = tpl.get("body") or ""
+        body = tpl.get("body")
+
+        if isinstance(body, list):
+            seed = f"{tenant_id}:{name}:{lang}"
+            template_str = self._pick_variant(
+                [str(x) for x in body if x],
+                seed,
+            )
+        else:
+            template_str = str(body or "")
+
         return render_template(template_str, context or {})

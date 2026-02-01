@@ -20,13 +20,14 @@ from botocore.config import Config
 from ..domain.models import Message, Action
 from ..common.utils import build_reply_action
 from ..common.config import settings
+from ..common.timing import timed
 from ..common.security import conversation_key
 from ..services.nlu_service import NLUService
 from ..services.kb_service import KBService
 from ..services.template_service import TemplateService
 from ..services.crm_service import CRMService
 from .clients_factory import ClientsFactory
-from .tenant_config_service import TenantConfigService
+from .tenant_config_service import default_tenant_config_service
 from ..services.ticketing_service import TicketingService
 from ..services.metrics_service import MetricsService
 from ..services.crm_flow_service import CRMFlowService
@@ -86,7 +87,7 @@ class RoutingService:
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
         self.members_index = members_index or MembersIndexRepo()
-        self._clients_factory = ClientsFactory(TenantConfigService())
+        self._clients_factory = ClientsFactory()
         self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.ticketing = ticketing or TicketingService(clients_factory=self._clients_factory)
         self.crm_flow = crm_flow or CRMFlowService(
@@ -263,9 +264,30 @@ class RoutingService:
         self._update_conversation_state(msg, lang, intent, slots)
 
         # 6) Routing po intencji
-
-        # 6.1 FAQ
+        # 6.1.a FAQ
         if intent == "faq":
+            slots = slots or {}
+            faq_key = (slots.get("faq_key") or "").strip()
+            
+            with timed("list_faq_keys", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
+                if faq_key:
+                    # lista kluczy z realnej bazy FAQ (S3/default), bez hardcode
+                    if faq_key not in self.kb.list_faq_keys(msg.tenant_id, lang):
+                        faq_key = ""
+            if faq_key:
+                with timed("answer_by_key", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
+            
+                    direct = self.kb.answer_by_key(
+                        tenant_id=msg.tenant_id,
+                        language_code=lang,
+                        faq_key=faq_key,
+                    )
+                    if direct:
+                        return [self._reply(msg, lang, direct)]
+
+                body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})
+                return [self._reply(msg, lang, body)]
+            
             conv_key = conversation_key(
                 msg.tenant_id,
                 msg.channel or "whatsapp",
@@ -317,23 +339,8 @@ class RoutingService:
             if ai_body:
                 body = ai_body
             else:
-                # ostateczny fallback: pojedynczy topic z NLU (jeśli jest),
-                # albo template "brak info"
-                topic = faq_tag or "hours"
-                body = (
-                    self.kb.answer(
-                        topic,
-                        tenant_id=msg.tenant_id,
-                        language_code=lang,
-                    )
-                    or self.tpl.render_named(
-                        msg.tenant_id,
-                        "faq_no_info",
-                        lang,
-                        {},
-                    )
-                )
-
+                # Deterministic fallback (no extra LLM calls).
+                body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})         
             return [self._reply(msg, lang, body)]
 
         # 6.2 Rezerwacja zajęć

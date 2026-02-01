@@ -7,6 +7,7 @@ from typing import Any, Dict
 
 from ..common.aws import ssm_client
 from ..common.logging import logger
+from ..common.timing import timed
 from ..repos.tenants_repo import TenantsRepo
 
 
@@ -22,7 +23,17 @@ class TenantConfigService:
 
     def __init__(self, repo: TenantsRepo | None = None, *, ttl_seconds: int | None = None) -> None:
         self.repo = repo or TenantsRepo()
-        self.ttl_seconds = ttl_seconds if ttl_seconds is not None else int(os.getenv("TENANT_CONFIG_CACHE_TTL", "600"))
+        # Keep the cache TTL short (warm Lambda speedup) but bounded.
+        # Default: 120s (fits requested 60–300s range).
+        raw_ttl = ttl_seconds if ttl_seconds is not None else int(
+            os.getenv("TENANT_CONFIG_CACHE_TTL", "120") or 120
+        )
+        try:
+            raw_ttl = int(raw_ttl)
+        except Exception:
+            raw_ttl = 120
+        # clamp to 60..300s
+        self.ttl_seconds = max(60, min(300, raw_ttl))
 
         # tenant_id -> (expires_at_epoch, expanded_cfg)
         self._cfg_cache: dict[str, tuple[float, dict]] = {}
@@ -38,7 +49,13 @@ class TenantConfigService:
         if param_name in self._ssm_cache:
             return self._ssm_cache[param_name]
         try:
-            resp = ssm_client().get_parameter(Name=param_name, WithDecryption=True)
+            with timed(
+                "tenant_cfg_ssm_get",
+                logger=logger,
+                component="tenant_config_service",
+                extra={"param": param_name},
+            ):
+                resp = ssm_client().get_parameter(Name=param_name, WithDecryption=True)
             val = (resp.get("Parameter") or {}).get("Value") or ""
             self._ssm_cache[param_name] = val
             return val
@@ -82,7 +99,13 @@ class TenantConfigService:
             if exp > self._now():
                 return cfg
 
-        item = self.repo.get(tenant_id) or {}
+        with timed(
+            "tenant_cfg_ddb_get",
+            logger=logger,
+            component="tenant_config_service",
+            extra={"tenant_id": tenant_id},
+        ):
+            item = self.repo.get(tenant_id) or {}
         if not item:
             raise ValueError(f"Tenant not found: {tenant_id}")
 
@@ -90,22 +113,50 @@ class TenantConfigService:
         cfg: dict[str, Any] = dict(item)
 
         # Expand secrets from SSM
-        self._expand_section(cfg, "twilio", {
-            "account_sid": "account_sid_param",
-            "auth_token": "auth_token_param",
-        })
-        self._expand_section(cfg, "whatsapp_cloud", {
-            "access_token": "access_token_param",
-            "app_secret": "app_secret_param",
-        })
-        self._expand_section(cfg, "pg", {
-            "client_id": "client_id_param",
-            "client_secret": "client_secret_param",
-        })
-        self._expand_section(cfg, "jira", {
-            "token": "token_param",
-        })
+        with timed(
+            "tenant_cfg_expand_secrets",
+            logger=logger,
+            component="tenant_config_service",
+            extra={"tenant_id": tenant_id},
+        ):
+            self._expand_section(cfg, "twilio", {
+                "account_sid": "account_sid_param",
+                "auth_token": "auth_token_param",
+            })
+            self._expand_section(cfg, "whatsapp_cloud", {
+                "access_token": "access_token_param",
+                "app_secret": "app_secret_param",
+            })
+            self._expand_section(cfg, "pg", {
+                "client_id": "client_id_param",
+                "client_secret": "client_secret_param",
+            })
+            self._expand_section(cfg, "jira", {
+                "token": "token_param",
+            })
+
+            # Optional integrations
+            self._expand_section(cfg, "pinecone", {
+                "api_key": "api_key_param",
+                "index_host": "index_host_param",
+            })
 
         # store cache
         self._cfg_cache[tenant_id] = (self._now() + float(self.ttl_seconds), cfg)
         return cfg
+
+
+_DEFAULT_TENANT_CONFIG_SERVICE: TenantConfigService | None = None
+
+
+def default_tenant_config_service() -> TenantConfigService:
+    """Return a process-wide TenantConfigService instance.
+
+    Important: in AWS Lambda warm runtimes, this gives us cross-service caching of
+    expanded tenant config (DDB + SSM) without requiring explicit wiring.
+    """
+
+    global _DEFAULT_TENANT_CONFIG_SERVICE
+    if _DEFAULT_TENANT_CONFIG_SERVICE is None:
+        _DEFAULT_TENANT_CONFIG_SERVICE = TenantConfigService()
+    return _DEFAULT_TENANT_CONFIG_SERVICE

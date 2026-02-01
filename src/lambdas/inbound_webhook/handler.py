@@ -14,7 +14,7 @@ import re
 
 from ...services.spam_service import SpamService
 from ...repos.tenants_repo import TenantsRepo
-from ...services.tenant_config_service import TenantConfigService
+from ...services.tenant_config_service import default_tenant_config_service
 from ...common.utils import new_id
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.security import verify_twilio_signature
@@ -26,7 +26,7 @@ from ...common.security import user_hmac
 NGROK_HOST_HINTS = (".ngrok-free.app", ".ngrok.io")
 spam_service = SpamService()
 tenants_repo = TenantsRepo()
-tenant_cfg = TenantConfigService()
+tenant_cfg = default_tenant_config_service()
 
 
 def _build_public_url(event, headers_in) -> str:

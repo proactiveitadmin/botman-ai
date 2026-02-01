@@ -52,7 +52,12 @@ Parameters:
     Type: String
   LlmModel:
     Type: String
-
+  DeployWaf:
+    Type: String
+    AllowedValues: ["true","false"]
+    Default: "true"
+Conditions:
+  DoWaf: !Equals [!Ref DeployWaf, "true"]
     
 Globals:
   Function:
@@ -117,7 +122,7 @@ Globals:
         CONVERSATIONS_RETENTION_DAYS: "5"
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
         
-        TENANT_CONFIG_CACHE_TTL: "600"
+        TENANT_CONFIG_CACHE_TTL: "300"
         OPENAI_TIMEOUT_S: 12
         OPENAI_MAX_ATTEMPTS: 3
         OPENAI_RETRY_MAX_DELAY_S: 2
@@ -139,6 +144,7 @@ Resources:
   # --- WAF ---
   ApiWebAcl:
     Type: AWS::WAFv2::WebACL
+    Condition: DoWaf
     Properties:
       Name: !Sub 'botman-api-waf-${AWS::StackName}'
       Scope: REGIONAL
@@ -164,6 +170,7 @@ Resources:
 
   ApiWebAclAssociation:
     Type: AWS::WAFv2::WebACLAssociation
+    Condition: DoWaf
     DependsOn:
       - MyApiProdStage
     Properties:
@@ -595,6 +602,10 @@ Resources:
       FunctionName: !Sub 'message-router-${AWS::StackName}'
       CodeUri: .
       Handler: src/lambdas/message_router/handler.lambda_handler
+      MemorySize: 2048
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt InboundEventsQueue.QueueName
@@ -662,6 +673,10 @@ Resources:
       FunctionName: !Sub 'outbound-sender-${AWS::StackName}'
       CodeUri: .
       Handler: src/lambdas/outbound_sender/handler.lambda_handler
+      MemorySize: 2048
+      AutoPublishAlias: live
+      ProvisionedConcurrencyConfig:
+        ProvisionedConcurrentExecutions: 1
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt OutboundQueue.QueueName      
@@ -925,6 +940,11 @@ Resources:
         - S3ReadPolicy:
             BucketName: !Sub '${AWS::StackName}-kb-${AWS::AccountId}'
         - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource:
+                - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Tenants-${AWS::StackName}"
             - Effect: Allow
               Action: ssm:GetParameter
               Resource:

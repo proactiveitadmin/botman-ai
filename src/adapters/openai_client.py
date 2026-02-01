@@ -23,85 +23,61 @@ from ..common.timing import timed
 
 
 SYSTEM_PROMPT = """
-You are an intent classifier for a fitness club assistant.
+Classify the user message and extract intent + slots.
 
-Return exactly one valid JSON object with keys:
-- "intent": one of [
-    "reserve_class",
-    "faq",
-    "handover",
-    "verification",
-    "clarify",
-    "ticket",
-    "crm_available_classes",
-    "crm_contract_status"
-  ]
-- "confidence": float 0..1
-- "slots": object with extracted parameters.
+Return ONLY JSON:
+{"intent": "...", "confidence": 0..1, "slots": {...}}
 
-INTENT DEFINITIONS:
+Intents:
+- reserve_class
+- crm_available_classes
+- crm_contract_status
+- crm_member_balance
+- verification
+- ticket
+- handover
+- ack
+- faq
+- clarify
+- ticket_status
 
-1) "faq"
-Use this intent for ALL informational or knowledge-based content that can be answered
-from static FAQ / knowledge base, including but NOT limited to:
+FAQ KEY POLICY (IMPORTANT):
+- slots.faq_key is OPTIONAL. Use it ONLY when the message unambiguously maps to exactly ONE FAQ key.
+- Do NOT guess. If there is any ambiguity between multiple keys, omit slots.faq_key.
+- If the user asks a general question that could match multiple FAQ entries (e.g., "hours" without specifying what),
+  omit slots.faq_key.
+- If the user mentions a specific entity (e.g., "sauna", "pool", "locker room", "kids zone"), prefer the matching key ONLY
+  if that entity is explicitly present in the user's text.
+- Do NOT map between similar categories (e.g., sauna vs pool) unless the user's text explicitly contains the target entity.
+- If unsure, return intent="faq" and leave slots empty.
 
-- club information:
-  hours, price, pricing, location, address, contact, schedule, classes, trainers,
-  membership, equipment, parking, rules, facilities, age_limit, guest_pass,
-  lost_and_found, cancellation, opening_soon
+Rules:
+- If message is only a number -> intent=clarify (confidence 0.01)
+- Prefer faq over clarify
+- Messages describing urgent problems, lost items, access to personal belongings,
+  safety issues, or situations requiring immediate human assistance
+  MUST be classified as intent "ticket".
+  
+Conversational shortcuts:
+- Single-token or very short greetings, farewells, and politeness expressions
+  (e.g. greetings, goodbyes, thanks, acknowledgements) are HIGH confidence.
+- For such messages, set confidence >= 0.9.
+- These messages are NOT ambiguous and should not be classified as clarify.
 
-- conversational / social FAQ:
-  greetings (hello, hi, hey, salam),
-  farewells (bye, goodbye, see you),
-  thanks and acknowledgements (thanks, thank you, shukran),
-  questions about the bot itself (who are you, what can you do, are you a bot),
-  polite small talk (how are you, nice to meet you),
-  language switching requests (can you speak English/Arabic/Polish)
+If the message is a greeting or farewell:
+- Use intent "faq".
+- These messages are HIGH confidence (>= 0.9).
 
-If the user message can reasonably be answered using FAQ or predefined knowledge,
-ALWAYS choose "faq".
-
-2) "reserve_class"
-User explicitly wants to sign up or reserve a class.
-Extract class_id, class_name, date, time, member_id if present.
-
-3) "crm_available_classes"
-User asks what classes are currently available, today, tomorrow, this week, etc.
-
-4) "crm_contract_status"
-User asks about their membership, contract, subscription, payments, or account status.
-
-5) "ticket"
-User reports a problem, complaint, issue, or asks for staff support/help.
-
-6) "handover"
-User explicitly asks to speak with a human, staff member, or receptionist.
-
-7) "verification"
-User asks for account verification or verification code.
-
-8) "clarify"
-Use ONLY if the message is unclear, incomplete, or cannot be confidently mapped
-to any intent above.
-
-🔧 SPECIAL RULES (IMPORTANT):
-
-- If the message is ONLY a number or short numeric selection
-  (e.g. "1", "2", "nr 3", "option 1"),
-  ALWAYS return:
-    { "intent": "clarify", "confidence": 0.01, "slots": {} }
-  This is NOT a class reservation.
-  Numeric selections are handled by a state machine, not NLU.
-
-- Prefer "faq" over "clarify" whenever possible.
-  If in doubt between "faq" and "clarify", choose "faq".
-
-- Always respond with ONE minimal JSON object and NOTHING else.
+If the message is a short acknowledgement or politeness response
+(e.g. confirming, thanking, or reacting to a previous message):
+- Use intent "ack".
+- These messages are HIGH confidence (>= 0.9).
 """
 
 _VALID_INTENTS = {
     "reserve_class", "faq", "handover", "verification", "clarify", "ticket",
     "crm_available_classes", "crm_contract_status", "crm_member_balance", "ack",
+    "ticket_status",
 }
 
 class OpenAIClient:
@@ -133,6 +109,13 @@ class OpenAIClient:
             if self.enabled
             else None
         )
+
+        # In-memory embedding cache (per warm Lambda runtime).
+        # Keyed by (model, dimensions, normalized_text).
+        import os
+        self._embed_cache_ttl_s = float(os.getenv("OPENAI_EMBED_CACHE_TTL", "300") or 300)
+        self._embed_cache_max = int(os.getenv("OPENAI_EMBED_CACHE_MAX", "2000") or 2000)
+        self._embed_cache: dict[tuple[str, int | None, str], tuple[float, list[float]]] = {}
 
     def _chat_once(
         self,
@@ -195,82 +178,84 @@ class OpenAIClient:
         Błędy konfiguracyjne (np. brak uprawnień, zły model) nie są retryowane,
         tylko powodują szybki powrót z fallbackiem.
         """
-        with timed(
-            "openai_chat_total",
-            logger=logger, 
-            component="openai_client",
-            extra={"model": model or self.model, "max_tokens": max_tokens, "enabled": self.enabled},
-        ):
-            last_api_error: Optional[APIError] = None
-            max_attempts = 2
-            for attempt in range(max_attempts):
-                try:
-                    with timed(
-                        "openai_chat_attempt",
-                        logger=logger, 
-                        component="openai_client",
-                        extra={"attempt": attempt + 1, "max_attempts": max_attempts},
-                    ):
-                        return self._chat_once(messages, model=model, max_tokens=max_tokens)
-                except RateLimitError:
+        # prompt_size: cheap, token-agnostic approximation (chars).
+        try:
+            prompt_chars = sum(len(str(m.get("content") or "")) for m in (messages or []))
+            prompt_msgs = len(messages or [])
+        except Exception:
+            prompt_chars = None
+            prompt_msgs = None
+
+        last_api_error: Optional[APIError] = None
+        max_attempts = 2
+        for attempt in range(max_attempts):
+            try:
+                with timed(
+                    "openai_chat_attempt",
+                    logger=logger, 
+                    component="openai_client",
+                    extra={"attempt": attempt + 1, "max_attempts": max_attempts},
+                ):
+                    return self._chat_once(messages, model=model, max_tokens=max_tokens)
+            except RateLimitError:
+                sleep_s = min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1)
+                with timed("openai_retry_sleep", logger=logger, component="openai_client", extra={"reason": "rate_limit", "sleep_s": round(sleep_s, 3)}):
+                    time.sleep(sleep_s)
+            except APIStatusError as e:
+                # 429/5xx -> retry, inne statusy -> nie ma sensu retry
+                status = getattr(e, "status_code", 0)
+                if status in (429, 500, 502, 503):
                     sleep_s = min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1)
-                    with timed("openai_retry_sleep", logger=logger, component="openai_client", extra={"reason": "rate_limit", "sleep_s": round(sleep_s, 3)}):
-                        time.sleep(sleep_s)
-                except APIStatusError as e:
-                    # 429/5xx -> retry, inne statusy -> nie ma sensu retry
-                    status = getattr(e, "status_code", 0)
-                    if status in (429, 500, 502, 503):
-                        sleep_s = min(0.5 * (2**attempt), 1.5) + random.uniform(0, 0.1)
-                        logger.warning(
-                            {
-                                "component": "openai_client",
-                                "event": "retry_sleep",
-                                "reason": "api_status",
-                                "status_code": status,
-                                "attempt": attempt + 1,
-                                "max_attempts": max_attempts,
-                                "sleep_s": round(sleep_s, 3),
-                            }
-                        )
-                        time.sleep(sleep_s)
-                    else:
-                        last_api_error = e
-                        logger.error(
-                            {
-                                "component": "openai_client",
-                                "event": "non_retryable_status",
-                                "status_code": status,
-                                "attempt": attempt + 1,
-                                "max_attempts": max_attempts,
-                            }
-                        )
-                        break
-                except APIConnectionError:
-                    # problemy sieciowe — próbujemy jeszcze raz, ale nie czekamy długo
-                    sleep_s = 0.3 + random.uniform(0, 0.1)
                     logger.warning(
                         {
                             "component": "openai_client",
                             "event": "retry_sleep",
-                            "reason": "connection_error",
+                            "reason": "api_status",
+                            "status_code": status,
                             "attempt": attempt + 1,
                             "max_attempts": max_attempts,
                             "sleep_s": round(sleep_s, 3),
                         }
                     )
                     time.sleep(sleep_s)
-                except APIError as e:
-                    # „logiczny” błąd API — raczej nie ustąpi po retry
+                else:
                     last_api_error = e
                     logger.error(
                         {
                             "component": "openai_client",
-                            "event": "api_error",
-                            "error_type": type(e).__name__,
-                            "message": str(e),
+                            "event": "non_retryable_status",
+                            "status_code": status,
+                            "attempt": attempt + 1,
+                            "max_attempts": max_attempts,
                         }
                     )
                     break
+            except APIConnectionError:
+                # problemy sieciowe — próbujemy jeszcze raz, ale nie czekamy długo
+                sleep_s = 0.3 + random.uniform(0, 0.1)
+                logger.warning(
+                    {
+                        "component": "openai_client",
+                        "event": "retry_sleep",
+                        "reason": "connection_error",
+                        "attempt": attempt + 1,
+                        "max_attempts": max_attempts,
+                        "sleep_s": round(sleep_s, 3),
+                    }
+                )
+                time.sleep(sleep_s)
+            except APIError as e:
+                # „logiczny” błąd API — raczej nie ustąpi po retry
+                last_api_error = e
+                logger.error(
+                    {
+                        "component": "openai_client",
+                        "event": "api_error",
+                        "error_type": type(e).__name__,
+                        "message": str(e),
+                    }
+                )
+                break
         
         # ostateczny fallback (json, żeby parser po drugiej stronie nie padł)
         logger.error(
@@ -309,7 +294,13 @@ class OpenAIClient:
         """
         Wygodny wrapper do klasyfikacji intencji.
         """
-        messages = [
+        with timed(
+            "prompt_build",
+            logger=logger,
+            component="openai_client",
+            extra={"prompt": "intent_classification", "lang": lang},
+        ):
+            messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
@@ -318,7 +309,18 @@ class OpenAIClient:
                     "Respond strictly in json according to the specification above."
                 ),
             },
-        ]
+            ]
+
+        prompt_size = sum(len(m.get("content") or "") for m in messages)
+        logger.warning(
+            {
+                "component": "openai_client",
+                "event": "prompt_size",
+                "prompt": "intent_classification",
+                "size_chars": prompt_size,
+                "messages": len(messages),
+            }
+        )
 
         content = self.chat(messages, model=self.model, max_tokens=256)
         return self._parse_classification(content)
@@ -361,7 +363,7 @@ class OpenAIClient:
         slots = data.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
-
+        
         return {"intent": intent, "confidence": conf, "slots": slots}
 
     # ---------------------------------------------------------------------
@@ -383,8 +385,38 @@ class OpenAIClient:
         if not self.enabled or not self.client:
             return []
 
+        # Small in-memory TTL cache to avoid repeated embedding calls for identical
+        # questions within warm Lambdas.
+        import time
+        now = time.time()
+        norm_texts = [(t or "").strip() for t in texts]
+
+        cached_vecs: list[list[float] | None] = [None] * len(norm_texts)
+        missing: list[str] = []
+        missing_idx: list[int] = []
+
+        for i, t in enumerate(norm_texts):
+            key = (model, int(dimensions) if dimensions else None, t)
+            item = self._embed_cache.get(key)
+            if item:
+                exp, vec = item
+                if exp > now and vec:
+                    cached_vecs[i] = vec
+                    continue
+                # expired
+                try:
+                    del self._embed_cache[key]
+                except Exception:
+                    pass
+            missing.append(t)
+            missing_idx.append(i)
+
+        # If everything is cached, return fast.
+        if not missing:
+            return [v or [] for v in cached_vecs]
+
         # OpenAI Embeddings API: returns a list aligned with inputs.
-        kwargs = {"model": model, "input": texts}
+        kwargs = {"model": model, "input": missing}
         if dimensions:
             kwargs["dimensions"] = int(dimensions)
 
@@ -392,8 +424,19 @@ class OpenAIClient:
             "openai_embed",
             logger=logger, 
             component="openai_client",
-            extra={"model": model, "n_texts": len(texts), "dims": dimensions or "default", "timeout_s": self._timeout_s},
+            extra={"model": model, "n_texts": len(missing), "dims": dimensions or "default", "timeout_s": self._timeout_s},
         ):
             resp = self.client.embeddings.create(**kwargs)
 
-        return [d.embedding for d in resp.data]
+        new_vecs = [d.embedding for d in resp.data]
+        # merge results back into full list
+        for j, vec in enumerate(new_vecs):
+            i = missing_idx[j]
+            cached_vecs[i] = vec
+            key = (model, int(dimensions) if dimensions else None, missing[j])
+            # simple eviction: if over max, clear (cheap + safe)
+            if len(self._embed_cache) >= self._embed_cache_max:
+                self._embed_cache.clear()
+            self._embed_cache[key] = (now + self._embed_cache_ttl_s, vec)
+
+        return [v or [] for v in cached_vecs]

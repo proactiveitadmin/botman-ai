@@ -22,9 +22,16 @@ def _queue_delay_ms(record: dict) -> int | None:
     except Exception:
         return None
 def _get_optout_service():
-    from ...services.opt_out_service import OptOutService
-    from ...repos.conversations_repo import ConversationsRepo
-    return OptOutService(ConversationsRepo()) 
+    global _OPT_OUT
+    try:
+        _OPT_OUT
+    except NameError:
+        _OPT_OUT = None
+    if _OPT_OUT is None:
+        from ...services.opt_out_service import OptOutService
+        from ...repos.conversations_repo import ConversationsRepo
+        _OPT_OUT = OptOutService(ConversationsRepo())
+    return _OPT_OUT
 
 def _normalize_whatsapp_channel_user_id(to: str | None) -> str | None:
     """Converts Twilio 'to' into channel_user_id format used by ConversationsRepo."""
@@ -55,8 +62,10 @@ def lambda_handler(event, context):
 
     batch_failures = []
 
-    for r in records:
+    sqs = sqs_client()
+    web_q_url = resolve_optional_queue_url("WebOutboundEventsQueueUrl")
 
+    for r in records:
         msg_id = r.get("messageId")
         delay_ms = _queue_delay_ms(r)
         logger.info({
@@ -117,7 +126,6 @@ def lambda_handler(event, context):
 
             # --- Kanał WWW ---
             if channel == "web":
-                web_q_url = resolve_optional_queue_url("WebOutboundEventsQueueUrl")
                 web_msg = {
                     "tenant_id": tenant_id,
                     "channel_user_id": payload.get("channel_user_id"),
@@ -125,7 +133,7 @@ def lambda_handler(event, context):
                 }
 
                 if web_q_url:
-                    sqs_client().send_message(
+                    sqs.send_message(
                         QueueUrl=web_q_url,
                         MessageBody=json.dumps(web_msg),
                     )
