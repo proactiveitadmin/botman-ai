@@ -87,6 +87,6 @@ jobs:
           path: htmlcov/
       - name: Coverage summary
         run: |
-          coverage report --fail-under=60
+          coverage report --fail-under=70
 
 
