@@ -9,571 +9,116 @@ Na podstawie wyniku NLU decyduje, czy:
 """
 
 import time
+import re
+import logging
+import os
+import boto3
+from datetime import datetime
 from typing import List, Optional
+from botocore.config import Config
 
 from ..domain.models import Message, Action
+from ..common.utils import build_reply_action
+from ..common.config import settings
+from ..common.timing import timed
+from ..common.security import conversation_key
 from ..services.nlu_service import NLUService
 from ..services.kb_service import KBService
 from ..services.template_service import TemplateService
-from ..adapters.perfectgym_client import PerfectGymClient
+from ..services.crm_service import CRMService
+from .clients_factory import ClientsFactory
+from .tenant_config_service import default_tenant_config_service
+from ..services.ticketing_service import TicketingService
+from ..services.metrics_service import MetricsService
+from ..services.crm_flow_service import CRMFlowService
+from ..services.language_service import LanguageService
+from ..services.opt_out_service import OptOutService
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..repos.messages_repo import MessagesRepo
-from ..common.utils import new_id
-from ..services.metrics_service import MetricsService        
-from ..adapters.jira_client import JiraClient
 from ..repos.members_index_repo import MembersIndexRepo
-from ..common.config import settings
 
-STATE_AWAITING_CONFIRMATION = "awaiting_confirmation"
-STATE_AWAITING_VERIFICATION = "awaiting_verification"
-STATE_AWAITING_CHALLENGE = "awaiting_challenge"
+from ..common.constants import (
+    STATE_AWAITING_CONFIRMATION,
+    STATE_AWAITING_CHALLENGE,
+    STATE_AWAITING_CLASS_SELECTION,
+    SESSION_TIMEOUT_SECONDS,
+    STATE_AWAITING_MESSAGE,
+)
+
+logger = logging.getLogger(__name__)
+
+COMPREHEND_REGION = os.getenv("COMPREHEND_REGION") or os.getenv("AWS_REGION") or "eu-central-1"
+
+comprehend = boto3.client(
+    "comprehend",
+    region_name=COMPREHEND_REGION,
+    config=Config(retries={"max_attempts": 2, "mode": "standard"}),
+)
 
 class RoutingService:
     """
-    Serwis łączący NLU, KB i integracje zewnętrzne tak, by obsłużyć pełen flow rozmowy.
+    Serwis łączący NLU, KB i integracje zewnętrzne tak,
+    by obsłużyć pełen flow rozmowy.
     """
+
     def __init__(
         self,
         nlu: NLUService | None = None,
         kb: KBService | None = None,
         tpl: TemplateService | None = None,
-        pg: PerfectGymClient | None = None,
+        metrics: MetricsService | None = None,
         conv: ConversationsRepo | None = None,
         tenants: TenantsRepo | None = None,
         messages: MessagesRepo | None = None,
-        metrics: MetricsService | None = None,
-        jira: JiraClient | None = None,
         members_index: MembersIndexRepo | None = None,
+        _clients_factory: ClientsFactory | None = None,
+        crm: CRMService | None = None,
+        ticketing: TicketingService | None = None,
+        crm_flow: CRMFlowService | None = None, 
+        language: LanguageService | None = None,
     ) -> None:
         self.nlu = nlu or NLUService()
         self.kb = kb or KBService()
         self.tpl = tpl or TemplateService()
-        self.pg = pg or PerfectGymClient()
+        self.metrics = metrics or MetricsService()
         self.conv = conv or ConversationsRepo()
+        self.optout = OptOutService(self.conv)
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
-        self.metrics = metrics or MetricsService()
-        self.jira = jira or JiraClient()
         self.members_index = members_index or MembersIndexRepo()
+        self._clients_factory = ClientsFactory()
+        self.crm = crm or CRMService(clients_factory=self._clients_factory)
+        self.ticketing = ticketing or TicketingService(clients_factory=self._clients_factory)
+        self.crm_flow = crm_flow or CRMFlowService(
+            crm=self.crm,
+            tpl=self.tpl,
+            conv=self.conv,
+            members_index=self.members_index,
+        )
+        self.language = language or LanguageService(conv=self.conv)
+        # cache na słowa typu TAK / NIE z templatek
         self._words_cache: dict[tuple[str, str, str], set[str]] = {}
 
-    def _generate_verification_code(self, length: int = 6) -> str:
-        """Generuje prosty kod weryfikacyjny używany w flow WWW -> WhatsApp."""
-        import secrets
-        import string
+    # -------------------------------------------------------------------------
+    #  Helpers ogólne
+    # -------------------------------------------------------------------------
 
-        alphabet = string.ascii_uppercase + string.digits
-        return "".join(secrets.choice(alphabet) for _ in range(length))
+    def _reply(self, msg, lang, body, channel=None, channel_user_id=None):
+        return build_reply_action(msg, lang, body, channel, channel_user_id)
+   
+    # -------------------------------------------------------------------------
+    #  NLU + zapis intentu/stanu
+    # -------------------------------------------------------------------------
 
-    def _whatsapp_wa_me_link(self, code: str) -> str:
-        """Buduje link wa.me z predefiniowaną treścią zawierającą kod weryfikacyjny."""
-        raw = settings.twilio_whatsapp_number  # np. "whatsapp:+48000000000"
-        phone = raw.replace("whatsapp:", "") if raw else ""
-        return f"https://wa.me/{phone}?text=KOD:{code}"
-
-    def _pending_key(self, phone: str) -> str:
-        """
-        Buduje klucz pod którym trzymamy w DDB oczekującą rezerwację dla danego numeru telefonu.
-        """
-        return f"pending#{phone}"
-
-    def _get_words_set(self, 
-        tenant_id: str, 
-        template_name: str, 
-        lang: str | None = None,
-    ) -> set[str]:
-        """
-        Wczytuje listę słów (np. TAK / NIE) z Templates (per tenant + język)
-        i zwraca jako zbiór lowercase stringów.
-
-        Szablon może zawierać:
-        - słowa rozdzielone przecinkiem,
-        - średniki,
-        - nowe linie, itp.
-        Np. "tak, tak., potwierdzam, ok"
-        """
-        key = (tenant_id, template_name, lang or "")
-        if key in self._words_cache:
-            return self._words_cache[key]
-
-        raw = self.tpl.render_named(tenant_id, template_name, lang, {})
-        
-        if not raw:
-            words: set[str] = set()
-            self._words_cache[key] = words
-            return words
-
-        import re
-
-        parts = re.split(r"[\s,;]+", raw)
-        words = {p.strip().lower() for p in parts if p.strip()}
-        self._words_cache[key] = words
-        return words
-
-    def _resolve_and_persist_language(self, msg: Message) -> str:
-        channel = msg.channel or "whatsapp"
-        channel_user_id = msg.channel_user_id or msg.from_phone
-
-        # 0. Jeśli Message już ma język (np. z frontu WWW) – używamy tego
-        if getattr(msg, "language_code", None):
-            lang = msg.language_code
-            self.conv.upsert_conversation(
-                msg.tenant_id,
-                channel,
-                channel_user_id,
-                language_code=lang,
-                last_intent=None,
-                state_machine_status=None,
-            )
-            return lang
-
-        # 1. Istniejąca rozmowa
-        existing = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id)
-        if existing and existing.get("language_code"):
-            return existing["language_code"]
-
-        # 2. Tenant
-        tenant = self.tenants.get(msg.tenant_id) or {}
-        lang = tenant.get("language_code") or settings.get_default_language()
-
-        # 3. Zapis/aktualizacja rozmowy
-        self.conv.upsert_conversation(
-            msg.tenant_id,
-            channel,
-            channel_user_id,
-            language_code=lang,
-            last_intent=None,
-            state_machine_status=None,
-        )
-        return lang
-
-    def change_conversation_language(self, tenant_id: str, phone: str, new_lang: str) -> dict:
-        """Metoda użyteczna na przyszłość (panel konsultanta)."""
-        return self.conv.set_language(tenant_id, phone, new_lang)
- 
-    # --- Helper: wspólna weryfikacja PG (WhatsApp + WWW) ---
-    def _ensure_pg_verification(
-        self, msg: Message, conv: dict, lang: str
-    ) -> Optional[List[Action]]:
-        """
-        Sprawdza, czy użytkownik ma ważną strong-verification dla PerfectGym.
-        Jeśli nie:
-         - na WWW: flow z kodem i linkiem wa.me (awaiting_verification),
-         - na WhatsApp: flow challenge PG (awaiting_challenge).
-
-        Zwraca:
-         - None, jeśli wszystko OK i można kontynuować operację PG,
-         - listę akcji (reply/handover), jeśli flow weryfikacji został zainicjowany/obsłużony.
-        """
-        now_ts = int(time.time())
-        pg_level = conv.get("pg_verification_level") or "none"
-        pg_until = conv.get("pg_verified_until") or 0
-
-        channel = msg.channel or "whatsapp"
-        channel_user_id = msg.channel_user_id or msg.from_phone
-
-        # 1) strong + nieprzeterminowane → OK
-        if pg_level == "strong" and pg_until >= now_ts:
-            return None
-
-        # 2) Kanał WWW → flow: kod + WhatsApp
-        if channel == "web":
-            verification_code = self._generate_verification_code()
-            wa_link = self._whatsapp_wa_me_link(verification_code)
-
-            self.conv.upsert_conversation(
-                tenant_id=msg.tenant_id,
-                channel=channel,
-                channel_user_id=channel_user_id,
-                verification_code=verification_code,
-                pg_member_id=None,
-                pg_verification_level="none",
-                pg_verified_until=None,
-                state_machine_status=STATE_AWAITING_VERIFICATION,
-            )
-
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "pg_web_verification_required",
-                lang,
-                {
-                    "verification_code": verification_code,
-                    "whatsapp_link": wa_link,
-                },
-            )
-
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": channel_user_id,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": "web",
-                        "channel_user_id": channel_user_id,
-                    },
-                )
-            ]
-
-        # 3) Kanał WhatsApp → flow challenge PG (np. DOB/email)
-        self.conv.upsert_conversation(
-            tenant_id=msg.tenant_id,
-            channel=channel,
-            channel_user_id=channel_user_id,
-            state_machine_status=STATE_AWAITING_CHALLENGE,
-            pg_challenge_type="dob",  # na razie domyślnie DOB
-            pg_challenge_attempts=0,
-        )
-
-        body = self.tpl.render_named(
-            msg.tenant_id,
-            "pg_challenge_ask_dob",
-            lang,
-            {},
-        )
-
-        return [
-            Action(
-                "reply",
-                {
-                    "to": msg.from_phone,
-                    "body": body,
-                    "tenant_id": msg.tenant_id,
-                    "channel": "whatsapp",
-                    "channel_user_id": msg.channel_user_id,
-                },
-            )
-        ]
-        
-
-    def _handle_pg_challenge(self, msg: Message, conv: dict, lang: str) -> List[Action]:
-        """
-        Użytkownik jest w stanie awaiting_challenge – traktujemy wiadomość
-        jako odpowiedź na challenge PG (np. data urodzenia / e-mail).
-        """
-        text = (msg.body or "").strip()
-        tenant_id = msg.tenant_id
-        channel = msg.channel or "whatsapp"
-        channel_user_id = msg.channel_user_id or msg.from_phone
-
-        challenge_type = conv.get("pg_challenge_type") or "dob"
-        attempts = int(conv.get("pg_challenge_attempts") or 0)
-
-        # TODO: Prawdziwa implementacja powinna sprawdzić odpowiedź w PerfectGym/MembersIndex.
-        # Tu: uproszczone MVP – wszystko, co niepuste, traktujemy jako poprawne.
-        is_correct = bool(text)
-
-        if is_correct:
-            now_ts = int(time.time())
-            ttl = now_ts + 15 * 60  # 15 minut ważności weryfikacji
-
-            member = self.members_index.get_member(tenant_id, msg.from_phone)
-            member_id = member["id"] if member else None
-
-            self.conv.upsert_conversation(
-                tenant_id=tenant_id,
-                channel=channel,
-                channel_user_id=channel_user_id,
-                state_machine_status=None,
-                pg_member_id=member_id,
-                pg_verification_level="strong",
-                pg_verified_until=ttl,
-                pg_challenge_type=None,
-                pg_challenge_attempts=None,
-            )
-
-            body = self.tpl.render_named(
-                tenant_id,
-                "pg_challenge_success",
-                lang,
-                {},
-            )
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
-                )
-            ]
-
-        # Zła odpowiedź – zwiększamy licznik prób
-        attempts += 1
-        self.conv.upsert_conversation(
-            tenant_id=tenant_id,
-            channel=channel,
-            channel_user_id=channel_user_id,
-            pg_challenge_attempts=attempts,
-        )
-
-        if attempts >= 3:
-            # Po 3 próbach – blokujemy i przekazujemy do człowieka
-            self.conv.upsert_conversation(
-                tenant_id=tenant_id,
-                channel=channel,
-                channel_user_id=channel_user_id,
-                state_machine_status=None,
-            )
-
-            body = self.tpl.render_named(
-                tenant_id,
-                "pg_challenge_fail_handover",
-                lang,
-                {},
-            )
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
-                ),
-                Action(
-                    "handover",
-                    {
-                        "tenant_id": tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
-                ),
-            ]
-
-        # Mniej niż 3 próby – poproś o kolejną próbę
-        body = self.tpl.render_named(
-            tenant_id,
-            "pg_challenge_retry",
-            lang,
-            {"attempts_left": 3 - attempts},
-        )
-        return [
-            Action(
-                "reply",
-                {
-                    "to": msg.from_phone,
-                    "body": body,
-                    "tenant_id": tenant_id,
-                    "channel": msg.channel,
-                    "channel_user_id": msg.channel_user_id,
-                },
-            )
-        ]
-        
-    def handle(self, msg: Message) -> List[Action]:
-        """
-        Przetwarza pojedynczą wiadomość biznesową i zwraca listę akcji do wykonania.
-
-        Zwraca zwykle jedną akcję typu "reply", ale architektura pozwala na wiele akcji w przyszłości.
-        """
-        text_raw = (msg.body or "").strip()
-        text_lower = text_raw.lower()
-
-        # 1) Język
-        lang = self._resolve_and_persist_language(msg)
-
-        # 2) Wczytaj rozmowę + stan maszyny
-        channel = msg.channel or "whatsapp"
-        channel_user_id = msg.channel_user_id or msg.from_phone
-        conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
-        state = conv.get("state_machine_status")
-     
-        # --- 0. Obsługa stanu awaiting_challenge (challenge PG na WhatsApp) ---
-        if state == STATE_AWAITING_CHALLENGE and channel == "whatsapp":
-            return self._handle_pg_challenge(msg, conv, lang)
-
-        
-        # --- 1. Obsługa oczekującej rezerwacji (TAK/NIE) ---
-        pending = self.conv.get(self._pending_key(msg.from_phone))
-        if pending:
-            confirm_words = self._get_words_set(
-                msg.tenant_id,
-                "reserve_class_confirm_words",
-                lang,
-            )
-            decline_words = self._get_words_set(
-                msg.tenant_id,
-                "reserve_class_decline_words",
-                lang,
-            )
-            if text_lower in confirm_words:
-                class_id = pending.get("class_id")
-                member_id = pending.get("member_id")
-                idem = pending.get("idempotency_key")
-
-                res = self.pg.reserve_class(
-                    member_id=member_id,
-                    class_id=class_id,
-                    idempotency_key=idem,
-                )
-                self.conv.delete(self._pending_key(msg.from_phone))
-
-                if (res or {}).get("ok", True):
-                    body = self.tpl.render_named(
-                        msg.tenant_id,
-                        "reserve_class_confirmed",
-                        lang,
-                        {},
-                    )
-                    return [
-                        Action(
-                            "reply",
-                            {
-                                "to": msg.from_phone,
-                                "body": body,
-                                "tenant_id": msg.tenant_id,
-                                "channel": msg.channel,
-                                "channel_user_id": msg.channel_user_id,
-                            },
-                        )
-                    ]
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "reserve_class_failed",
-                    lang,
-                    {},
-                )
-                return [
-                    Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )
-                ]
-
-            if text_lower in decline_words:
-                # użytkownik odrzucił rezerwację
-                self.conv.delete(self._pending_key(msg.from_phone))
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "reserve_class_declined",
-                    lang,
-                    {},
-                )
-                return [
-                    Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )
-                ]
-        text = (msg.body or "").strip()
-        text_upper = text.upper()
-
-        # 1) KOD:ABC123 z WhatsApp → mapowanie do konwersacji WWW
-        if msg.channel == "whatsapp" and text_upper.startswith("KOD:"):
-            code = text_upper.replace("KOD:", "").strip()
-
-            # znajdź konwersację WWW z tym kodem
-            web_conv = self.conv.find_by_verification_code(
-                tenant_id=msg.tenant_id,
-                verification_code=code,
-            )
-            if not web_conv:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "www_not_verified",
-                    lang,
-                    {},
-                )
-                return [
-                    Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": "whatsapp",
-                            "channel_user_id": msg.from_phone,
-                        },
-                    )
-                ]
-
-            # wyszukaj członka w MembersIndex po numerze z WhatsApp
-            member = self.members_index.get_member(msg.tenant_id, msg.from_phone)
-            if not member:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "www_user_not_found",
-                    lang,
-                    {},
-                )
-                return [
-                    Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": "whatsapp",
-                            "channel_user_id": msg.from_phone,
-                        },
-                    )
-                ]
-
-            member_id = member["id"]  # dopasuj do faktycznej struktury MembersIndex
-
-            now_ts = int(time.time())
-            ttl = now_ts + 30 * 60  # 30 minut weryfikacji dla WWW
-
-            # update konwersacji WWW – podpinamy użytkownika PG
-            self.conv.upsert_conversation(
-                tenant_id=msg.tenant_id,
-                channel=web_conv["channel"],
-                channel_user_id=web_conv["channel_user_id"],
-                pg_member_id=member_id,
-                pg_verification_level="strong",
-                pg_verified_until=ttl,
-                verification_code=None,  # czyścimy kod
-                state_machine_status=None,
-            )
-
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "www_verified",
-                lang,
-                {},
-            )
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": "whatsapp",
-                        "channel_user_id": msg.from_phone,
-                    },
-                )
-            ]
-
-        # --- 2. Klasyfikacja intencji ---
+    def _classify_intent(self, msg: Message, lang: str):
+        """Opakowanie NLU + fallback na clarify."""
         if msg.intent:
-            # precomputed intent → pomijamy NLU, pewność "na sztywno"
             intent = msg.intent
             slots = msg.slots or {}
             confidence = 1.0
         else:
             nlu = self.nlu.classify_intent(msg.body, lang)
-            
-            # wynik NLU może być dict albo obiektem z atrybutami
             if isinstance(nlu, dict):
                 intent = nlu.get("intent", "clarify")
                 slots = nlu.get("slots") or {}
@@ -583,85 +128,322 @@ class RoutingService:
                 slots = getattr(nlu, "slots", {}) or {}
                 confidence = float(getattr(nlu, "confidence", 1.0))
 
-        if intent != "clarify" and confidence < 0.3:
+        if intent not in ("clarify") and confidence < 0.3:
             intent = "clarify"
 
-        
-        # --- 3. Zapisz info o rozmowie (intent, stan, język) ---
+        return intent, slots, confidence
+
+    def _update_conversation_state(
+        self,
+        msg: Message,
+        lang: str,
+        intent: str,
+        slots: dict,
+    ) -> None:
+        """Ustawia last_intent + ewentualny stan maszyny."""
+        sm_state = None
+        if intent == "reserve_class":
+            cid = (slots.get("class_id") or "").strip()
+            if cid and cid.isdigit():
+                sm_state = STATE_AWAITING_CONFIRMATION
+            elif cid:
+                sm_state = STATE_AWAITING_CLASS_SELECTION
+        elif intent == "crm_available_classes":
+            sm_state = STATE_AWAITING_CLASS_SELECTION
+
         self.conv.upsert_conversation(
             tenant_id=msg.tenant_id,
             channel=msg.channel or "whatsapp",
             channel_user_id=msg.channel_user_id or msg.from_phone,
             last_intent=intent,
-             state_machine_status=(
-                STATE_AWAITING_CONFIRMATION if intent == "reserve_class" else None
-            ),
+            state_machine_status=sm_state,
             language_code=lang,
         )
+
+    # -------------------------------------------------------------------------
+    #  Główna metoda
+    # -------------------------------------------------------------------------
+
+    def handle(self, msg: Message) -> List[Action]:
+        """
+        Przetwarza pojedynczą wiadomość biznesową i zwraca listę akcji do wykonania.
+        """
+        text_raw = (msg.body or "").strip()
+
+        # 1) Język
+        lang = self.language.resolve_and_persist_language(msg)
+
+        # 2) Rozmowa + stan maszyny
+        channel = msg.channel or "whatsapp"
+        channel_user_id = msg.channel_user_id or msg.from_phone
+        conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
+        # 2a) Opt-out / opt-in commands (full flow)
+        opt_action = self.optout.parse_command(text_raw)
+        if opt_action == "optout":
+            self.optout.set_opt_out(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                opt_out=True,
+                source="text_command",
+            )
+            body = self.tpl.render_named(msg.tenant_id, "system_optout_on", lang, {})
+            if body == "system_optout_on":
+                body = "OK"  # ostatni fallback (język-agnostyczny)
+            return [self._reply(msg, lang, body)]
+        if opt_action == "optin":
+            self.optout.set_opt_out(
+                tenant_id=msg.tenant_id,
+                channel=channel,
+                channel_user_id=channel_user_id,
+                opt_out=False,
+                source="text_command",
+            )
+            body = self.tpl.render_named(msg.tenant_id, "system_optout_off", lang, {})
+            if body == "system_optout_off":
+                body = "OK"
+            return [self._reply(msg, lang, body)]
         
-        # --- 4. FAQ ---
+        state = conv.get("state_machine_status")
+
+        now_ts = int(time.time())
+        last_ts = int(conv.get("updated_at") or 0)
+        gap = now_ts - last_ts if last_ts else 0
+        is_new_session = last_ts == 0 or gap > SESSION_TIMEOUT_SECONDS
+
+        # 3) Stany specjalne – bez NLU
+
+        # 3a) Challenge PG na WhatsApp
+        if state == STATE_AWAITING_CHALLENGE and channel == "whatsapp":
+            return self.crm_flow.handle_crm_challenge(msg, conv, lang)
+
+        # 3b) Użytkownik wybiera zajęcia z listy
+        if state == STATE_AWAITING_CLASS_SELECTION:
+            selection_response = self.crm_flow.handle_class_selection(msg, lang)
+            if selection_response is not None:
+                return selection_response
+
+        # 3c) Pending rezerwacja – TAK/NIE
+        pending_response = self.crm_flow.handle_pending_reservation_confirmation(msg, lang)
+        if pending_response is not None:
+            return pending_response
+
+        # 3d) KOD:... z WhatsApp (powiązanie z WWW)
+        code_response = self.crm_flow.handle_whatsapp_verification_code_linking(msg, lang)
+        if code_response is not None:
+            return code_response
+
+        # 4) NLU – klasyfikacja intencji
+        intent, slots, _ = self._classify_intent(msg, lang)
+        
+        # 4x) Fast-path intents (bez LLM/CRM/KB) – tylko szablony.
+        #      Zero hardkodowania: treść kontroluje TemplatesRepo.
+        if intent == "ack":
+            tpl_name = "system_ack"
+            body = self.tpl.render_named(msg.tenant_id, tpl_name, lang, {})
+            if body == tpl_name:
+                body = "OK"  # absolutny fallback
+            self._update_conversation_state(msg, lang, intent, slots)
+            return [self._reply(msg, lang, body)]
+
+        # 4a) Kontekstowa poprawka: follow-up po FAQ
+        # Jeśli poprzednia intencja była "faq", sesja jest ciągle ta sama,
+        # a NLU zwróciło "clarify" (bo pytanie jest krótkie, typu "A w sobotę?"),
+        # to traktujemy to jako FAQ z kontekstem.
+        last_intent = conv.get("last_intent")
+        if (
+            not is_new_session
+            and last_intent == "faq"
+            and intent == "clarify"
+        ):
+            intent = "faq"
+            # Slots zwykle i tak nie są potrzebne dla AI-FAQ,
+            # więc nie musimy ich tu ruszać.
+            
+        # 5) Zapis intentu / stanu
+        self._update_conversation_state(msg, lang, intent, slots)
+
+        # 6) Routing po intencji
+        # 6.1.a FAQ
         if intent == "faq":
-            topic = slots.get("topic", "hours")
-            body = (
-                self.kb.answer(topic, tenant_id=msg.tenant_id, language_code=lang)
-                or 
-                self.tpl.render_named(
+            slots = slots or {}
+            faq_key = (slots.get("faq_key") or "").strip()
+            
+            with timed("list_faq_keys", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
+                if faq_key:
+                    # lista kluczy z realnej bazy FAQ (S3/default), bez hardcode
+                    if faq_key not in self.kb.list_faq_keys(msg.tenant_id, lang):
+                        faq_key = ""
+            if faq_key:
+                with timed("answer_by_key", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
+            
+                    direct = self.kb.answer_by_key(
+                        tenant_id=msg.tenant_id,
+                        language_code=lang,
+                        faq_key=faq_key,
+                    )
+                    if direct:
+                        return [self._reply(msg, lang, direct)]
+
+                body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})
+                return [self._reply(msg, lang, body)]
+            
+            conv_key = conversation_key(
+                msg.tenant_id,
+                msg.channel or "whatsapp",
+                msg.channel_user_id or msg.from_phone,
+                msg.conversation_id,
+            )
+            chat_history: list[dict] = []
+
+            # historia potrzebna nam tylko jako fallback do answer_ai
+            if not is_new_session and self.messages:
+                try:
+                    history_items = self.messages.get_last_messages(
+                        tenant_id=msg.tenant_id,
+                        conv_key=conv_key,
+                        limit=10,
+                    ) or []
+                except Exception as e:
+                    logger.error({
+                        "sender": "routing",
+                        "error": "get_last_messages_failed",
+                        "err": str(e),
+                    })
+                    history_items = []
+                else:
+                    for item in reversed(history_items):
+                        direction = item.get("direction")
+                        body_item = item.get("body") or ""
+                        if not body_item:
+                            continue
+                        if direction == "inbound":
+                            chat_history.append(
+                                {"role": "user", "content": body_item}
+                            )
+                        elif direction == "outbound":
+                            chat_history.append(
+                                {"role": "assistant", "content": body_item}
+                            )
+                    chat_history = chat_history[-6:]
+
+            # 3) Fallback – jeśli NLU nie podało topic albo FAQ nie ma wpisu,
+            #    używamy dotychczasowego AI-FAQ (answer_ai) z historią
+            ai_body = self.kb.answer_ai(
+                question=msg.body,
+                tenant_id=msg.tenant_id,
+                language_code=lang,
+                history=chat_history,
+            )
+
+            if ai_body:
+                body = ai_body
+            else:
+                # Deterministic fallback (no extra LLM calls).
+                body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})         
+            return [self._reply(msg, lang, body)]
+
+        # 6.2 Rezerwacja zajęć
+        if intent == "reserve_class":
+            class_id = (slots.get("class_id") or "").strip()
+
+            # brak class_id → najpierw lista zajęć
+            if not class_id:
+                # tu ustawiamy stan ręcznie
+                if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
+                    self.conv.upsert_conversation(
+                        tenant_id=msg.tenant_id,
+                        channel=msg.channel or "whatsapp",
+                        channel_user_id=msg.channel_user_id or msg.from_phone,
+                        last_intent="crm_available_classes",
+                        state_machine_status=STATE_AWAITING_MESSAGE,
+                        language_code=lang,
+                    )
+                    return self.crm_flow.build_available_classes_response(
+                        msg,
+                        lang,
+                        auto_confirm_single=False,
+                        allow_selection=False,
+                    )
+
+                self.conv.upsert_conversation(
+                    tenant_id=msg.tenant_id,
+                    channel=msg.channel or "whatsapp",
+                    channel_user_id=msg.channel_user_id or msg.from_phone,
+                    last_intent=intent,
+                    state_machine_status=STATE_AWAITING_CLASS_SELECTION,
+                    language_code=lang,
+                )
+                return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=True)
+
+            # class_id to nie ID tylko nazwa typu zajęć (np. 'pilates') → lista z filtrem
+            if class_id and not class_id.isdigit():
+                if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
+                    self.conv.upsert_conversation(
+                        tenant_id=msg.tenant_id,
+                        channel=msg.channel or "whatsapp",
+                        channel_user_id=msg.channel_user_id or msg.from_phone,
+                        last_intent="crm_available_classes",
+                        state_machine_status=STATE_AWAITING_MESSAGE,
+                        language_code=lang,
+                    )
+                    return self.crm_flow.build_available_classes_response(
+                        msg,
+                        lang,
+                        auto_confirm_single=False,
+                        class_type_query=class_id,
+                        allow_selection=False,
+                    )
+                self.conv.upsert_conversation(
+                    tenant_id=msg.tenant_id,
+                    channel=msg.channel or "whatsapp",
+                    channel_user_id=msg.channel_user_id or msg.from_phone,
+                    last_intent=intent,
+                    state_machine_status=STATE_AWAITING_CLASS_SELECTION,
+                    language_code=lang,
+                )
+                return self.crm_flow.build_available_classes_response(
+                    msg,
+                    lang,
+                    auto_confirm_single=True,
+                    class_type_query=class_id,
+                )
+
+            # mamy class_id → standardowy flow z weryfikacją PG i pending
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
+                lang,
+                post_intent="reserve_class",
+                post_slots={"class_id": class_id},
+            )
+            if verify_resp:
+                return verify_resp
+
+            member_id = conv.get("crm_member_id")
+            if not member_id:
+                body = self.tpl.render_named(
                     msg.tenant_id,
-                    "faq_no_info",
+                    "crm_member_not_linked",
                     lang,
                     {},
                 )
-            )
-            return [Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )]
+                return [self._reply(msg, lang, body)]
 
-        # --- 5. Rezerwacja zajęć ---
-        if intent == "reserve_class":
-            class_id = slots.get("class_id", "101")
-            member_id = slots.get("member_id", "105")
-            idem = new_id("idem-")
-            self.conv.put(
-                {
-                    "pk": self._pending_key(msg.from_phone),
-                    "class_id": class_id,
-                    "member_id": member_id,
-                    "idempotency_key": idem,
-                }
-            )
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "reserve_class_confirm",
+            return self.crm_flow.reserve_class_with_id_core(
+                msg,
                 lang,
-                {"class_id": class_id},
+                class_id=class_id,
+                member_id=member_id,
             )
-            
-            return [Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )]
 
-
-        # --- 6. Handover do człowieka ---
+        # 6.3 Handover do człowieka
         if intent == "handover":
             self.conv.assign_agent(
                 tenant_id=msg.tenant_id,
                 channel=msg.channel or "whatsapp",
                 channel_user_id=msg.channel_user_id or msg.from_phone,
-                agent_id=slots.get("agent_id", "UNKNOWN"),   # np. przekazane w slots
+                agent_id=slots.get("agent_id", "UNKNOWN"),
             )
             body = self.tpl.render_named(
                 msg.tenant_id,
@@ -669,26 +451,19 @@ class RoutingService:
                 lang,
                 {},
             )
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                        "language_code": lang,
-                    },
-                )
-            ]
-             
-        # --- 7. Ticket do systemu ticketowego (Jira) ---
+            return [self._reply(msg, lang, body)]
+
+        # 6.4 Ticket do systemu ticketowego
         if intent == "ticket":
-            conv_key = msg.conversation_id or (msg.channel_user_id or msg.from_phone)
+            conv_key = conversation_key(
+                msg.tenant_id,
+                msg.channel or "whatsapp",
+                msg.channel_user_id or msg.from_phone,
+                msg.conversation_id,
+            )
 
             history_items: list[dict] = []
-            if hasattr(self, "messages") and self.messages:
+            if self.messages:
                 try:
                     history_items = self.messages.get_last_messages(
                         tenant_id=msg.tenant_id,
@@ -698,14 +473,15 @@ class RoutingService:
                 except Exception:
                     history_items = []
 
-            # zbuduj prosty tekst z historii
             history_lines = []
-            for item in reversed(history_items):  # od najstarszych do najnowszych
+            for item in reversed(history_items):
                 direction = item.get("direction", "?")
                 body_item = item.get("body", "")
                 history_lines.append(f"{direction}: {body_item}")
 
-            history_block = "\n".join(history_lines) if history_lines else "(brak historii)"
+            history_block = (
+                "\n".join(history_lines) if history_lines else "(brak historii)"
+            )
 
             summary = slots.get("summary") or self.tpl.render_named(
                 msg.tenant_id,
@@ -716,7 +492,7 @@ class RoutingService:
 
             description = (
                 slots.get("description")
-                or f"Zgłoszenie z chatu.\n\nOstatnia wiadomość:\n{msg.body}\n\nHistoria:\n{history_block}"
+                or f"Request from chat.\n\Last message:\n{msg.body}\n\History:\n{history_block}"
             )
 
             meta = {
@@ -729,11 +505,10 @@ class RoutingService:
                 "language_code": lang,
             }
 
-            # KLUCZOWE: wywołujemy Jirę
-            res = self.jira.create_ticket(
+            res = self.ticketing.create_ticket(
+                tenant_id=msg.tenant_id,
                 summary=summary,
                 description=description,
-                tenant_id=msg.tenant_id,
                 meta=meta,
             )
 
@@ -756,309 +531,79 @@ class RoutingService:
                     {},
                 )
 
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                        "language_code": lang,
-                    },
-                )
-            ]
+            return [self._reply(msg, lang, body)]
 
-        
-        # --- 8. Lista dostępnych zajęć (PerfectGym) ---
-        if intent == "pg_available_classes":
-            pg = PerfectGymClient()
-            # Na początek weźmy najbliższe 10 zajęć od teraz
-            classes_resp = pg.get_available_classes(top=10)
-            classes = classes_resp.get("value", []) or []
+        # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
+        if intent == "crm_available_classes":
+            return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=False)
 
-            if not classes:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "pg_available_classes_empty",
-                    lang,
-                    {},
-                )
-                return [
-                    Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    ),
-                    Action(
-                        "ticket",
-                        {
-                            "tenant_id": msg.tenant_id,
-                            "conversation_id": conv_key,
-                            "phone": msg.from_phone,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                            "intent": intent,
-                            "slots": slots,
-                            "language_code": lang,
-                        },
-                    ),
-                                ]
-
-            lines: list[str] = []
-            for c in classes:
-                start = str(c.get("startDate") or c.get("startdate") or "")
-                # TODO: weryfikacja! startDate: "2025-11-23T10:00:00+01:00"
-                date_str = start[:10] if len(start) >= 10 else "?"
-                time_str = start[11:16] if len(start) >= 16 else "?"
-                class_type = (c.get("classType") or {}).get("name") or "Class"
-
-                attendees_count = c.get("attendeesCount") or 0
-                attendees_limit = c.get("attendeesLimit")
-
-                if attendees_limit is None:
-                    capacity_info = self.tpl.render_named(
-                        msg.tenant_id,
-                        "pg_available_classes_capacity_no_limit",
-                        lang,
-                        {},
-                    )
-                else:
-                    free = max(attendees_limit - attendees_count, 0)
-                    if free <= 0:
-                        capacity_info = self.tpl.render_named(
-                            msg.tenant_id,
-                            "pg_available_classes_capacity_full",
-                            lang,
-                            {"limit": attendees_limit},
-                        )
-                    else:
-                        capacity_info = self.tpl.render_named(
-                            msg.tenant_id,
-                            "pg_available_classes_capacity_free",
-                            lang,
-                            {
-                                "free": free,
-                                "limit": attendees_limit,
-                            },
-                        )
-
-                line = self.tpl.render_named(
-                    msg.tenant_id,
-                    "pg_available_classes_item",
-                    lang,
-                    {
-                        "date": date_str,
-                        "time": time_str,
-                        "name": class_type,
-                        "capacity": capacity_info,
-                    },
-                )
-                lines.append(line)
-
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "pg_available_classes",
+        # 6.6 Status kontraktu
+        if intent == "crm_contract_status":
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
                 lang,
-                {"classes": "\n".join(lines)},
+                post_intent="crm_contract_status",
+                post_slots=slots,
             )
-
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
-                )
-            ]
-
-
-        # --- 9. Status kontraktu (PerfectGym) ---
-        if intent == "pg_contract_status":
-            verify_resp = self._ensure_pg_verification(msg, conv, lang)
             if verify_resp:
                 return verify_resp
 
-            email = (slots.get("email") or "").strip()
-            if not email:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "pg_contract_ask_email",
-                    lang,
-                    {},
-                )
-                return [
-                     Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )
-                ]
-
-            # Numer telefonu z WhatsAppa (format 'whatsapp:+9665...')
-            phone = msg.from_phone
-            if phone.startswith("whatsapp:"):
-                phone = phone.split(":", 1)[1]
-
-            pg = PerfectGymClient()
-            contracts_resp = pg.get_contracts_by_email_and_phone(
-                email=email,
-                phone_number=phone,
-            )
-            contracts = contracts_resp.get("value", []) or []
-
-            if not contracts:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "pg_contract_not_found",
-                    lang,
-                    {
-                        "email": email,
-                        "phone": phone,
-                    },
-                )
-                return [
-                     Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )
-                ]
-
-            # Preferujemy bieżący kontrakt; jeśli brak – bierzemy pierwszy z listy.
-            current = next(
-                (c for c in contracts if c.get("status") == "Current"),
-                contracts[0],
-            )
-
-            status = current.get("status") or "Unknown"
-            is_active = bool(current.get("isActive"))
-            start_date = (current.get("startDate") or "")[:10]
-            end_date_raw = current.get("endDate")
-            end_date = (end_date_raw or "")[:10] if end_date_raw else ""
-
-            payment_plan = current.get("paymentPlan") or {}
-            plan_name = payment_plan.get("name") or ""
-            membership_fee = payment_plan.get("membershipFee") or {}
-            membership_fee_gross = membership_fee.get("gross")
-
-            context = {
-                "plan_name": plan_name,
-                "status": status,
-                # bool – template w danym języku sam decyduje jak go pokazać
-                "is_active": is_active,
-                "start_date": start_date,
-                "end_date": end_date or "",
-            }
-            if membership_fee_gross is not None:
-                context["membership_fee"] = membership_fee_gross
-
-
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "pg_contract_details",
-                lang,
-                context,
-            )
-
-            return [
-                 Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
-                )
-            ]
-        # --- 10. Saldo członkowskie (PerfectGym) ---
-        if intent == "pg_member_balance":
-            verify_resp = self._ensure_pg_verification(msg, conv, lang)
-            if verify_resp:
-                return verify_resp
-
-            member_id = conv.get("pg_member_id")
+            member_id = conv.get("crm_member_id")
             if not member_id:
                 body = self.tpl.render_named(
                     msg.tenant_id,
-                    "pg_member_not_linked",
+                    "crm_member_not_linked",
                     lang,
                     {},
                 )
-                return [
-                    Action(
-                        "reply",
-                        {
-                            "to": msg.from_phone,
-                            "body": body,
-                            "tenant_id": msg.tenant_id,
-                            "channel": msg.channel,
-                            "channel_user_id": msg.channel_user_id,
-                        },
-                    )
-                ]
+                return [self._reply(msg, lang, body)]
 
-            pg = PerfectGymClient()
-            balance_resp = pg.get_member_balance(member_id=member_id)
-            balance = balance_resp.get("balance", 0)
+            return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
 
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "pg_member_balance",
+        # 6.7 Saldo członkowskie
+        if intent == "crm_member_balance":
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
                 lang,
-                {"balance": balance},
+                post_intent="crm_member_balance",
+                post_slots=slots,
             )
+            if verify_resp:
+                return verify_resp
 
-            return [
-                Action(
-                    "reply",
-                    {
-                        "to": msg.from_phone,
-                        "body": body,
-                        "tenant_id": msg.tenant_id,
-                        "channel": msg.channel,
-                        "channel_user_id": msg.channel_user_id,
-                    },
+            member_id = conv.get("crm_member_id")
+            if not member_id:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "crm_member_not_linked",
+                    lang,
+                    {},
                 )
-            ]
-        # --- 11. Domyślny clarify ---
+                return [self._reply(msg, lang, body)]
+
+            return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
+        
+        #6.8 Prośba o weryfikację
+        if intent == "verification":
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
+                lang,
+                post_intent="crm_contract_status",
+                post_slots=slots,
+            )
+            if verify_resp:
+                return verify_resp
+            return self.crm_flow.verification_active(msg, lang, member_id)
+
+        
+        # 6.9 Domyślny clarify
         body = self.tpl.render_named(
             msg.tenant_id,
             "clarify_generic",
             lang,
             {},
         )
-        return [
-             Action(
-                "reply",
-                {
-                    "to": msg.from_phone,
-                    "body": body,
-                    "tenant_id": msg.tenant_id,
-                    "channel": msg.channel,
-                    "channel_user_id": msg.channel_user_id,
-                },
-            )
-        ]
+        return [self._reply(msg, lang, body)]

@@ -3,12 +3,17 @@ from ..repos.templates_repo import TemplatesRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..common.config import settings
 from ..common.logging import logger
+import time
 
 
 class TemplateService:
     def __init__(self, repo: TemplatesRepo | None = None) -> None:
         self.repo = repo or TemplatesRepo()
         self.tenants = TenantsRepo()
+        # Prosty cache w pamięci procesu Lambdy.
+        # Znacząco redukuje liczbę zapytań do DDB na ścieżce krytycznej latency.
+        self._cache: dict[tuple[str, str, str], tuple[dict, float]] = {}
+        self._cache_ttl_s = int(getattr(settings, "template_cache_ttl_s", 300) or 300)
 
     def render(self, template: str, context: dict):
         """
@@ -24,7 +29,19 @@ class TemplateService:
     def _try_get_template(self, tenant_id: str, name: str, language_code: str | None):
         if not language_code:
             return None
-        return self.repo.get_template(tenant_id, name, language_code)
+        key = (tenant_id, name, language_code)
+        now = time.time()
+        cached = self._cache.get(key)
+        if cached:
+            item, ts = cached
+            if now - ts <= self._cache_ttl_s:
+                return item
+            self._cache.pop(key, None)
+
+        item = self.repo.get_template(tenant_id, name, language_code)
+        if item:
+            self._cache[key] = (item, now)
+        return item
 
     def render_named(
         self,
@@ -78,5 +95,15 @@ class TemplateService:
             # ŻADNYCH domyślnych tekstów – zwracamy nazwę szablonu
             return name
 
-        template_str = tpl.get("body") or ""
+        body = tpl.get("body")
+
+        if isinstance(body, list):
+            seed = f"{tenant_id}:{name}:{lang}"
+            template_str = self._pick_variant(
+                [str(x) for x in body if x],
+                seed,
+            )
+        else:
+            template_str = str(body or "")
+
         return render_template(template_str, context or {})

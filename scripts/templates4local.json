@@ -1,281 +1,454 @@
 {
-  "Templates-gi-dev": [
+  "Templates-botman-dev": [
     {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "handover_to_staff" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Łączę Cię z pracownikiem klubu (wkrótce stałe przełączenie)." },
+          "placeholders": { "L": [] }
         }
       }
     },
     {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "ticket_summary" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Zgłoszenie klienta" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Zgłoszenie klienta" },
+          "placeholders": { "L": [] }
         }
       }
     },
     {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "ticket_created_ok" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Utworzyłem zgłoszenie. Numer: %{ticket}." },
-          "placeholders":  { "L": [ { "S": "ticket" } ] }
+          "body": { "S": "Utworzyłem zgłoszenie. Numer: %{ticket}." },
+          "placeholders": { "L": [ { "S": "ticket" } ] }
         }
       }
     },
     {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "ticket_created_failed" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Nie udało się utworzyć zgłoszenia. Spróbuj później." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Nie udało się utworzyć zgłoszenia. Spróbuj później." },
+          "placeholders": { "L": [] }
         }
       }
     },
     {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "clarify_generic" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Czy możesz doprecyzować, w czym pomóc?" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Czy możesz doprecyzować, w czym pomóc?" },
+          "placeholders": { "L": [] }
         }
       }
     },
-	{
+
+    // ========== PERFECTGYM – LISTA ZAJĘĆ ==========
+
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_available_classes" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Najbliższe zajęcia:\n{classes}" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Dostępne zajęcia:\n{classes}\n" },
+          "placeholders": { "L": [ { "S": "classes" } ] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_available_classes_empty" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_empty" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Aktualnie nie widzę dostępnych zajęć w grafiku." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Aktualnie nie widzę dostępnych zajęć w grafiku." },
+          "placeholders": { "L": [] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_no_limit" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_capacity_no_limit" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "bez limitu miejsc" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "bez limitu miejsc" },
+          "placeholders": { "L": [] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_full" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_capacity_full" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "brak wolnych miejsc (limit {limit})" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "brak wolnych miejsc (limit {limit})" },
+          "placeholders": { "L": [ { "S": "limit" } ] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_available_classes_capacity_free" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_capacity_free" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "{free} wolnych miejsc (limit {limit})" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "{free} wolnych miejsc (limit {limit})" },
+          "placeholders": { "L": [ { "S": "free" }, { "S": "limit" } ] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_available_classes_item" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_item" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "{date} {time} – {name} ({capacity})" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "{index}) {date} {time} – {name} {capacity}" },
+          "placeholders": {
+            "L": [
+              { "S": "index" },
+              { "S": "date" },
+              { "S": "time" },
+              { "S": "name" },
+              { "S": "capacity" }
+            ]
+          }
         }
       }
     },
-	{
+
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_contract_ask_email" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_invalid_index" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Podaj proszę adres e-mail użyty w klubie, żebym mógł sprawdzić status Twojej umowy." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Nie rozumiem wyboru. Podaj numer zajęć od 1 do {max_index}." },
+          "placeholders": { "L": [ { "S": "max_index" } ] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_contract_not_found" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_no_today" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Nie widzę żadnej umowy powiązanej z adresem {email} i numerem {phone}. Upewnij się proszę, że dane są zgodne z PerfectGym." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Dzisiaj nie mamy żadnych dostępnych zajęć." },
+          "placeholders": { "L": [] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_contract_details" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_today" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Szczegóły Twojej umowy:\nPlan: {plan_name}\nStatus:\n{status}\nAktywna: {is_active, select, true{tak} false{nie}}\nStart: {start_date}\nKoniec: {end_date}\nOpłata członkowska: {membership_fee}" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Dzisiaj mamy takie zajęcia:\n{classes}\n" },
+          "placeholders": { "L": [ { "S": "classes" } ] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_no_classes_on_date" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "W dniu {date} nie mamy żadnych dostępnych zajęć." },
+          "placeholders": { "L": [ { "S": "date" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_select_by_number" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Tego dnia są różne zajęcia. Napisz numer zajęć, które chcesz zarezerwować." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== PERFECTGYM – KONTRAKT / WERYFIKACJA ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_contract_ask_email" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Podaj proszę adres e-mail użyty w klubie, żebym mógł sprawdzić status Twojej umowy." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_contract_not_found" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Nie widzę żadnej umowy powiązanej z adresem {email} i numerem {phone}. Upewnij się proszę, że dane są zgodne z PerfectGym." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_ask_dob" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "W celu weryfikacji podaj swoją datę urodzenia." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_success" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Zweryfikowaliśmy Twoje konto." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_contract_details" },
+          "language_code": { "S": "pl" },
+          "body": {
+            "S": "Szczegóły Twojej umowy:\nPlan: {plan_name}\nStatus:\n{status}\nAktywna: {is_active, select, true{tak} false{nie}}\nStart: {start_date}\nKoniec: {end_date}\nOpłata członkowska: {membership_fee}"
+          },
+          "placeholders": {
+            "L": [
+              { "S": "plan_name" },
+              { "S": "status" },
+              { "S": "is_active" },
+              { "S": "start_date" },
+              { "S": "end_date" },
+              { "S": "membership_fee" }
+            ]
+          }
+        }
+      }
+    },
+
+    // ========== REZERWACJE ZAJĘĆ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "reserve_class_confirmed" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Zarezerwowano zajęcia (ID {class_id}). Do zobaczenia!" },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Zarezerwowano {class_name} w dniu {class_date} o {class_time}. Do zobaczenia!" },
+          "placeholders": { "L": [ 
+								{ "S": "class_name" },
+								{ "S": "class_date" },
+								{ "S": "class_time" } 
+				] 
+			}
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "reserve_class_failed" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Nie udało się zarezerwować. Spróbuj ponownie później." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Nie udało się zarezerwować. Spróbuj ponownie później." },
+          "placeholders": { "L": [] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "reserve_class_declined" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Anulowano rezerwację. Daj znać, jeżeli będziesz chciał/chciała zarezerwować inne zajęcia." },
-          "placeholders":  { "L": [] }
+          "body": { "S": "Anulowano rezerwację. Daj znać, jeżeli będziesz chciał/chciała zarezerwować inne zajęcia." },
+          "placeholders": { "L": [] }
         }
       }
     },
-	{
+    {
       "PutRequest": {
         "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "www_not_verified" },
-          "language_code": { "S": "pl" },
-          "body":          { "S": "Nie znaleziono aktywnej weryfikacji dla tego kodu." },
-          "placeholders":  { "L": [] }
-        }
-      }
-    },
-	{
-      "PutRequest": {
-        "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "www_user_not_found" },
-          "language_code": { "S": "pl" },
-          "body":          { "S": "Nie znaleziono członkostwa powiązanego z tym numerem." },
-          "placeholders":  { "L": [] }
-        }
-      }
-    },
-	{
-      "PutRequest": {
-        "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "www_verified" },
-          "language_code": { "S": "pl" },
-          "body":          { "S": "Twoje konto zostało zweryfikowane. Możesz wrócić do czatu WWW." },
-          "placeholders":  { "L": [] }
-        }
-      }
-    },
-	{
-      "PutRequest": {
-        "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "pg_web_verification_required" },
-          "language_code": { "S": "pl" },
-          "body":          { "S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\nJeśli korzystasz z czatu WWW, kliknij poniższy link, aby otworzyć WhatsApp i wysłać kod weryfikacyjny.\nJeśli jesteś już w WhatsApp, wystarczy że wyślesz poniższy kod.\n\nKod: {{verification_code}}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć do rozmowy – zweryfikujemy Twoje konto i odblokujemy dostęp do danych PerfectGym."},
-		  "placeholders":  {"L": [
-			  { "S": "verification_code" },
-			  { "S": "whatsapp_link" }]}
-        }
-      }
-    },
-	{
-      "PutRequest": {
-        "Item": {
-          "tenant_id":     { "S": "default" },
-          "template_code": { "S": "faq_no_info" },
-          "language_code": { "S": "pl" },
-          "body":          { "S": "Przepraszam, nie mam informacji." },
-		  "placeholders":  {"L": []}
-        }
-      }
-    },
-	{
-      "PutRequest": {
-        "Item": {
-          "tenant_id":     { "S": "default" },
+          "tenant_id": { "S": "default" },
           "template_code": { "S": "reserve_class_confirm" },
           "language_code": { "S": "pl" },
-          "body":          { "S": "Czy potwierdzasz rezerwację zajęć {class_id}? Odpowiedz: TAK lub NIE." },
-		  "placeholders":  {"L": []}
+          "body": { "S": "Czy potwierdzasz rezerwację zajęć {class_id}? Odpowiedz: TAK lub NIE." },
+          "placeholders": { "L": [ { "S": "class_id" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_missing_id" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Nie udało się zidentyfikować zajęć do rezerwacji. Spróbuj jeszcze raz." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // słowa potwierdzenia / odmowy
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirm_words" },
+          "language_code": { "S": "pl" },
+          "body": {
+            "S": "tak,tak.,potwierdzam,ok,zgadzam się,zgadzam sie,oczywiście,oczywiscie,pewnie,jasne"
+          },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_decline_words" },
+          "language_code": { "S": "pl" },
+          "body": {
+            "S": "nie,nie.,anuluj,rezygnuję,rezygnuje,nie chcę,nie chce"
+          },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== WERYFIKACJA WWW / FAQ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_not_verified" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Nie znaleziono aktywnej weryfikacji dla tego kodu." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_user_not_found" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Nie znaleziono członkostwa powiązanego z tym numerem." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_verified" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Twoje konto zostało zweryfikowane. Możesz wrócić do czatu WWW." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_web_verification_required" },
+          "language_code": { "S": "pl" },
+          "body": {
+            "S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\nJeśli korzystasz z czatu WWW, kliknij poniższy link, aby otworzyć WhatsApp i wysłać kod weryfikacyjny.\nJeśli jesteś już w WhatsApp, wystarczy że wyślesz poniższy kod.\n\nKod: {{verification_code}}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć do rozmowy – zweryfikujemy Twoje konto i odblokujemy dostęp do danych PerfectGym."
+          },
+          "placeholders": {
+            "L": [
+              { "S": "verification_code" },
+              { "S": "whatsapp_link" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "faq_no_info" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Przepraszam, nie mam informacji. Czy mogę jeszcze w czymś pomóc?" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== POWITANIE ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "greeting" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Cześć! Jestem wirtualnym asystentem klubu fitness. Napisz, w czym mogę pomóc." },
+          "placeholders": { "L": [] }
         }
       }
     },
 	{
-	  "PutRequest": {
-		"Item": {
-		  "tenant_id":     { "S": "default" },
-		  "template_code": { "S": "reserve_class_confirm_words" },
-		  "language_code": { "S": "pl" },
-		  "body":          { "S": "tak", "tak.", "potwierdzam", "ok", "zgadzam się", "oczywiście", "pewnie", "jasne" },
-		  "placeholders":  { "L": [] }
-		}
-	  }
-	},
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_retry" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Weryfikacja nie powiodła się. Sprobuj jeszcze raz" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
 	{
-	  "PutRequest": {
-		"Item": {
-		  "tenant_id":     { "S": "default" },
-		  "template_code": { "S": "reserve_class_decline_words" },
-		  "language_code": { "S": "pl" },
-		  "body":          { "S": "nie", "nie.", "anuluj", "rezygnuję", "rezygnuje", "ne" },
-		  "placeholders":  { "L": [] }
-		}
-	  }
-	}
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_fail_handover" },
+          "language_code": { "S": "pl" },
+          "body": { "S": "Niestety weryfikacja nie powiodła się. Spróbuj innym razem." },
+          "placeholders": { "L": [] }
+        }
+      }
+    }
   ]
 }

@@ -28,70 +28,64 @@ class CampaignService:
         # cache na listy słów, gdybyś kiedyś chciał używać templatek do słówek TAK/NIE w kampaniach
         self._words_cache: dict[tuple[str, str, str], set[str]] = {}
 
-    def select_recipients(self, campaign: Dict) -> List[str]:
-        """
-        Zwraca listę numerów telefonu dla kampanii.
+    
+    def select_recipients(self, campaign: Dict) -> List[Any]:
+        """Zwraca listę odbiorców dla kampanii (bez jawnych telefonów w storage).
 
-        Obsługiwane formaty:
-          1) Proste: ["whatsapp:+48...", ...]
-          2) Z tagami:
-             [
-               {"phone": "whatsapp:+48...", "tags": ["vip", "active"]},
-               ...
-             ]
+        Obsługiwane formaty danych w Campaigns (legacy + nowy):
+          1) Legacy: ["whatsapp:+48...", ...]
+          2) Legacy z tagami: [{"phone": "whatsapp:+48...", "tags": [...]}, ...]
+          3) Nowy (bez PII): [{"phone_hmac": "<hmac>", "phone_last4": "6789", "tags": [...]}, ...]
 
-        Filtry:
-          - include_tags: jeżeli niepuste, bierzemy tylko odbiorców posiadających
-            przynajmniej jeden z tagów
-          - exclude_tags: jeżeli odbiorca ma którykolwiek z tych tagów, jest pomijany
+        Ta funkcja **nie** rozwiązuje phone_hmac → raw phone. To robimy dopiero w runtime
+        (np. w campaign_runner) przez MembersIndex.
         """
-        raw_recipients = campaign.get("recipients", []) or []
+        recipients = campaign.get("recipients") or []
         include_tags = set(campaign.get("include_tags") or [])
         exclude_tags = set(campaign.get("exclude_tags") or [])
 
-        result: List[str] = []
+        result: List[Any] = []
 
-        # tryb: brak filtrów -> zachowaj się jak dotychczas
-        if not include_tags and not exclude_tags:
-            for r in raw_recipients:
-                if isinstance(r, dict):
-                    phone = r.get("phone")
-                else:
-                    phone = r
-                if phone:
-                    result.append(phone)
-            logger.info(
-                {
-                    "campaign": "recipients",
-                    "mode": "simple",
-                    "count": len(result),
-                }
-            )
-            return result
+        def tags_ok(rec_tags: set[str]) -> bool:
+            if include_tags and rec_tags.isdisjoint(include_tags):
+                return False
+            if exclude_tags and not rec_tags.isdisjoint(exclude_tags):
+                return False
+            return True
 
-        # tryb z filtrami / tagami
-        for r in raw_recipients:
+        for r in recipients:
+            if isinstance(r, str):
+                # legacy: raw phone
+                rec_tags = set()
+                if not tags_ok(rec_tags):
+                    continue
+                result.append(r)
+                continue
+
             if isinstance(r, dict):
+                rec_tags = set(r.get("tags") or [])
+                if not tags_ok(rec_tags):
+                    continue
+
+                if r.get("phone_hmac"):
+                    # new format (hashed)
+                    result.append(
+                        {
+                            "phone_hmac": r.get("phone_hmac"),
+                            "phone_last4": r.get("phone_last4"),
+                            "tags": list(rec_tags) if rec_tags else [],
+                        }
+                    )
+                    continue
+
                 phone = r.get("phone")
-                tags = set(r.get("tags") or [])
-            else:
-                # brak struktury -> nie umiemy ocenić tagów,
-                # więc traktujemy tags = empty set
-                phone = r
-                tags = set()
+                if phone:
+                    # legacy dict
+                    result.append(phone)
+                    continue
 
-            if not phone:
-                continue
-
-            # include_tags: musi być przecięcie
-            if include_tags and not (tags & include_tags):
-                continue
-
-            # exclude_tags: jeśli przecięcie niepuste -> skip
-            if exclude_tags and (tags & exclude_tags):
-                continue
-
-            result.append(phone)
+            # unknown / empty recipient entry -> skip
+            continue
 
         logger.info(
             {

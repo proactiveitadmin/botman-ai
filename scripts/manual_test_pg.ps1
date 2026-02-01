@@ -1,9 +1,9 @@
 Param(
     [string]$ApiUrl = "",
-    [string]$StackName = "gi-dev"
+    [string]$StackName = "botman-dev"
 )
 
-Write-Host "=== Gym Integrator - manual_test_pg.ps1 ==="
+Write-Host "=== Botman AI - manual_test_pg.ps1 ==="
 
 # Jezeli ApiUrl nie jest podany, probujemy pobrac go ze stacka (AWS)
 if ($ApiUrl -eq "") {

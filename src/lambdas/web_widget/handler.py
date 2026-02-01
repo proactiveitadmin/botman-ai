@@ -4,6 +4,7 @@ import time
 from ...common.aws import sqs_client, resolve_queue_url
 from ...common.utils import new_id
 from ...common.logging import logger
+from ...common.security import user_hmac
 
 def lambda_handler(event, context):
     """
@@ -24,28 +25,36 @@ def lambda_handler(event, context):
 
         if not channel_user_id or not text:
             return {"statusCode": 400, "body": "Missing channel_user_id or body"}
-
+        
+        uid = user_hmac(tenant_id, "web", channel_user_id)
+        conv_id = f"conv#web#{uid}"
         msg = {
-            "event_id": new_id("evt-web-"),
+            "event_id": (body.get("event_id") or body.get("client_message_id") or new_id("evt-web-")),
             "from": None,  # brak telefonu
             "to": None,
             "body": text,
             "tenant_id": tenant_id,
             "channel": "web",
             "channel_user_id": channel_user_id,
+            "conversation_id": conv_id,
             "language_code": language_code,
             "ts": int(time.time() * 1000),
             "ip": (event.get("requestContext") or {}).get("identity", {}).get("sourceIp"),
         }
 
         q_url = resolve_queue_url("InboundEventsQueueUrl")
-        sqs_client().send_message(QueueUrl=q_url, MessageBody=json.dumps(msg))
-
+        sqs_client().send_message(
+            QueueUrl=q_url,
+            MessageBody=json.dumps(msg),
+            MessageGroupId=msg.get('conversation_id') or 'default',
+            MessageDeduplicationId=msg.get('event_id') or new_id('dedup-'),
+        )
         logger.info(
             {
                 "web_widget": "ok",
                 "tenant_id": tenant_id,
                 "channel_user_id": channel_user_id,
+                "conversation_id": conv_id,
                 "language_code": language_code,
             }
         )

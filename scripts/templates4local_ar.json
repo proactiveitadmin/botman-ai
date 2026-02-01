@@ -1,0 +1,455 @@
+{
+  "Templates-botman-dev": [
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "handover_to_staff" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "سأقوم الآن بتحويلك إلى أحد موظفي النادي (سيتم التحويل خلال لحظات)." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "ticket_summary" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "طلب العميل" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "ticket_created_ok" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لقد أنشأت طلباً جديداً. الرقم: %{ticket}." },
+          "placeholders": { "L": [ { "S": "ticket" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "ticket_created_failed" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تعذّر إنشاء الطلب الآن. يرجى المحاولة مرة أخرى لاحقاً." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "clarify_generic" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "هل يمكنك توضيح كيف أستطيع مساعدتك؟" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== PERFECTGYM – LISTA ZAJĘĆ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "الحصص المتاحة:\n{classes}\n\nاكتب رقم الحصة التي تختارها (مثلاً 1)." },
+          "placeholders": { "L": [ { "S": "classes" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_empty" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "حالياً لا توجد أي حصص متاحة في الجدول." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_capacity_no_limit" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "دون حد لعدد الأماكن" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_capacity_full" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لا توجد أماكن شاغرة (الحد {limit})" },
+          "placeholders": { "L": [ { "S": "limit" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_capacity_free" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "{free} أماكن شاغرة (الحد {limit})" },
+          "placeholders": { "L": [ { "S": "free" }, { "S": "limit" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_item" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "{index}) {date} {time} – {name} {capacity}" },
+          "placeholders": {
+            "L": [
+              { "S": "index" },
+              { "S": "date" },
+              { "S": "time" },
+              { "S": "name" },
+              { "S": "capacity" }
+            ]
+          }
+        }
+      }
+    },
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_invalid_index" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لم أفهم اختيارك. يرجى إدخال رقم الحصة من 1 إلى {max_index}." },
+          "placeholders": { "L": [ { "S": "max_index" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_no_today" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لا توجد أي حصص متاحة اليوم." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_today" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لدينا اليوم الحصص التالية:\n{classes}\n\nاكتب رقم الحصة التي تريدها." },
+          "placeholders": { "L": [ { "S": "classes" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_no_classes_on_date" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "في تاريخ {date} لا توجد أي حصص متاحة." },
+          "placeholders": { "L": [ { "S": "date" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_available_classes_select_by_number" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "هناك عدة حصص في ذلك اليوم. يرجى كتابة رقم الحصة التي تود حجزها." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== PERFECTGYM – KONTRAKT / WERYFIKACJA ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_contract_ask_email" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "يرجى تزويدي بعنوان البريد الإلكتروني المستخدم في النادي حتى أتمكّن من التحقق من حالة عضويتك." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_contract_not_found" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لا أرى أي عضوية مرتبطة بالبريد الإلكتروني {email} ورقم الهاتف {phone}. يرجى التأكد من أن البيانات مطابقة لتلك المسجلة في PerfectGym." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_ask_dob" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لأغراض التحقق، يرجى تزويدي بتاريخ ميلادك." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_success" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تمّ التحقق من حسابك بنجاح." },
+          "placeholders": { "L": [ { "S": "email" }, { "S": "phone" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_contract_details" },
+          "language_code": { "S": "ar" },
+          "body": {
+            "S": "تفاصيل عضويتك:\nالباقة: {plan_name}\nالحالة:\n{status}\nنشطة: {is_active, select, true{نعم} false{لا}}\nتاريخ البداية: {start_date}\nتاريخ الانتهاء: {end_date}\nرسوم العضوية: {membership_fee}"
+          },
+          "placeholders": {
+            "L": [
+              { "S": "plan_name" },
+              { "S": "status" },
+              { "S": "is_active" },
+              { "S": "start_date" },
+              { "S": "end_date" },
+              { "S": "membership_fee" }
+            ]
+          }
+        }
+      }
+    },
+
+    // ========== REZERWACJE ZAJĘĆ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirmed" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تم حجز {class_name} بتاريخ {class_date} الساعة {class_time}. نراك هناك!" },
+          "placeholders": {
+            "L": [
+              { "S": "class_name" },
+              { "S": "class_date" },
+              { "S": "class_time" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_failed" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تعذّر إتمام الحجز. يرجى المحاولة مرة أخرى لاحقاً." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_declined" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تم إلغاء الحجز. أخبرني إذا رغبت في حجز حصة أخرى." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirm" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "هل تؤكد حجز الحصة {class_id}؟ يرجى الرد: نعم أو لا." },
+          "placeholders": { "L": [ { "S": "class_id" } ] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_missing_id" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تعذّر تحديد الحصة المطلوب حجزها. يرجى المحاولة مرة أخرى." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // słowa potwierdzenia / odmowy
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_confirm_words" },
+          "language_code": { "S": "ar" },
+          "body": {
+            "S": "نعم,نعم.,ايوه,أيوه,تمام,موافق,أوافق,أكيد,طبعاً,بالطبع"
+          },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "reserve_class_decline_words" },
+          "language_code": { "S": "ar" },
+          "body": {
+            "S": "لا,لا.,إلغاء,ألغِ,أريد الإلغاء,لا أريد,لا أرغب"
+          },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== WERYFIKACJA WWW / FAQ ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_not_verified" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لم يتم العثور على تحقق فعّال لهذا الرمز." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_user_not_found" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "لم يتم العثور على عضوية مرتبطة بهذا الرقم." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "www_verified" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "تمّ التحقق من حسابك. يمكنك الآن العودة إلى محادثة الويب." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_web_verification_required" },
+          "language_code": { "S": "ar" },
+          "body": {
+            "S": "لمتابعة العملية، نحتاج أولاً إلى تأكيد هويتك.\n\nإذا كنت تستخدم محادثة الويب، اضغط على الرابط أدناه لفتح واتساب وإرسال رمز التحقق.\nوإذا كنت بالفعل داخل واتساب، فقط أرسل الرمز الموضح أدناه.\n\nالرمز: {{verification_code}}\nالرابط: {{whatsapp_link}}\n\nبعد إرسال الرمز، عُد إلى هذه المحادثة – سنقوم بالتحقق من حسابك وفتح الوصول إلى بياناتك في PerfectGym."
+          },
+          "placeholders": {
+            "L": [
+              { "S": "verification_code" },
+              { "S": "whatsapp_link" }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "faq_no_info" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "عذراً، لا تتوفر لدي معلومات حول هذا الموضوع. هل يمكنني مساعدتك في شيء آخر؟" },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+
+    // ========== POWITANIE ==========
+
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "greeting" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "مرحباً! أنا المساعد الافتراضي لنادي اللياقة. أخبرني كيف يمكنني مساعدتك." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_retry" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "فشل التحقق. يرجى المحاولة مرة أخرى." },
+          "placeholders": { "L": [] }
+        }
+      }
+    },
+    {
+      "PutRequest": {
+        "Item": {
+          "tenant_id": { "S": "default" },
+          "template_code": { "S": "crm_challenge_fail_handover" },
+          "language_code": { "S": "ar" },
+          "body": { "S": "للأسف لم تنجح عملية التحقق. يرجى المحاولة مرة أخرى في وقت لاحق." },
+          "placeholders": { "L": [] }
+        }
+      }
+    }
+  ]
+}

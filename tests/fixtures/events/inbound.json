@@ -1,0 +1,10 @@
+{
+  "headers": {
+    "Host": "localhost"
+  },
+  "requestContext": {
+    "path": "/webhooks/twilio",
+    "requestTimeEpoch": 0
+  },
+  "body": "From=whatsapp%3A%2B48123123123&To=whatsapp%3A%2B48000000000&Body=chc%C4%99+si%C4%99+zapisa%C4%87"
+}

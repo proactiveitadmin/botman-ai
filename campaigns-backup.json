@@ -1,0 +1,189 @@
+{
+  "Items": [
+    {
+      "template_name": {
+        "S": "campaign_birthday"
+      },
+      "language_code": {
+        "NULL": true
+      },
+      "active": {
+        "BOOL": true
+      },
+      "tenant_id": {
+        "S": "clubProactiveIT"
+      },
+      "send_to": {
+        "S": "20:00"
+      },
+      "send_from": {
+        "S": "09:00"
+      },
+      "recipients": {
+        "L": [
+          {
+            "S": "whatsapp:+48694757634"
+          },
+          {
+            "M": {
+              "phone": {
+                "S": "whatsapp:+48698156215"
+              },
+              "tags": {
+                "L": [
+                  {
+                    "S": "vip"
+                  },
+                  {
+                    "S": "active"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "exclude_tags": {
+        "L": []
+      },
+      "pk": {
+        "S": "clubProactiveIT#camp-birthday-template"
+      },
+      "include_tags": {
+        "L": []
+      },
+      "campaign_id": {
+        "S": "camp-birthday-template"
+      },
+      "body": {
+        "S": "Sample body for camp-birthday-template"
+      }
+    },
+    {
+      "template_name": {
+        "NULL": true
+      },
+      "language_code": {
+        "S": "en"
+      },
+      "active": {
+        "BOOL": true
+      },
+      "tenant_id": {
+        "S": "tenant-b"
+      },
+      "send_to": {
+        "S": "18:00"
+      },
+      "send_from": {
+        "S": "10:00"
+      },
+      "recipients": {
+        "L": [
+          {
+            "S": "whatsapp:+447000000001"
+          }
+        ]
+      },
+      "exclude_tags": {
+        "L": []
+      },
+      "include_tags": {
+        "L": []
+      },
+      "pk": {
+        "S": "tenant-b#camp-body-fallback"
+      },
+      "campaign_id": {
+        "S": "camp-body-fallback"
+      },
+      "body": {
+        "S": "Manual campaign body ÔÇô fallback without templates."
+      }
+    },
+    {
+      "template_name": {
+        "S": "campaign_vip_offer"
+      },
+      "language_code": {
+        "S": "pl"
+      },
+      "active": {
+        "BOOL": true
+      },
+      "tenant_id": {
+        "S": "tenant-a"
+      },
+      "send_to": {
+        "S": "06:00"
+      },
+      "send_from": {
+        "S": "21:00"
+      },
+      "recipients": {
+        "L": [
+          {
+            "M": {
+              "phone": {
+                "S": "whatsapp:+48123400001"
+              },
+              "tags": {
+                "L": [
+                  {
+                    "S": "vip"
+                  },
+                  {
+                    "S": "active"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "M": {
+              "phone": {
+                "S": "whatsapp:+48123400002"
+              },
+              "tags": {
+                "L": [
+                  {
+                    "S": "blocked"
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "S": "whatsapp:+48123400003"
+          }
+        ]
+      },
+      "exclude_tags": {
+        "L": [
+          {
+            "S": "blocked"
+          }
+        ]
+      },
+      "include_tags": {
+        "L": [
+          {
+            "S": "vip"
+          }
+        ]
+      },
+      "pk": {
+        "S": "tenant-a#camp-vip-template-pl"
+      },
+      "campaign_id": {
+        "S": "camp-vip-template-pl"
+      },
+      "body": {
+        "S": "Sample body for camp-vip-template-pl"
+      }
+    }
+  ],
+  "Count": 3,
+  "ScannedCount": 3,
+  "ConsumedCapacity": null
+}

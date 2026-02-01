@@ -43,12 +43,6 @@ def _endpoint_for(service: str) -> str | None:
     if global_ep:
         return global_ep
 
-    # 3) heurystyka SAM/LocalStack (bez twardego localhosta):
-    # SAM/LocalStack zwykle wstrzykują LOCALSTACK_HOSTNAME do kontenera
-    host = os.getenv("LOCALSTACK_HOSTNAME")
-    if host:
-        return f"http://{host}:4566"
-
     # 4) jeżeli pracujesz ręcznie lokalnie i chcesz fallback,
     # zamiast hardcodu w kodzie – ustaw to w środowisku:
     #   $Env:S3_ENDPOINT="http://localhost:4566"
@@ -75,3 +69,18 @@ def ddb_resource():
     if ep:
         kwargs["endpoint_url"] = ep
     return boto3.resource("dynamodb", **kwargs)
+
+
+def ssm_client():
+    ep = _endpoint_for("ssm")
+    kwargs = {"region_name": _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("ssm", **kwargs)
+
+def ses_client(region_name: str | None = None):
+    ep = _endpoint_for("ses")
+    kwargs = {"region_name": region_name or _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("ses", **kwargs)

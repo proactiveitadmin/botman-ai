@@ -3,7 +3,7 @@ Param(
     [string]$Region="eu-central-1"
 )
 
-#"=== Gym Integrator – create_local_resources.ps1 ==="
+#"=== Botman AI – create_local_resources.ps1 ==="
 Write-Host Endpoint: $Endpoint
 Write-Host Region: $Region
 Write-Host

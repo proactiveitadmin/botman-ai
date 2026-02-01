@@ -39,9 +39,16 @@ if __name__ == "__main__":
         [{"AttributeName":"pk","AttributeType":"S"},{"AttributeName":"sk","AttributeType":"S"}],
         [{"AttributeName":"pk","KeyType":"HASH"},{"AttributeName":"sk","KeyType":"RANGE"}]
     )
-    ensure_table("Conversations",
-        [{"AttributeName":"pk","AttributeType":"S"}],
-        [{"AttributeName":"pk","KeyType":"HASH"}]
+    ensure_table(
+        "Conversations",
+        [
+            {"AttributeName": "pk", "AttributeType": "S"},
+            {"AttributeName": "sk", "AttributeType": "S"},
+        ],
+        [
+            {"AttributeName": "pk", "KeyType": "HASH"},
+            {"AttributeName": "sk", "KeyType": "RANGE"},
+        ],
     )
     ensure_table("Campaigns",
         [{"AttributeName":"pk","AttributeType":"S"}],

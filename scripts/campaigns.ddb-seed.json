@@ -3,9 +3,19 @@
     {
       "PutRequest": {
         "Item": {
+          "pk":          { "S": "CAMPAIGN#camp-birthday-template" },
           "campaign_id": { "S": "camp-birthday-template" },
-          "tenant_id":   { "S": "tenant-a" },
+          "tenant_id":   { "S": "default" },
           "active":      { "BOOL": true },
+
+          "next_run_at": { "N": "1767817697" },
+          "schedule": {
+            "M": {
+              "type":          { "S": "interval" },
+              "every_seconds": { "N": "86400" },
+              "anchor":        { "S": "last_run" }
+            }
+          },
 
           "template_name": { "S": "campaign_birthday" },
           "language_code": { "NULL": true },
@@ -14,10 +24,10 @@
 
           "recipients": {
             "L": [
-              { "S": "whatsapp:+48111111111" },
+              { "S": "whatsapp:+48694757634" },
               {
                 "M": {
-                  "phone": { "S": "whatsapp:+48111111112" },
+                  "phone": { "S": "whatsapp:+48694757634" },
                   "tags": {
                     "L": [
                       { "S": "vip" },
@@ -39,9 +49,19 @@
     {
       "PutRequest": {
         "Item": {
+          "pk":          { "S": "CAMPAIGN#camp-vip-template-pl" },
           "campaign_id": { "S": "camp-vip-template-pl" },
-          "tenant_id":   { "S": "tenant-a" },
+          "tenant_id":   { "S": "clubProactiveIT" },
           "active":      { "BOOL": true },
+
+          "next_run_at": { "N": "1767817697" },
+          "schedule": {
+            "M": {
+              "type":          { "S": "interval" },
+              "every_seconds": { "N": "86400" },
+              "anchor":        { "S": "last_run" }
+            }
+          },
 
           "template_name": { "S": "campaign_vip_offer" },
           "language_code": { "S": "pl" },
@@ -52,7 +72,7 @@
             "L": [
               {
                 "M": {
-                  "phone": { "S": "whatsapp:+48123400001" },
+                  "phone": { "S": "whatsapp:+48694757634" },
                   "tags": {
                     "L": [
                       { "S": "vip" },
@@ -63,7 +83,7 @@
               },
               {
                 "M": {
-                  "phone": { "S": "whatsapp:+48123400002" },
+                  "phone": { "S": "whatsapp:+48694757634" },
                   "tags": {
                     "L": [
                       { "S": "blocked" }
@@ -71,7 +91,7 @@
                   }
                 }
               },
-              { "S": "whatsapp:+48123400003" }
+              { "S": "whatsapp:+48694757634" }
             ]
           },
           "include_tags": {
@@ -93,9 +113,19 @@
     {
       "PutRequest": {
         "Item": {
+          "pk":          { "S": "CAMPAIGN#camp-body-fallback" },
           "campaign_id": { "S": "camp-body-fallback" },
-          "tenant_id":   { "S": "tenant-b" },
+          "tenant_id":   { "S": "clubProactiveIT" },
           "active":      { "BOOL": true },
+
+          "next_run_at": { "N": "1767817697" },
+          "schedule": {
+            "M": {
+              "type":          { "S": "interval" },
+              "every_seconds": { "N": "86400" },
+              "anchor":        { "S": "last_run" }
+            }
+          },
 
           "template_name": { "NULL": true },
           "language_code": { "S": "en" },
@@ -106,7 +136,7 @@
 
           "recipients": {
             "L": [
-              { "S": "whatsapp:+447000000001" }
+              { "S": "whatsapp:+48694757634" }
             ]
           },
           "include_tags": { "L": [] },
