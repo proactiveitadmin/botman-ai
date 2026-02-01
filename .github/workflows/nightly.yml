@@ -78,4 +78,15 @@ jobs:
           USER_HASH_PEPPER: ""
           OTP_HASH_PEPPER: ""
         run: |
-          pytest -m "prod_safe and not slow" -q --cov=src --cov-report=html
+          pytest -m "prod_safe and not slow" -q --cov=src --cov-report=html- 
+        name: Upload coverage html
+          uses: actions/upload-artifact@v4
+          if: always()
+          with:
+            name: htmlcov
+            path: htmlcov/
+        - name: Coverage summary
+          run: |
+            coverage report --fail-under=80
+
+
