@@ -2,9 +2,15 @@ import json
 import pytest
 from src.services.campaign_service import CampaignService
 
+from pathlib import Path
+import json
+
 def load_local_campaigns():
-    with open("scripts\\campaigns.local.json", "r", encoding="utf-8") as f:
+    repo_root = Path(__file__).resolve().parents[3]  # tests/unit/services -> repo root
+    path = repo_root / "scripts" / "campaigns.local.json"
+    with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
 
 def test_build_message_from_template():
     # Fake TemplateService – bez DDB
