@@ -1394,3 +1394,218 @@ aws dynamodb put-item `
   --region $region `
   --item $item
 
+
+
+# ==== 43. system_marketing_optout_confirm ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optout_confirm#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optout_confirm"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Czy na pewno chcesz wypisać się z wiadomości marketingowych? Odpowiedz TAK lub NIE."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 44. system_marketing_optin_confirm ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optin_confirm#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optin_confirm"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Czy na pewno chcesz zacząć otrzymywać wiadomości marketingowe? Odpowiedz TAK lub NIE."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 45. system_confirm_cancelled ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_confirm_cancelled#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_confirm_cancelled"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "OK, anulowane."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 46. system_marketing_optout_done ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optout_done#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optout_done"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Wypisano z wiadomości marketingowych."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 47. system_marketing_optin_done ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optin_done#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optin_done"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Zgoda marketingowa została włączona."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 48. system_marketing_change_failed ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_change_failed#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_change_failed"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Nie udało się zmienić zgody. Spróbuj ponownie później."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  
+# ==== 49. confirm_words ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#confirm_words#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "confirm_words"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "tak,tak.,potwierdzam,ok,zgadzam się,zgadzam sie,oczywiście,oczywiscie,pewnie,jasne"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+

@@ -9,6 +9,7 @@ from ..common.logging_utils import mask_phone
 from ..common.rate_limiter import InMemoryRateLimiter
 from .clients_factory import ClientsFactory
 
+PG_MARKETING_AGREEMENT_ID = 1
 
 class CRMService:
     """
@@ -162,6 +163,87 @@ class CRMService:
         self._pg_gate(tenant_id)
         return self._client_for(tenant_id).get_member_balance(member_id=member_id)
 
+    def get_marketing_consent_for_member(self, tenant_id: str, *, member_id: int) -> bool:
+        """
+        Sprawdza w PerfectGym czy member ma zgodę marketingową (agreed = true).
+        memberAgreementId traktujemy jako stałą (1).
+        """
+        self._pg_gate(tenant_id)
+        pg = self._client_for(tenant_id)
+
+        odata_filter = (
+            f"memberId eq {int(member_id)} "
+            f"and memberAgreementId eq {PG_MARKETING_AGREEMENT_ID} "
+            f"and agreed eq true"
+        )
+
+        url = (
+            f"{pg.base_url}/MemberAgreementAnswers"
+            f"?$filter={quote(odata_filter, safe=' =$andtruefalse')}"
+        )
+
+        try:
+            resp = pg._request_with_retry(
+                "GET",
+                url,
+                headers=pg._headers(),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json() or {}
+            return bool(data.get("value"))
+        except Exception as e:
+            self.logger.error(
+                {
+                    "crm": "pg_marketing_consent_check_failed",
+                    "tenant_id": tenant_id,
+                    "member_id": member_id,
+                    "error": str(e),
+                }
+            )
+            # fail-safe: jak nie wiemy, to NIE wysyłamy
+            return False
+    
+    #stub cofniecia zgody, TODO: zaimplementowac cofniecie zgody
+    def revoke_marketing_consent_for_member(
+        self,
+        tenant_id: str,
+        *,
+        member_id: int,
+        reason: str | None = None,
+    ):
+        self.logger.warning(
+            {
+                "crm": "pg_revoke_marketing_consent_not_implemented",
+                "tenant_id": tenant_id,
+                "member_id": member_id,
+                "reason": reason,
+            }
+        )
+        raise NotImplementedError(
+            "PerfectGym revoke consent endpoint not implemented yet"
+        ) 
+    
+    #stub dodania zgody, TODO: zaimplementowac cofniecie zgody
+    def grant_marketing_consent_for_member(
+        self,
+        tenant_id: str,
+        *,
+        member_id: int,
+        reason: str | None = None,
+    ):
+        self.logger.warning(
+            {
+                "crm": "pg_grant_marketing_consent_not_implemented",
+                "tenant_id": tenant_id,
+                "member_id": member_id,
+                "reason": reason,
+            }
+        )
+        raise NotImplementedError(
+            "PerfectGym grant consent endpoint not implemented yet"
+        )  
+        
     def reserve_class(
         self,
         tenant_id: str,

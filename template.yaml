@@ -99,7 +99,6 @@ Globals:
         DDB_TABLE_TEMPLATES:     !Sub 'Templates-${AWS::StackName}'
         DDB_TABLE_CAMPAIGNS:     !Sub 'Campaigns-${AWS::StackName}'
         DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN: tenant_next_run_at
-        DDB_TABLE_CONSENTS:      !Sub 'Consents-${AWS::StackName}'
         DDB_TABLE_INTENTS_STATS: !Sub 'IntentsStats-${AWS::StackName}'
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
         DDB_TABLE_LEADS:         !Sub 'Leads-${AWS::StackName}'
@@ -348,19 +347,6 @@ Resources:
               - template_name
               - body
               - language_code
-  Consents:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      TableName: !Sub 'Consents-${AWS::StackName}'
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: pk
-          AttributeType: S
-      KeySchema:
-        - AttributeName: pk
-          KeyType: HASH
 
   IntentsStats:
     Type: AWS::DynamoDB::Table
@@ -722,8 +708,6 @@ Resources:
             TableName: !Ref Campaigns
         - SQSSendMessagePolicy:
             QueueName: !GetAtt OutboundQueue.QueueName 
-        - DynamoDBReadPolicy:
-            TableName: !Ref Consents
         - Statement:
             - Effect: Allow
               Action: ssm:GetParameter
@@ -873,32 +857,6 @@ Resources:
             Path: /web/widget
             Method: post
             
-  OptOutFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub 'optout-link-${AWS::StackName}'
-      CodeUri: .
-      Handler: src/lambdas/optout/handler.lambda_handler
-      Policies:
-        - Statement:
-            - Effect: Allow
-              Action: ssm:GetParameter
-              Resource:
-                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
-            - Effect: Allow
-              Action: kms:Decrypt
-              Resource: "*"
-              Condition:
-                StringEquals:
-                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
-      Events:
-        Api:
-          Type: Api
-          Properties:
-            RestApiId: !Ref MyApi
-            Path: /optout
-            Method: get
-
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:

@@ -171,7 +171,7 @@ def test_pending_reservation_confirmation_yes_triggers_crm_and_clears_pending(mo
         tenant_id=tenant_id,
         from_phone=phone,
         to_phone="whatsapp:+48000000000",
-        body="tak",  # jest w reserve_class_confirm_words
+        body="tak",  # jest w confirm_words
         channel=channel,
         channel_user_id=channel_user_id,
     )

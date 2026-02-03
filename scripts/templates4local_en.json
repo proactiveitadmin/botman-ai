@@ -330,7 +330,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "reserve_class_confirm_words" },
+          "template_code": { "S": "confirm_words" },
           "language_code": { "S": "en" },
           "body": {
             "S": "yes,yes.,confirm,I confirm,ok,okay,sure,of course,certainly,no problem,all good"
@@ -343,7 +343,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "reserve_class_decline_words" },
+          "template_code": { "S": "decline_words" },
           "language_code": { "S": "en" },
           "body": {
             "S": "no,no.,cancel,I cancel,abort,I don’t want,I do not want"

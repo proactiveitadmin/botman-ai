@@ -32,7 +32,6 @@ from ..services.ticketing_service import TicketingService
 from ..services.metrics_service import MetricsService
 from ..services.crm_flow_service import CRMFlowService
 from ..services.language_service import LanguageService
-from ..services.opt_out_service import OptOutService
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..repos.messages_repo import MessagesRepo
@@ -83,7 +82,6 @@ class RoutingService:
         self.tpl = tpl or TemplateService()
         self.metrics = metrics or MetricsService()
         self.conv = conv or ConversationsRepo()
-        self.optout = OptOutService(self.conv)
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
         self.members_index = members_index or MembersIndexRepo()
@@ -177,32 +175,6 @@ class RoutingService:
         channel = msg.channel or "whatsapp"
         channel_user_id = msg.channel_user_id or msg.from_phone
         conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
-        # 2a) Opt-out / opt-in commands (full flow)
-        opt_action = self.optout.parse_command(text_raw)
-        if opt_action == "optout":
-            self.optout.set_opt_out(
-                tenant_id=msg.tenant_id,
-                channel=channel,
-                channel_user_id=channel_user_id,
-                opt_out=True,
-                source="text_command",
-            )
-            body = self.tpl.render_named(msg.tenant_id, "system_optout_on", lang, {})
-            if body == "system_optout_on":
-                body = "OK"  # ostatni fallback (język-agnostyczny)
-            return [self._reply(msg, lang, body)]
-        if opt_action == "optin":
-            self.optout.set_opt_out(
-                tenant_id=msg.tenant_id,
-                channel=channel,
-                channel_user_id=channel_user_id,
-                opt_out=False,
-                source="text_command",
-            )
-            body = self.tpl.render_named(msg.tenant_id, "system_optout_off", lang, {})
-            if body == "system_optout_off":
-                body = "OK"
-            return [self._reply(msg, lang, body)]
         
         state = conv.get("state_machine_status")
 
@@ -224,7 +196,7 @@ class RoutingService:
                 return selection_response
 
         # 3c) Pending rezerwacja – TAK/NIE
-        pending_response = self.crm_flow.handle_pending_reservation_confirmation(msg, lang)
+        pending_response = self.crm_flow.handle_pending_confirmation(msg, lang)
         if pending_response is not None:
             return pending_response
 
@@ -438,23 +410,23 @@ class RoutingService:
             )
 
         # 6.3 Handover do człowieka
-        if intent == "handover":
-            self.conv.assign_agent(
-                tenant_id=msg.tenant_id,
-                channel=msg.channel or "whatsapp",
-                channel_user_id=msg.channel_user_id or msg.from_phone,
-                agent_id=slots.get("agent_id", "UNKNOWN"),
-            )
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "handover_to_staff",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
+       # if intent == "handover":
+       #     self.conv.assign_agent(
+       #         tenant_id=msg.tenant_id,
+       #         channel=msg.channel or "whatsapp",
+       #         channel_user_id=msg.channel_user_id or msg.from_phone,
+       #         agent_id=slots.get("agent_id", "UNKNOWN"),
+       #     )
+       #     body = self.tpl.render_named(
+       #         msg.tenant_id,
+       #         "handover_to_staff",
+       #         lang,
+       #         {},
+       #     )
+       #     return [self._reply(msg, lang, body)]
 
         # 6.4 Ticket do systemu ticketowego
-        if intent == "ticket":
+        if intent == "ticket" or intent == "handover":
             conv_key = conversation_key(
                 msg.tenant_id,
                 msg.channel or "whatsapp",
@@ -585,7 +557,7 @@ class RoutingService:
 
             return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
         
-        #6.8 Prośba o weryfikację
+        # 6.8 Prośba o weryfikację
         if intent == "verification":
             verify_resp = self.crm_flow.ensure_crm_verification(
                 msg,
@@ -598,8 +570,32 @@ class RoutingService:
                 return verify_resp
             return self.crm_flow.verification_active(msg, lang, member_id)
 
+        # 6.9 Zgody marketingowe (opt-in / opt-out) – PG-only, z confirm na "TAK"
+        if intent == "marketing_optout":
+            self.crm_flow.set_pending_marketing_consent_change(
+                msg, 
+                "marketing_optout"
+            )
+            body = self.tpl.render_named(
+                msg.tenant_id, 
+                "system_marketing_optout_confirm", 
+                lang, {}
+            )
+            return [self._reply(msg, lang, body)]
+
+        if intent == "marketing_optin":
+            self.crm_flow.set_pending_marketing_consent_change(
+                msg, 
+                "marketing_optin"
+            )
+            body = self.tpl.render_named(
+                msg.tenant_id, 
+                "system_marketing_optin_confirm", 
+                lang, {}
+            )
+            return [self._reply(msg, lang, body)]
         
-        # 6.9 Domyślny clarify
+        # 6.10 Domyślny clarify
         body = self.tpl.render_named(
             msg.tenant_id,
             "clarify_generic",

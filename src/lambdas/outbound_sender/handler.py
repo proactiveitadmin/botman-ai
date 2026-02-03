@@ -21,17 +21,6 @@ def _queue_delay_ms(record: dict) -> int | None:
         return now - sent
     except Exception:
         return None
-def _get_optout_service():
-    global _OPT_OUT
-    try:
-        _OPT_OUT
-    except NameError:
-        _OPT_OUT = None
-    if _OPT_OUT is None:
-        from ...services.opt_out_service import OptOutService
-        from ...repos.conversations_repo import ConversationsRepo
-        _OPT_OUT = OptOutService(ConversationsRepo())
-    return _OPT_OUT
 
 def _normalize_whatsapp_channel_user_id(to: str | None) -> str | None:
     """Converts Twilio 'to' into channel_user_id format used by ConversationsRepo."""
@@ -41,18 +30,6 @@ def _normalize_whatsapp_channel_user_id(to: str | None) -> str | None:
     if not t:
         return None
     return t if t.startswith("whatsapp:") else f"whatsapp:{t}"
-
-def _should_enforce_opt_out(payload: dict) -> bool:
-    """Backward compatible enforcement.
-
-    We only enforce opt-out for messages that explicitly declare themselves as
-    campaign/notification.
-
-    Legacy payloads (no message_type) MUST behave as before this change,
-    i.e., never blocked and never requiring DynamoDB access.
-    """
-    mt = (payload or {}).get("message_type")
-    return mt in ("campaign", "notification")
         
 def lambda_handler(event, context):
     records = event.get("Records", [])
@@ -86,32 +63,6 @@ def lambda_handler(event, context):
             channel = payload.get("channel", "whatsapp")
             text = payload.get("body")
             tenant_id = payload.get("tenant_id", "default")
- 
-            # Opt-out enforcement (campaign/notification only, backward compatible)
-            if _should_enforce_opt_out(payload):
-                try:
-                    optout = _get_optout_service()
-                    if channel == "whatsapp":
-                        channel_user_id = payload.get("channel_user_id") or _normalize_whatsapp_channel_user_id(payload.get("to"))
-                    else:
-                        channel_user_id = payload.get("channel_user_id")
-
-                    if channel_user_id and optout.is_opted_out(tenant_id, channel, channel_user_id):
-                        metrics.incr("message_blocked_opt_out", channel=channel, status="OPT_OUT")
-                        logger.info(
-                            {
-                                "handler": "outbound_sender",
-                                "event": "blocked_opt_out",
-                                "tenant_id": tenant_id,
-                                "channel": channel,
-                            }
-                        )
-                        # treat as processed
-                        continue
-                except Exception as e:
-                    # Never break core outbound flow on opt-out check failure
-                    logger.error({"handler": "outbound_sender", "event": "optout_check_failed", "err": str(e)})
-
 
             # Idempotency for outbound send (Twilio / web queue)
             idem_key = payload.get("idempotency_key") or (f"out#{tenant_id}#{msg_id}" if msg_id else None)

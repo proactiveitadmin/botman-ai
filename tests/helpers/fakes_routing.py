@@ -194,10 +194,10 @@ class FakeTemplateServicePG:
             return "Nie znam ID zajęć."
 
         # słowa TAK / NIE
-        if template_code == "reserve_class_confirm_words":
+        if template_code == "confirm_words":
             return "tak ok potwierdzam"
 
-        if template_code == "reserve_class_decline_words":
+        if template_code == "decline_words":
             return "nie rezygnuję"
 
         # challenge / saldo

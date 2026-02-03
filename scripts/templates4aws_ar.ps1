@@ -1314,3 +1314,210 @@ aws dynamodb put-item `
   --region $region `
   --item $item
 
+# ==== 43. system_marketing_optout_confirm (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optout_confirm#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optout_confirm"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "هل أنت متأكد أنك تريد إلغاء الاشتراك في الرسائل التسويقية؟ رد بنعم أو لا."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 44. system_marketing_optin_confirm (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optin_confirm#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optin_confirm"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "هل أنت متأكد أنك تريد استلام الرسائل التسويقية؟ رد بنعم أو لا."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 45. system_confirm_cancelled (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_confirm_cancelled#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_confirm_cancelled"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "تمام، تم الإلغاء."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 46. system_marketing_optout_done (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optout_done#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optout_done"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "تم إلغاء اشتراكك من الرسائل التسويقية."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 47. system_marketing_optin_done (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_optin_done#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_optin_done"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "تم تفعيل الموافقة على الرسائل التسويقية."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 48. system_marketing_change_failed (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#system_marketing_change_failed#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "system_marketing_change_failed"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "ما قدرنا نغيّر الموافقة. حاول مرة ثانية لاحقاً."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+# ==== 49. confirm_words (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#confirm_words#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "confirm_words"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "نعم,نعم.,ايوه,أيوه,تمام,موافق,أوافق,أكيد,طبعاً,بالطبع"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item

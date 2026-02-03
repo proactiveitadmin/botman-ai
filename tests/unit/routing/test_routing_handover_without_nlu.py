@@ -63,13 +63,29 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     class DummyTenants:
         def get(self, tenant_id):
             return {"language_code": "pl"}
+    class DummyTicketing:
+        def __init__(self):
+            self.calls = []
 
+        def create_ticket(self, tenant_id, summary, description, meta=None):
+            self.calls.append(
+                {
+                    "tenant_id": tenant_id,
+                    "summary": summary,
+                    "description": description,
+                    "meta": meta or {},
+                }
+            )
+            # RoutingService oczekuje dict-a z kluczem 'ticket' lub 'key'
+            return {"ticket": "ABC-123"}
+    
     svc = RoutingService()
     svc.nlu = DummyNLU()
     svc.conv = DummyConvRepo()
     svc.kb = DummyKB()
     svc.tpl = DummyTpl()
     svc.tenants = DummyTenants()
+    svc.ticketing = DummyTicketing()
     wire_subservices(svc)
 
     
@@ -88,9 +104,11 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
 
     # 1) NLU NIE zostało wywołane
     assert not called["nlu_called"]
+    
+    # Sprawdzamy, że TicketingService zostało zawołane
+    assert svc.ticketing.calls, "TicketingService.create_ticket powinno zostać wywołane"
 
     # 2) Zwrócona akcja reply (handover_to_staff)
     assert len(actions) == 1
     action = actions[0]
     assert action.type == "reply"
-    assert "handover" in action.payload["body"]

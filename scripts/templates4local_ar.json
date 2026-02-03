@@ -328,7 +328,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "reserve_class_confirm_words" },
+          "template_code": { "S": "confirm_words" },
           "language_code": { "S": "ar" },
           "body": {
             "S": "نعم,نعم.,ايوه,أيوه,تمام,موافق,أوافق,أكيد,طبعاً,بالطبع"
@@ -341,7 +341,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "reserve_class_decline_words" },
+          "template_code": { "S": "decline_words" },
           "language_code": { "S": "ar" },
           "body": {
             "S": "لا,لا.,إلغاء,ألغِ,أريد الإلغاء,لا أريد,لا أرغب"
