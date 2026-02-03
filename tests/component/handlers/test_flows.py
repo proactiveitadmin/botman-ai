@@ -139,7 +139,7 @@ DUMMY_TEMPLATES = {
     },
     # Tu ważne: traktujemy body jako listę słów rozdzieloną przecinkami,
     # bo _get_words_set pewnie robi split po przecinku / białych znakach
-    ("reserve_class_confirm_words", "pl"): {
+    ("confirm_words", "pl"): {
         "body": "tak, tak., potwierdzam, ok, zgadzam się, oczywiście, pewnie, jasne",
         "placeholders": [],
     },

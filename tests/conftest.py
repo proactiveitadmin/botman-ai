@@ -57,8 +57,10 @@ def reset_http_session_singleton():
 
 
 @pytest.fixture(autouse=True)
-def disable_custom_aws_endpoints(monkeypatch):
+def disable_custom_aws_endpoints(monkeypatch, request):
     """Ignore all custom AWS endpoints in tests (LocalStack, *_ENDPOINT vars)."""
+    if request.node.get_closest_marker("allow_custom_aws_endpoints"):
+        return  # ← nie robimy NIC dla tego testu
     for var in (
         "AWS_ENDPOINT_URL",
         "AWS_ENDPOINT_URL_DYNAMODB",

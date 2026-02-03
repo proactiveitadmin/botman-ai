@@ -16,7 +16,6 @@ from boto3.dynamodb.conditions import Key
 from ...services.campaign_service import CampaignService
 from ...repos.conversations_repo import ConversationsRepo
 from ...common.aws import sqs_client, ddb_resource, resolve_queue_url
-from ...services.consent_service import ConsentService
 from ...repos.members_index_repo import MembersIndexRepo
 from ...common.logging import logger
 
@@ -25,7 +24,6 @@ CAMPAIGNS_TABLE = os.getenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
 CAMPAIGNS_TENANT_NEXT_RUN_INDEX = os.getenv("DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN", "tenant_next_run_at")
 
 svc = CampaignService()
-consents = ConsentService()
 members_index = MembersIndexRepo()
 conv_repo = ConversationsRepo()
 
@@ -91,7 +89,7 @@ def lambda_handler(event, context):
 
         # QUIET HOURS – jeśli teraz jest poza oknem wysyłki, pomijamy kampanię
         if not svc.is_within_send_window(item):
-            logger.info(
+            logger.warning(
                 {
                     "campaign": "skipped_quiet_hours",
                     "campaign_id": item.get("campaign_id"),
@@ -110,22 +108,43 @@ def lambda_handler(event, context):
                 mi = members_index.find_by_phone_hmac(tenant_id_item, recipient.get("phone_hmac"))
                 phone = (mi or {}).get("phone")
                 if not phone:
+                    logger.warning(
+                        {
+                            "campaign": "no phone",
+                            "campaign_id": item.get("campaign_id"),
+                            "tenant_id": item.get("tenant_id", tenant_id),
+                        }
+                    )
                     # brak mapowania w MembersIndex -> pomijamy (nie mamy jak wysłać)
                     continue
             elif isinstance(recipient, dict) and recipient.get("phone"):
                 phone = recipient.get("phone")
             else:
+                logger.warning(
+                    {
+                        "campaign": "no phone",
+                        "campaign_id": item.get("campaign_id"),
+                        "tenant_id": item.get("tenant_id", tenant_id),
+                    }
+                )
                 continue
-            if not consents.has_opt_in(tenant_id_item, phone):
-                continue
- 
-            # Opt-out per tenant/channel blocks campaigns regardless of opt-in
-            wa_uid = phone if str(phone).startswith('whatsapp:') else f"whatsapp:{phone}"
-            conv = conv_repo.get_conversation(tenant_id_item, 'whatsapp', wa_uid) or {}
-            if conv.get('opt_out') is True:
+            members = crm.get_member_by_phone(tenant_id_item, phone)
+            items = (members or {}).get("value") or []
+            if not items:
                 continue
 
-            # tutaj w przyszłości możesz zbudować context z danych odbiorcy (imię, saldo, klub itd.)
+            raw_id = items[0].get("Id") or items[0].get("id")
+            try:
+                member_id = int(raw_id)
+            except Exception:
+                continue
+            if not crm.get_marketing_consent_for_member(
+                tenant_id_item,
+                member_id=member_id,
+            ):
+                continue
+ 
+            # tutaj w przyszłości można zbudować context z danych odbiorcy (imię, saldo, klub itd.)
             msg = svc.build_message(
                 campaign=item,
                 tenant_id=tenant_id_item,

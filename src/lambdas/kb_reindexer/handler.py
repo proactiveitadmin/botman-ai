@@ -118,5 +118,5 @@ def lambda_handler(event, context):
         ok = kb.reindex_faq(tenant_id=tenant_id, language_code=language_code)
         results["indexed"].append({"language_code": language_code or "", "ok": bool(ok)})
 
-    log_safe({"event": "kb_reindexer_done", **results})
+    logger.info({"event": "kb_reindexer_done", **results})
     return {"statusCode": 200, "body": json.dumps(results)}

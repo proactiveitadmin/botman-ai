@@ -4,7 +4,7 @@
       "PutRequest": {
         "Item": {
 			"tenant_id": { "S": "clubProactiveIT" },
-			"language_code": { "S": "pl" },
+			"language_code": { "S": "en" },
 			"twilio_to": { "S": "whatsapp:+14155238886" },
 
 			"email": {
@@ -53,7 +53,7 @@
       "PutRequest": {
         "Item": {
 			"tenant_id": { "S": "default" },
-			"language_code": { "S": "pl" },
+			"language_code": { "S": "en" },
 			"twilio_to": { "S": "whatsapp:+1400000000" },
 
 			"email": {

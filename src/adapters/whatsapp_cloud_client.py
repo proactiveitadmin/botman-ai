@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import requests
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
 
 from ..common.logging import logger
 from ..common.logging_utils import mask_phone, shorten_body
+
+_SESSION = None
 
 
 def _strip_whatsapp_prefix(v: str) -> str:
@@ -30,6 +33,12 @@ def _normalize_to_msisdn(to: str) -> str:
         s = s[1:]
     return s
 
+def get_session():
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+    return _SESSION
+
 
 @dataclass
 class WhatsAppCloudConfig:
@@ -38,10 +47,8 @@ class WhatsAppCloudConfig:
     # optional metadata
     api_version: str = "v20.0"
 
-
 class WhatsAppCloudClient:
     """Minimal client for WhatsApp Business Platform (Cloud API).
-
     Docs: https://developers.facebook.com/docs/whatsapp/cloud-api/
     """
 
@@ -68,7 +75,7 @@ class WhatsAppCloudClient:
             phone_number_id=wa.get("phone_number_id"),
             api_version=wa.get("api_version") or wa.get("version") or "v20.0",
         )
-
+		
     def send_text(self, to: str, body: str) -> dict:
         """Send a WhatsApp text message via Cloud API."""
         if not self.enabled:
@@ -80,6 +87,7 @@ class WhatsAppCloudClient:
                 }
             )
             return {"status": "DEV_OK"}
+
 
         to_msisdn = _normalize_to_msisdn(to)
         if not to_msisdn:
@@ -93,50 +101,37 @@ class WhatsAppCloudClient:
             "text": {"body": body},
         }
 
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(
-            url=url,
-            data=data,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.access_token}",
-                "Content-Type": "application/json",
-            },
-        )
-
         try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                raw = resp.read().decode("utf-8", errors="ignore")
-                try:
-                    parsed = json.loads(raw) if raw else {}
-                except Exception:
-                    parsed = {"raw": raw}
-        except urllib.error.HTTPError as e:
-            err_raw = ""
-            try:
-                err_raw = e.read().decode("utf-8", errors="ignore")
-            except Exception:
-                err_raw = str(e)
-            logger.error(
-                {
-                    "msg": "WhatsApp Cloud send failed",
-                    "to": mask_phone(to),
-                    "status": getattr(e, "code", None),
-                    "error": err_raw,
-                }
+            sess = get_session()
+            resp = sess.post(
+                url,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=12,
             )
-            return {"status": "ERROR", "http_status": getattr(e, "code", None), "error": err_raw}
         except Exception as e:
-            logger.error(
-                {
-                    "msg": "WhatsApp Cloud send failed",
-                    "to": mask_phone(to),
-                    "error": str(e),
-                }
-            )
+            logger.error({"msg": "WhatsApp Cloud send failed", "to": mask_phone(to), "error": str(e)})
             return {"status": "ERROR", "error": str(e)}
 
-        # Cloud API returns `messages: [{id: ...}]`
+        # non-ok response
+        if not getattr(resp, "ok", False):
+            raw_text = getattr(resp, "text", "") or ""
+            # test expects invalid json -> error['raw'] == 'bad'
+            err = {"raw": raw_text}
+            logger.error(
+                {"msg": "WhatsApp Cloud send failed", "to": mask_phone(to), "status": getattr(resp, "status_code", None), "error": raw_text}
+            )
+            return {"status": "ERROR", "http_status": getattr(resp, "status_code", None), "error": err}
+
+        # OK response
+        try:
+            parsed = resp.json()
+        except Exception:
+            parsed = {}
+
         msg_id = None
         try:
             msgs = (parsed or {}).get("messages") or []
@@ -144,13 +139,5 @@ class WhatsAppCloudClient:
                 msg_id = (msgs[0] or {}).get("id")
         except Exception:
             msg_id = None
-
-        logger.info(
-            {
-                "msg": "WhatsApp Cloud sent",
-                "to": mask_phone(to),
-                "message_id": msg_id,
-            }
-        )
 
         return {"status": "OK", "message_id": msg_id, "raw": parsed}

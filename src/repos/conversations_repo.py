@@ -82,9 +82,6 @@ class ConversationsRepo:
         crm_post_intent=_UNSET,
         crm_post_slots=_UNSET,
         crm_verification_blocked_until=_UNSET,
-        opt_out=_UNSET,
-        opt_out_at=_UNSET,
-        opt_out_source=_UNSET,
     ):
         """Upsert rozmowy po pre-hashowanym UID (bez PII w handlerze)."""
         key = self.conversation_pk_by_uid(tenant_id, channel, uid)
@@ -129,9 +126,6 @@ class ConversationsRepo:
         maybe_set_or_remove("crm_post_intent", crm_post_intent)
         maybe_set_or_remove("crm_post_slots", crm_post_slots)
         maybe_set_or_remove("crm_verification_blocked_until", crm_verification_blocked_until)
-        maybe_set_or_remove("opt_out", opt_out)
-        maybe_set_or_remove("opt_out_at", opt_out_at)
-        maybe_set_or_remove("opt_out_source", opt_out_source)
 
         if not set_parts and not remove_parts:
             return
@@ -198,9 +192,6 @@ class ConversationsRepo:
         crm_post_intent=_UNSET,
         crm_post_slots=_UNSET,
         crm_verification_blocked_until=_UNSET,
-        opt_out=_UNSET,
-        opt_out_at=_UNSET,
-        opt_out_source=_UNSET,
     ):
         """Upsert rozmowy.
 
@@ -250,9 +241,6 @@ class ConversationsRepo:
         maybe_set_or_remove("crm_post_intent", crm_post_intent)
         maybe_set_or_remove("crm_post_slots", crm_post_slots)
         maybe_set_or_remove("crm_verification_blocked_until", crm_verification_blocked_until)
-        maybe_set_or_remove("opt_out", opt_out)
-        maybe_set_or_remove("opt_out_at", opt_out_at)
-        maybe_set_or_remove("opt_out_source", opt_out_source)
 
         if not set_parts and not remove_parts:
             return

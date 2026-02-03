@@ -327,7 +327,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "reserve_class_confirm_words" },
+          "template_code": { "S": "confirm_words" },
           "language_code": { "S": "pl" },
           "body": {
             "S": "tak,tak.,potwierdzam,ok,zgadzam się,zgadzam sie,oczywiście,oczywiscie,pewnie,jasne"
@@ -340,7 +340,7 @@
       "PutRequest": {
         "Item": {
           "tenant_id": { "S": "default" },
-          "template_code": { "S": "reserve_class_decline_words" },
+          "template_code": { "S": "decline_words" },
           "language_code": { "S": "pl" },
           "body": {
             "S": "nie,nie.,anuluj,rezygnuję,rezygnuje,nie chcę,nie chce"

@@ -909,6 +909,7 @@ class CRMFlowService:
         self.clear_crm_challenge_state(tenant_id, channel, channel_user_id)
         body = self.tpl.render_named(tenant_id, "crm_challenge_success", lang, {})
         return [self._reply(msg, lang, body, channel=channel, channel_user_id=channel_user_id)]
+    
     def _finalize_crm_verification_success(
         self,
         msg: Message,
@@ -1157,7 +1158,19 @@ class CRMFlowService:
     def is_crm_member(self, tenant_id: str, phone: str) -> bool:
         mt = self.crm.get_member_type_by_phone(tenant_id, phone)
         return bool(mt) and mt.lower() == "member"
-  
+        
+    def set_pending_marketing_consent_change(self, msg: Message, kind: str):
+        self.conv.put(
+            self._pending_key(msg.from_phone),
+            "pending",
+            {
+                "kind": kind,  # "marketing_optout" | "marketing_optin"
+                "created_at": int(time.time()),
+                "member_id": member_id,
+            },
+        )
+
+
     def build_available_classes_response(
         self,
         msg: Message,
@@ -1502,7 +1515,7 @@ class CRMFlowService:
 
 
 
-    def handle_pending_reservation_confirmation(
+    def handle_pending_confirmation(
         self,
         msg: Message,
         lang: str,
@@ -1510,6 +1523,8 @@ class CRMFlowService:
 
         """
         Sprawdza, czy istnieje pending rezerwacja i obsługuje odpowiedź TAK/NIE.
+        Zasada: tylko TAK -> wykonaj; wszystko inne -> anuluj (brak zgody)
+        (Rozszerzone: obsługuje też pending marketing opt-in/opt-out)
         """
         text_raw = (msg.body or "").strip()
         text_lower = text_raw.lower()
@@ -1520,14 +1535,76 @@ class CRMFlowService:
 
         confirm_words = self._get_words_set(
             msg.tenant_id,
-            "reserve_class_confirm_words",
+            "confirm_words",
             lang,
         )
-        decline_words = self._get_words_set(
-            msg.tenant_id,
-            "reserve_class_decline_words",
-            lang,
-        )
+        
+        pending_kind = (pending.get("kind") or "").strip()
+
+        # ---------------------------------------------------------------------
+        # pending marketing consent change (opt-out / opt-in)
+        # 
+        # ---------------------------------------------------------------------
+        if pending_kind in ("marketing_optout", "marketing_optin"):
+        
+            if text_lower in confirm_words:
+                # Pobierz conv (potrzebne do ensure_crm_verification oraz crm_member_id)
+                channel = msg.channel or "whatsapp"
+                channel_user_id = msg.channel_user_id or msg.from_phone
+                conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
+
+                # Wymuszenie weryfikacji konta (email code) – reuse istniejącego flow
+                verify_resp = self.ensure_crm_verification(
+                    msg,
+                    conv,
+                    lang,
+                    post_intent=pending_kind,
+                    post_slots={},
+                )
+                if verify_resp:
+                    return verify_resp
+
+                member_id = conv.get("crm_member_id") or pending.get("member_id")
+                if not member_id:
+                    # fail-safe: czyścimy pending i zwracamy błąd
+                    self.conv.delete(self._pending_key(msg.from_phone), "pending")
+                    body = self.tpl.render_named(msg.tenant_id, "system_marketing_change_failed", lang, {})
+                    return [self._reply(msg, lang, body)]
+
+                try:
+                    if pending_kind == "marketing_optout":
+                        self.crm.revoke_marketing_consent_for_member(
+                            tenant_id=msg.tenant_id,
+                            member_id=member_id,
+                            reason="text_command_confirmed",
+                        )
+                        tpl_name = "system_marketing_optout_done"
+                    else:
+                        self.crm.grant_marketing_consent_for_member(
+                            tenant_id=msg.tenant_id,
+                            member_id=member_id,
+                            reason="text_command_confirmed",
+                        )
+                        tpl_name = "system_marketing_optin_done"
+
+                    self.conv.delete(self._pending_key(msg.from_phone), "pending")
+                    body = self.tpl.render_named(msg.tenant_id, tpl_name, lang, {})
+                    return [self._reply(msg, lang, body)]
+
+                except NotImplementedError:
+                    self.conv.delete(self._pending_key(msg.from_phone), "pending")
+                    body = self.tpl.render_named(msg.tenant_id, "system_marketing_change_failed", lang, {})
+                    return [self._reply(msg, lang, body)]
+
+                except Exception:
+                    self.conv.delete(self._pending_key(msg.from_phone), "pending")
+                    body = self.tpl.render_named(msg.tenant_id, "system_marketing_change_failed", lang, {})
+                    return [self._reply(msg, lang, body)]
+
+            # każdy inny tekst niż TAK = brak zgody na zmianę -> anuluj
+            self.conv.delete(self._pending_key(msg.from_phone), "pending")
+            body = self.tpl.render_named(msg.tenant_id, "system_confirm_cancelled", lang, {})
+            return [self._reply(msg, lang, body)]
 
         if text_lower in confirm_words:
             class_id = pending.get("class_id")
@@ -1613,19 +1690,14 @@ class CRMFlowService:
             )
             return [self._reply(msg, lang, body)]
 
-        if text_lower in decline_words:
-            self.conv.delete(self._pending_key(msg.from_phone), "pending")
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "reserve_class_declined",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
-
-        return None
-
-
+        self.conv.delete(self._pending_key(msg.from_phone), "pending")
+        body = self.tpl.render_named(
+            msg.tenant_id,
+            "reserve_class_declined",
+            lang,
+            {},
+        )
+        return [self._reply(msg, lang, body)]
 
     def handle_whatsapp_verification_code_linking(
         self,

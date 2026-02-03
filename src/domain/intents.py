@@ -9,4 +9,6 @@ INTENTS = {
     "crm_contract_status": {"requires_confirmation": True},
     "crm_member_balance": {"requires_confirmation": True},
     "ack": {"requires_confirmation": False},
+    "marketing_optout": {"requires_confirmation": True},
+    "marketing_optin": {"requires_confirmation": True},
 }

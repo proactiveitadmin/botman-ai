@@ -40,6 +40,8 @@ Intents:
 - faq
 - clarify
 - ticket_status
+- marketing_optout
+- marketing_optin
 
 FAQ KEY POLICY (IMPORTANT):
 - slots.faq_key is OPTIONAL. Use it ONLY when the message unambiguously maps to exactly ONE FAQ key.
@@ -77,7 +79,7 @@ If the message is a short acknowledgement or politeness response
 _VALID_INTENTS = {
     "reserve_class", "faq", "handover", "verification", "clarify", "ticket",
     "crm_available_classes", "crm_contract_status", "crm_member_balance", "ack",
-    "ticket_status",
+    "ticket_status", "marketing_optout", "marketing_optin",
 }
 
 class OpenAIClient:
