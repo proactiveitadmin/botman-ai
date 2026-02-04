@@ -118,6 +118,33 @@ class KBVectorService:
         except Exception:
             return []
             
+    def _split_question(self, question: str) -> list[str]:
+        q = (question or "").strip()
+        if not q:
+            return []
+        parts = [q]
+
+        raw_parts = re.split(r"[\n\r;|/]+|\s+[,]+\s+|\?+|\.+", q)
+        for p in raw_parts:
+            p = (p or "").strip()
+            if len(p) < 4:
+                continue
+
+            # avoid near-duplicate that only differs by trailing punctuation
+            if re.sub(r"[^\w]+$", "", p.lower()) == re.sub(r"[^\w]+$", "", q.lower()):
+                continue
+            parts.append(p)
+
+        # de-dup (case-insensitive) + cap
+        out, seen = [], set()
+        for p in parts:
+            k = p.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(p)
+        return out[:3]
+                
     def index_faq(
         self,
         *,
@@ -215,13 +242,16 @@ class KBVectorService:
         emb_model = getattr(settings, "embedding_model", "text-embedding-3-small")
         emb_dims = getattr(settings, "embedding_dimensions", None)
 
+        queries = self._split_question(q)
+        if not queries:
+            return []
         with timed(
             "embed_question",
             logger=logger, 
             component="kb_vector_service",
-            extra={"tenant_id": tenant_id, "model": emb_model},
+            extra={"tenant_id": tenant_id, "model": emb_model, "queries": len(queries)},
         ):
-            q_vecs = self._openai.embed([q], model=emb_model, dimensions=emb_dims)
+            q_vecs = self._openai.embed(queries, model=emb_model, dimensions=emb_dims)
 
         if not q_vecs:
             return []
@@ -229,46 +259,61 @@ class KBVectorService:
         ns = self._namespace(tenant_id, language_code)
         k = int(top_k or getattr(settings, "pinecone_top_k", 6) or 6)
 
+        # Run Pinecone queries for each segment and merge matches.
+        all_matches = []
         with timed(
             "pinecone_query",
-            logger=logger, 
+            logger=logger,
             component="kb_vector_service",
-            extra={"tenant_id": tenant_id, "namespace": ns, "top_k": k},
+            extra={"tenant_id": tenant_id, "namespace": ns, "top_k": k, "queries": len(q_vecs)},
         ):
-            matches = self._client_for(tenant_id).query(
-                vector=q_vecs[0],
-                namespace=ns,
-                top_k=k,
-                include_metadata=True,
-            )
+            for vec in q_vecs:
+                if not vec:
+                    continue
+                matches = self._client_for(tenant_id).query(
+                    vector=vec,
+                    namespace=ns,
+                    top_k=k,
+                    include_metadata=True,
+                )
+                all_matches.extend(matches or [])
 
         with timed(
             "postprocess_matches",
-            logger=logger, 
+            logger=logger,
             component="kb_vector_service",
-            extra={"tenant_id": tenant_id, "matches": len(matches) if matches else 0},
+            extra={"tenant_id": tenant_id, "matches": len(all_matches) if all_matches else 0, "queries": len(queries)},
         ):
-            out: List[RetrievedChunk] = []
-            for m in matches:
+            # Keep best match per FAQ key to increase result diversity.
+            best_by_faq: dict[str, RetrievedChunk] = {}
+            for m in all_matches or []:
                 md = m.metadata or {}
                 txt = (md.get("text") or "").strip()
                 if not txt:
                     continue
-                out.append(
-                    RetrievedChunk(
-                        score=float(m.score or 0.0),
-                        text=txt,
-                        faq_key=str(md.get("faq_key") or ""),
-                        chunk_id=str(m.id or ""),
-                    )
+
+                faq_key = str(md.get("faq_key") or "").strip()
+                chunk_id = str(m.id or "").strip()
+                rc = RetrievedChunk(
+                    score=float(m.score or 0.0),
+                    text=txt,
+                    faq_key=faq_key,
+                    chunk_id=chunk_id,
                 )
 
+                dedupe_key = faq_key or chunk_id
+                prev = best_by_faq.get(dedupe_key)
+                if (prev is None) or (rc.score > prev.score):
+                    best_by_faq[dedupe_key] = rc
+
+            out = sorted(best_by_faq.values(), key=lambda x: x.score, reverse=True)[:k]
+ 
         logger.info({
             "component": "kb_vector_service",
             "event": "KBVector: retrieved",
             "tenant_id": tenant_id,
             "lang": language_code,
-            "requested_top_k": k,
+            "queries_used": len(queries),
             "returned": len(out),
         })
         return out

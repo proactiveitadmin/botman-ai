@@ -168,7 +168,7 @@ def lambda_handler(event, context):
             tenant_id = (tenant_item or {}).get("tenant_id")
             if not tenant_id:
                 logger.error({"webhook": "tenant_missing", "phone_number_id": phone_number_id})
-                return {"statusCode": 400, "body": "Missing tenant"}
+                return {"statusCode": 200, "body": "OK"}
 
         headers = event.get("headers") or {}
         sig = headers.get("X-Hub-Signature-256") or headers.get("x-hub-signature-256") or ""

@@ -46,11 +46,11 @@ def test_lambda_handler_post_invalid_json():
 
 def test_lambda_handler_post_missing_tenant(monkeypatch):
     monkeypatch.setenv("DEV_MODE", "true")
-    # shared endpoint: no tenant in path and repo returns nothing
+    # shared endpoint: no tenant in path and repo returns nothing - we must switch to Twilio, returns "OK"
     monkeypatch.setattr(wh.tenants_repo, "find_by_whatsapp_phone_number_id", lambda _pnid: None)
     event = {"httpMethod": "POST", "body": json.dumps({"entry": []})}
     res = wh.lambda_handler(event, None)
-    assert res["statusCode"] == 400
+    assert res["statusCode"] == 200
 
 
 def test_lambda_handler_post_enqueues_messages(monkeypatch):
