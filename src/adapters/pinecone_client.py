@@ -164,14 +164,6 @@ class PineconeClient:
                                 score=float(m.get("score", 0.0) or 0.0),
                                 metadata=m.get("metadata") or {},
                             ))
-                        logger.warning({
-                            "component": "pinecone_client",
-                            "event": "pinecone_query_ok",
-                            "namespace": namespace,
-                            "filter": filter,
-                            "vec_dim": len(vector),
-                            "returned": len(matches),}
-                        )
                         return matches
 
                     logger.warning({"component": "pinecone_client","event": "pinecone_query_http", "status": r.status_code, "body": r.text[:500]})
