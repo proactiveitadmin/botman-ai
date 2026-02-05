@@ -150,3 +150,47 @@ def test_kb_vector_index_faq_builds_payload_vectors(monkeypatch):
         assert md["text"] == ch.text
         assert md["faq_key"] == ch.faq_key
         assert md["chunk_id"] == ch.chunk_id
+        
+def test_kb_vector_retrieve_multi_segment_queries_and_dedup(monkeypatch):
+    """
+    If the question contains multiple segments and the first one is noisy/unknown,
+    retrieval should still surface matches for later segments.
+    """
+    from src.common.config import settings
+    from src.services.kb_vector_service import KBVectorService
+
+    monkeypatch.setattr(settings, "kb_vector_enabled", True, raising=False)
+    monkeypatch.setattr(settings, "pinecone_namespace_prefix", "kb", raising=False)
+    monkeypatch.setattr(settings, "pinecone_top_k", 5, raising=False)
+    monkeypatch.setattr(settings, "embedding_model", "text-embedding-3-small", raising=False)
+    monkeypatch.setattr(settings, "embedding_dimensions", None, raising=False)
+
+    oa = DummyOpenAI()
+    pc = DummyPinecone()
+
+    # Return different matches per query call.
+    per_call = [
+        [PineconeMatch(id="c1", score=0.20, metadata={"faq_key": "Hours", "text": "Q: Hours\nA: 8-20"})],
+        [PineconeMatch(id="c2", score=0.92, metadata={"faq_key": "Location", "text": "Q: Location\nA: City"})],
+        [PineconeMatch(id="c3", score=0.10, metadata={"faq_key": "Hours", "text": "Q: Hours\nA: 8-20"})],
+    ]
+
+    def query_seq(*, vector, namespace, top_k, include_metadata, filter=None):
+        pc.queries.append({"namespace": namespace, "top_k": top_k, "include_metadata": include_metadata, "filter": filter})
+        return per_call.pop(0) if per_call else []
+
+    pc.query = query_seq  # type: ignore[method-assign]
+
+    svc = KBVectorService(openai_client=oa, pinecone_client=pc)
+    chunks = svc.retrieve(tenant_id="t1", language_code="pl", question="UnknownKey; Location")
+
+    # Should pick Location as best match and dedupe per faq_key.
+    assert chunks
+    assert chunks[0].faq_key == "Location"
+    assert len({c.faq_key for c in chunks}) == len(chunks)
+
+    # Embedded multiple query strings (full question + at least one segment)
+    assert len(oa.calls) == 1
+    assert len(oa.calls[0]["texts"]) >= 2
+    assert any("Location" in t for t in oa.calls[0]["texts"])
+    assert len(pc.queries) == len(oa.calls[0]["texts"])

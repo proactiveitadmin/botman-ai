@@ -1,1 +1,11 @@
-{"from":"whatsapp:+48123123123","to":"whatsapp:+14155238886","body":"godziny otwarcia","tenant_id":"default"}
+{
+  "tenant_id": "default",
+  "channel": "whatsapp",
+  "from": "whatsapp:+48694757634",
+  "to": "whatsapp:+14155238886",
+  "channel_user_id": "whatsapp:+48694757634",
+  "conversation_id": "conv#local#whatsapp:+48694757634",
+  "event_id": "evt-local-001",
+  "message_sid": "SM-local-001",
+  "body": "Macie kawiarnię? Jest basen? Jest sauna?"
+}

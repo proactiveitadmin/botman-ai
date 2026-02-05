@@ -1,40 +1,95 @@
-Param(
-    [string]$Endpoint="http://localhost:4566",
-    [string]$Region="eu-central-1"
+<# create_local_resources.ps1 (SQS only) #>
+
+[CmdletBinding()]
+param(
+  [string]$Endpoint  = "http://localhost:4566",
+  [string]$Region    = "eu-central-1",
+  [string]$StackName = "botman-dev"
 )
 
-#"=== Botman AI – create_local_resources.ps1 ==="
-Write-Host Endpoint: $Endpoint
-Write-Host Region: $Region
-Write-Host
+$ErrorActionPreference = "Stop"
 
-#"=== SQS queues ==="
+Write-Host "Endpoint: $Endpoint"
+Write-Host "Region:   $Region"
+Write-Host "Stack:    $StackName"
+Write-Host ""
 
-aws --endpoint-url $Endpoint --region $Region sqs create-queue --queue-name inbound-events
-aws --endpoint-url $Endpoint --region $Region sqs create-queue --queue-name inbound-events-dlq
-aws --endpoint-url $Endpoint --region $Region sqs create-queue --queue-name outbound-messages
-aws --endpoint-url $Endpoint --region $Region sqs create-queue --queue-name outbound-messages-dlq
+function Get-QueueUrl([string]$QueueName) {
+  $json = & aws --no-cli-pager --endpoint-url $Endpoint --region $Region sqs get-queue-url --queue-name $QueueName
+  return ($json | ConvertFrom-Json).QueueUrl
+}
 
-#"=== DynamoDB tables ==="
+function Get-QueueArn([string]$QueueUrl) {
+  $json = & aws --no-cli-pager --endpoint-url $Endpoint --region $Region sqs get-queue-attributes `
+    --queue-url $QueueUrl --attribute-names QueueArn
+  return (($json | ConvertFrom-Json).Attributes).QueueArn
+}
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Tenants --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=tenant_id,AttributeType=S --key-schema AttributeName=tenant_id,KeyType=HASH
+function Ensure-Queue([string]$QueueName, [string[]]$Attributes) {
+  try {
+    $existing = & aws --no-cli-pager --endpoint-url $Endpoint --region $Region sqs get-queue-url --queue-name $QueueName 2>$null
+    if ($LASTEXITCODE -eq 0 -and $existing) {
+      Write-Host "SQS exists: $QueueName"
+      return ($existing | ConvertFrom-Json).QueueUrl
+    }
+  } catch {}
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Conversations --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+  if ($null -ne $Attributes -and $Attributes.Count -gt 0) {
+    & aws --no-cli-pager --endpoint-url $Endpoint --region $Region sqs create-queue `
+      --queue-name $QueueName `
+      --attributes $Attributes | Out-Null
+  } else {
+    & aws --no-cli-pager --endpoint-url $Endpoint --region $Region sqs create-queue `
+      --queue-name $QueueName | Out-Null
+  }
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Messages --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S AttributeName=sk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE
+  Write-Host "SQS created: $QueueName"
+  return Get-QueueUrl $QueueName
+}
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Templates --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+Write-Host "=== Creating SQS queues ==="
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Campaigns --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+# Names (match template.yaml intent)
+$inboundName     = "inbound-events-$StackName.fifo"
+$inboundDlqName  = "inbound-events-$StackName-dlq.fifo"
+$outboundName    = "outbound-messages-$StackName"
+$outboundDlqName = "outbound-messages-$StackName-dlq"
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Consents --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+# 1) DLQs
+$inboundDlqUrl = Ensure-Queue $inboundDlqName @(
+  "FifoQueue=true"
+  "ContentBasedDeduplication=false"
+)
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name IntentsStats --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+$outboundDlqUrl = Ensure-Queue $outboundDlqName @()
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name MembersIndex --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+# 2) ARNs
+$inboundDlqArn  = Get-QueueArn $inboundDlqUrl
+$outboundDlqArn = Get-QueueArn $outboundDlqUrl
 
-aws --endpoint-url $Endpoint --region $Region dynamodb create-table --table-name Consents --billing-mode PAY_PER_REQUEST --attribute-definitions AttributeName=pk,AttributeType=S --key-schema AttributeName=pk,KeyType=HASH
+# 3) RedrivePolicy JSON
+$inboundRedrive  = @{ deadLetterTargetArn = $inboundDlqArn;  maxReceiveCount = 5 } | ConvertTo-Json -Compress
+$outboundRedrive = @{ deadLetterTargetArn = $outboundDlqArn; maxReceiveCount = 5 } | ConvertTo-Json -Compress
 
-#"=== S3 bucket ==="
+# 4) Main queues
+$inboundUrl = Ensure-Queue $inboundName @(
+  "FifoQueue=true"
+  "ContentBasedDeduplication=false"
+  "VisibilityTimeout=60"
+  "RedrivePolicy=$inboundRedrive"
+)
 
-aws --endpoint-url $Endpoint --region $Region s3api create-bucket --bucket local-kb
+$outboundUrl = Ensure-Queue $outboundName @(
+  "VisibilityTimeout=60"
+  "RedrivePolicy=$outboundRedrive"
+)
+
+# 5) Export ENV for this PS session
+$Env:InboundEventsQueueUrl = $inboundUrl
+$Env:OutboundQueueUrl      = $outboundUrl
+
+Write-Host ""
+Write-Host "InboundEventsQueueUrl = $Env:InboundEventsQueueUrl"
+Write-Host "OutboundQueueUrl      = $Env:OutboundQueueUrl"
+Write-Host ""
+Write-Host "Done."

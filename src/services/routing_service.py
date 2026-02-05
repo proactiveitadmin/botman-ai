@@ -126,7 +126,7 @@ class RoutingService:
                 slots = getattr(nlu, "slots", {}) or {}
                 confidence = float(getattr(nlu, "confidence", 1.0))
 
-        if intent not in ("clarify") and confidence < 0.3:
+        if intent != ("clarify") and confidence < 0.3:
             intent = "clarify"
 
         return intent, slots, confidence
@@ -568,13 +568,32 @@ class RoutingService:
             )
             if verify_resp:
                 return verify_resp
+            member_id = conv.get("crm_member_id")
+            if not member_id:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "crm_member_not_linked",
+                    lang,
+                    {},
+                )
+                return [self._reply(msg, lang, body)]
             return self.crm_flow.verification_active(msg, lang, member_id)
 
         # 6.9 Zgody marketingowe (opt-in / opt-out) – PG-only, z confirm na "TAK"
         if intent == "marketing_optout":
+            member_id = conv.get("crm_member_id")
+            if not member_id:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "crm_member_not_linked",
+                    lang,
+                    {},
+                )
+                return [self._reply(msg, lang, body)]
             self.crm_flow.set_pending_marketing_consent_change(
                 msg, 
-                "marketing_optout"
+                "marketing_optout",
+                member_id
             )
             body = self.tpl.render_named(
                 msg.tenant_id, 
@@ -584,9 +603,19 @@ class RoutingService:
             return [self._reply(msg, lang, body)]
 
         if intent == "marketing_optin":
+            member_id = conv.get("crm_member_id")
+            if not member_id:
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "crm_member_not_linked",
+                    lang,
+                    {},
+                )
+                return [self._reply(msg, lang, body)]
             self.crm_flow.set_pending_marketing_consent_change(
                 msg, 
-                "marketing_optin"
+                "marketing_optin",
+                member_id
             )
             body = self.tpl.render_named(
                 msg.tenant_id, 

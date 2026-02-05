@@ -162,9 +162,6 @@ class CRMFlowService:
         """
         Wczytuje listę słów (np. TAK / NIE) z Templates (per tenant + język),
         trzyma w cache.
-
-        SKOPIUJ tu ciało obecnej metody `_get_words_set` z RoutingService
-        1:1.
         """
         key = (tenant_id, template_name, lang or "")
         if key in self._words_cache:
@@ -189,8 +186,6 @@ class CRMFlowService:
     def _generate_verification_code(self, length: int = 6) -> str:
         """
         Generuje prosty kod weryfikacyjny używany w flow WWW -> WhatsApp.
-
-        SKOPIUJ ciało z `_generate_verification_code` z RoutingService.
         """
         import secrets
         import string
@@ -1105,13 +1100,20 @@ class CRMFlowService:
         contracts = contracts_resp.get("value", []) or []
 
         if not contracts:
+            try:
+                members_resp = self.crm.get_member_by_phone(tenant_id, msg.from_phone)
+                items = (members_resp or {}).get("value") or []
+                if items:
+                    email = (items[0].get("email") or "").strip()
+            except Exception:
+                email = ""
             body = self.tpl.render_named(
                 msg.tenant_id,
                 "crm_contract_not_found",
                 lang,
                 {
-                    "email": slots.get("email", ""),
-                    "phone": slots.get("phone", ""),
+                    "email": email,
+                    "phone": msg.from_phone,
                 },
             )
             return [self._reply(msg, lang, body)]
@@ -1159,7 +1161,7 @@ class CRMFlowService:
         mt = self.crm.get_member_type_by_phone(tenant_id, phone)
         return bool(mt) and mt.lower() == "member"
         
-    def set_pending_marketing_consent_change(self, msg: Message, kind: str):
+    def set_pending_marketing_consent_change(self, msg: Message, kind: str, member_id: str):
         self.conv.put(
             self._pending_key(msg.from_phone),
             "pending",
@@ -1192,9 +1194,6 @@ class CRMFlowService:
         
         classes = classes_resp.get("value") or []
         
-        if not allow_selection:
-            auto_confirm_single = False
-            
         if not classes:
             body = self.tpl.render_named(
                 msg.tenant_id,
@@ -1202,9 +1201,11 @@ class CRMFlowService:
                 lang,
                 {},
             )
-            return [self._reply(msg, lang, body)]
-            classes = classes_resp.get("value") or []
-
+            return [self._reply(msg, lang, body)]   
+            
+        if not allow_selection:
+            auto_confirm_single = False
+            
         # Jeśli jest dokładnie 1 pozycja, nie pokazujemy listy.
         # Od razu przechodzimy do standardowego flow rezerwacji (w tym weryfikacji PG).
         if auto_confirm_single and len(classes) == 1:
@@ -1446,74 +1447,6 @@ class CRMFlowService:
 
         # 4) Nic nie wybraliśmy – oddaj dalej do NLU / clarify
         return None
-
-
-    def start_reservation_from_selection(
-        self,
-        msg: Message,
-        lang: str,
-        selection: dict,
-    ) -> List[Action]:
-        """
-        Użytkownik wybrał konkretną klasę z listy.
-        Tutaj pilnujemy:
-        - że mamy class_id,
-        - że użytkownik jest zweryfikowany w PG (w razie potrzeby wywołujemy challenge),
-        - że pending rezerwacja używa prawdziwego member_id z PG.
-        """
-        class_id = selected.get("class_id")
-        if not class_id:
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "reserve_class_missing_id",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
-
-        channel = msg.channel or "whatsapp"
-        channel_user_id = msg.channel_user_id or msg.from_phone
-        conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
-
-        # 1) Weryfikacja PG – jeśli potrzeba, zainicjuje challenge
-        verify_resp = self.ensure_crm_verification(
-            msg,
-            conv,
-            lang,
-            post_intent="reserve_class",
-            post_slots={"class_id": class_id},
-        )
-        if verify_resp:
-            # tutaj kończymy – challenge / WWW verification przejmie flow
-            return verify_resp
-
-        # 2) Po weryfikacji PG oczekujemy crm_member_id w rozmowie
-        conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
-        member_id = conv.get("crm_member_id")
-        if not member_id:
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "crm_member_not_linked",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
-
-        class_meta = {
-            "class_name": selected.get("name"),
-            "class_date": selected.get("date"),
-            "class_time": selected.get("time"),
-        }
-
-        return self.reserve_class_with_id_core(
-            msg,
-            lang,
-            class_id=class_id,
-            member_id=member_id,
-            class_meta=class_meta,
-        )
-
-
 
     def handle_pending_confirmation(
         self,
@@ -1860,40 +1793,6 @@ class CRMFlowService:
             member_id=member_id,
             class_meta=class_meta,
         )
-
-
-    def _verify_challenge_answer(
-        self,
-        tenant_id: str,
-        phone: str,
-        challenge_type: str,
-        answer: str,
-    ) -> bool:
-        """
-        Weryfikacja odpowiedzi na challenge PG.
-
-        Docelowo logika powinna siedzieć w CRMService (odpytywanie PerfectGym
-        / wewnętrznego indeksu członków). Tutaj delegujemy do metody
-        crm.verify_member_challenge.
-
-        Zwraca True/False.
-        """
-        answer = (answer or "").strip()
-        if not answer:
-            return False
-
-        try:
-            return bool(
-                self.crm.verify_member_challenge(
-                    tenant_id=tenant_id,
-                    phone=phone,
-                    challenge_type=challenge_type,
-                    answer=answer,
-                )
-            )
-        except Exception:
-            # W razie błędu po stronie integracji traktujemy jako niepowodzenie.
-            return False
 
     def verification_active(
         self, msg: Message, lang: str, member_id: str

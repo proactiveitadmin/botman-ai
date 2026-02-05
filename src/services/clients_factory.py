@@ -25,23 +25,24 @@ class ClientsFactory:
         self._pg: dict[str, PerfectGymClient] = {}
         self._pinecone: dict[str, PineconeClient] = {}
         self._whatsapp_sender: dict[str, Any] = {}
+   
+    def _get_client(self, tenant_id: str, cache: Dict[str, T], client_cls: Type[T]) -> T:
+            if tenant_id in cache:
+                return cache[tenant_id]
+            cfg = self.tenant_cfg.get(tenant_id)
+            if cfg is None:
+                raise ValueError(f"Missing tenant config for tenant_id={tenant_id}")
+            client = client_cls.from_tenant_config(cfg)
+            cache[tenant_id] = client
+            return client
 
     def twilio(self, tenant_id: str) -> TwilioClient:
-        if tenant_id in self._twilio:
-            return self._twilio[tenant_id]
-        cfg = self.tenant_cfg.get(tenant_id)
-        client = TwilioClient.from_tenant_config(cfg)
-        self._twilio[tenant_id] = client
-        return client
+        return self._get_client(tenant_id, self._twilio, TwilioClient)
 
 
     def whatsapp_cloud(self, tenant_id: str) -> WhatsAppCloudClient:
-        if tenant_id in self._whatsapp_cloud:
-            return self._whatsapp_cloud[tenant_id]
-        cfg = self.tenant_cfg.get(tenant_id)
-        client = WhatsAppCloudClient.from_tenant_config(cfg)
-        self._whatsapp_cloud[tenant_id] = client
-        return client
+        return self._get_client(tenant_id, self._whatsapp_cloud, WhatsAppCloudClient)
+
 
     def whatsapp(self, tenant_id: str):
         """Returns the configured WhatsApp sender for the tenant.
@@ -65,25 +66,11 @@ class ClientsFactory:
         return sender
 
     def jira(self, tenant_id: str) -> JiraClient:
-        if tenant_id in self._jira:
-            return self._jira[tenant_id]
-        cfg = self.tenant_cfg.get(tenant_id)
-        client = JiraClient.from_tenant_config(cfg)
-        self._jira[tenant_id] = client
-        return client
+        return self._get_client(tenant_id, self._jira, JiraClient)
 
     def perfectgym(self, tenant_id: str) -> PerfectGymClient:
-        if tenant_id in self._pg:
-            return self._pg[tenant_id]
-        cfg = self.tenant_cfg.get(tenant_id)
-        client = PerfectGymClient.from_tenant_config(cfg)
-        self._pg[tenant_id] = client
-        return client
+        return self._get_client(tenant_id, self._pg, PerfectGymClient)
 
     def pinecone(self, tenant_id: str) -> PineconeClient:
-        if tenant_id in self._pinecone:
-            return self._pinecone[tenant_id]
-        cfg = self.tenant_cfg.get(tenant_id)
-        client = PineconeClient.from_tenant_config(cfg)
-        self._pinecone[tenant_id] = client
-        return client
+        return self._get_client(tenant_id, self._pinecone, PineconeClient)
+

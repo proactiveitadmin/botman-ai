@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 from datetime import datetime
+from urllib.parse import quote
 
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..common.logging import logger
