@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, Type, TypeVar
 
 from ..adapters.jira_client import JiraClient
 from ..adapters.perfectgym_client import PerfectGymClient
@@ -9,6 +9,9 @@ from ..adapters.whatsapp_cloud_client import WhatsAppCloudClient
 from ..adapters.pinecone_client import PineconeClient
 from ..common.logging import logger
 from .tenant_config_service import TenantConfigService, default_tenant_config_service
+
+
+T = TypeVar("T")
 
 
 class ClientsFactory:
@@ -25,16 +28,24 @@ class ClientsFactory:
         self._pg: dict[str, PerfectGymClient] = {}
         self._pinecone: dict[str, PineconeClient] = {}
         self._whatsapp_sender: dict[str, Any] = {}
-   
+
+    def _feature_enabled(self, cfg: dict, flag_name: str) -> bool:
+        f = (cfg or {}).get("features") or {}
+        if not isinstance(f, dict):
+            return True
+        v = f.get(flag_name)
+        # absent flag => enabled by default (demo-friendly)
+        return bool(True if v is None else v)
+
     def _get_client(self, tenant_id: str, cache: Dict[str, T], client_cls: Type[T]) -> T:
-            if tenant_id in cache:
-                return cache[tenant_id]
-            cfg = self.tenant_cfg.get(tenant_id)
-            if cfg is None:
-                raise ValueError(f"Missing tenant config for tenant_id={tenant_id}")
-            client = client_cls.from_tenant_config(cfg)
-            cache[tenant_id] = client
-            return client
+        if tenant_id in cache:
+            return cache[tenant_id]
+        cfg = self.tenant_cfg.get(tenant_id)
+        if cfg is None:
+            raise ValueError(f"Missing tenant config for tenant_id={tenant_id}")
+        client = client_cls.from_tenant_config(cfg)
+        cache[tenant_id] = client
+        return client
 
     def twilio(self, tenant_id: str) -> TwilioClient:
         return self._get_client(tenant_id, self._twilio, TwilioClient)
@@ -66,11 +77,21 @@ class ClientsFactory:
         return sender
 
     def jira(self, tenant_id: str) -> JiraClient:
+        cfg = self.tenant_cfg.get(tenant_id)
+        if not self._feature_enabled(cfg, "jira"):
+            # No-op dev mode: JiraClient.create_ticket returns dev ticket when url is empty
+            return JiraClient.from_tenant_config({"jira": {}})
         return self._get_client(tenant_id, self._jira, JiraClient)
 
     def perfectgym(self, tenant_id: str) -> PerfectGymClient:
+        cfg = self.tenant_cfg.get(tenant_id)
+        if not self._feature_enabled(cfg, "perfectgym"):
+            return PerfectGymClient.from_tenant_config({"perfectgym": {}})
         return self._get_client(tenant_id, self._pg, PerfectGymClient)
 
     def pinecone(self, tenant_id: str) -> PineconeClient:
+        cfg = self.tenant_cfg.get(tenant_id)
+        if not self._feature_enabled(cfg, "kb_vector"):
+            return PineconeClient.from_tenant_config({"pinecone": {}})
         return self._get_client(tenant_id, self._pinecone, PineconeClient)
 

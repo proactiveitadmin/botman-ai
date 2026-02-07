@@ -256,7 +256,12 @@ class KBService:
         question = (question or "").strip()
         if not question:
             return None
-
+           
+        top1 = 0.0
+        top2 = 0.0
+        gap = 0.0
+        strict_mode = False
+            
         # 2) retrieval: prefer Pinecone (vector DB) when configured.
         vector_enabled = self._vector.enabled(tenant_id)
         retrieved_chunks = []
@@ -302,9 +307,6 @@ class KBService:
             except Exception:
                 top1_strict_min = 0.55
 
-            top1 = 0.0
-            top2 = 0.0
-            gap = 0.0
         
             if retrieved_chunks:
                 try:
@@ -318,14 +320,16 @@ class KBService:
                         top2 = 0.0
                 gap = max(0.0, top1 - top2)
 
-            # Default behavior: low band -> return None (no KB LLM)
-            below_low = (not retrieved_chunks) or (top1 < low_threshold)
+            if (not retrieved_chunks):
+                return None
 
-            # NEW override rules based on gap
-            # Rule 1: treat as high confidence even if top1 < high_threshold
+            if top1 < low_threshold:
+                strict_mode = True
+
+            #treat as high confidence even if top1 < high_threshold
             force_high = (top1 >= top1_high_min and gap >= gap_high)
 
-            # Rule 2: if it would fall below_low, but it's clearly the best vs #2,
+            # if it would fall below_low, but it's clearly the best vs #2,
             # do NOT return None; instead go strict LLM.
             force_strict = (top1 >= top1_strict_min and gap >= gap_strict)
 
@@ -344,80 +348,77 @@ class KBService:
                 "force_strict": force_strict,
             })
 
-            if below_low and not force_strict:
-                logger.info({
-                    "component": "kb_service",
-                    "event": "vector_retrieval_below_threshold",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                    "matches": len(retrieved_chunks) if retrieved_chunks else 0,
-                    "top1": top1,
-                    "top2": top2,
-                    "gap": gap,
-                    "threshold": low_threshold,
-                    "band": "low",
-                })
-                return None
-
             # Decide strict_mode:
             # - If force_high -> not strict
             # - Else strict if top1 < high_threshold OR force_strict explicitly
-            strict_mode = (not force_high) and (force_strict or (top1 < high_threshold))
+            if force_high:
+                strict_mode = False
+            else:
+                strict_mode = (strict_mode or force_strict or (top1 < high_threshold))
 
 
         # FAST PATH: if vector retrieval returns chunks that already include "A: ...",
         # return the best-match answer directly and avoid an extra LLM call.
         if retrieved_chunks:
-            best = retrieved_chunks[0]
             # FAST-PATH safety: only return a direct FAQ answer when similarity is high.
             # Otherwise fall back to LLM synthesis / explicit "no info" response.
             try:
-                min_score = float(os.getenv("KB_VECTOR_FASTPATH_MIN_SCORE", "0.80"))
+                min_score = float(os.getenv("KB_VECTOR_FASTPATH_MIN_SCORE", "0.70"))
             except Exception:
-                min_score = 0.80
+                min_score = 0.70
 
-            # NEW: allow fastpath for clearly dominant match
-            try:
-                fastpath_gap = float(os.getenv("KB_VECTOR_FASTPATH_GAP", "0.12"))
-            except Exception:
-                fastpath_gap = 0.12
-                
-            best_score = getattr(best, "score", 0.0) or 0.0
-            # reuse gap computed earlier
-            if best_score < min_score and gap < fastpath_gap:
-                best = None
+            max_fastpath = 2  # keep latency predictable
+            for idx, best in enumerate((retrieved_chunks or [])[:max_fastpath]):  
+                best_score = getattr(best, "score", 0.0) or 0.0
+                # reuse gap computed earlier
+                if best_score < min_score:
+                    continue
 
-            if best is not None:
                 # Extract the answer portion from the chunk (chunk_faq uses "Q:" and "A:").
                 txt = (best.text or "").strip()
-                ans = ""
+                if not txt:
+                    continue
+                    
                 m = re.search(r"\n\s*A:\s*(.*)$", txt, flags=re.IGNORECASE | re.DOTALL)
                 if m:
                     ans = (m.group(1) or "").strip()
                 else:
                     # Fallback: try split on 'A:' if newlines differ
                     parts = re.split(r"\bA:\s*", txt, maxsplit=1, flags=re.IGNORECASE)
-                    if len(parts) == 2:
-                        ans = parts[1].strip()
-                if ans:
-                    if ans == "__NO_INFO__":
-                        logger.info(
-                            {
-                                "component": "kb_service",
-                                "event": "kb_llm_no_info",
-                                "tenant_id": tenant_id,
-                                "lang": language_code,
-                                "band": "mid",
-                            }
-                        )
-                        return None
+                    ans = parts[1].strip() if len(parts) == 2 else ""
+                if not ans:
+                    continue
+                if ans == "__NO_INFO__":
+                    logger.info(
+                        {
+                            "component": "kb_service",
+                            "event": "fastpath_skip_no_info_chunk",
+                            "tenant_id": tenant_id,
+                            "lang": language_code,
+                            "band": "mid",
+                        }
+                    )
+                    continue
+                logger.info(
+                    {
+                        "component": "kb_service",
+                        "event": "returns fastpath answer",
+                        "tenant_id": tenant_id,
+                        "lang": language_code,
+                        "ans": ans,
+                    }
+                )
+                if ans and ans != "__NO_INFO__":
                     return ans
 
             system_prompt = build_kb_prompt(chunks=retrieved_chunks, language_code=language_code)
             if strict_mode:
-                system_prompt += (
-                    "\n\nIf the snippets do not contain enough information to answer, "
-                    "respond with the exact JSON {\"answer\": \"__NO_INFO__\"} and nothing else."
+                system_prompt += (        
+                    "\n\nThe user's message may contain multiple questions or topics. "
+                    "Answer using ONLY the provided snippets.\n"
+                    "- If you can answer at least one part, provide an answer for the part(s) supported by snippets and ignore unsupported parts.\n"
+                    "- If none of the snippets support any part of the user's message, respond with the exact JSON "
+                    "{\"answer\": \"__NO_INFO__\"} and nothing else."
                 )
         else:
             # legacy retrieval (backward-compatible)
@@ -502,6 +503,8 @@ class KBService:
             ]
             # 4) opcjonalna historia rozmowy (user / assistant)
             if history:
+                history = [m for m in history if m.get("role") == "user"]
+            if history:
                 messages.extend(history)
 
             # 5) aktualne pytanie
@@ -559,28 +562,33 @@ class KBService:
                 }
             )
             return None
-        if "__NO_INFO__" in raw:
-            logger.info(
-                {
-                    "component": "kb_service",
-                    "event": "kb_llm_no_info",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                    "band": "mid",
-                }
-            )
-            return None
+
         # 7) próbujemy wyciągnąć "answer" z JSON-a
         try:
             data = json.loads(raw)
-            ans = data.get("answer")
-            if isinstance(ans, str):
-                ans = ans.strip()
-                return ans
-        except Exception:
-            pass
+            if isinstance(data, dict):
+                if "answer" in data:
+                    ans = data.get("answer")
+                    if isinstance(ans, str):
+                        ans = ans.strip()
+                        if ans == "__NO_INFO__":
+                            return None
+                        return ans
+                    return None
+                parts = []
+                for v in data.values():
+                    if isinstance(v, str):
+                        v = v.strip()
+                        if v and v != "__NO_INFO__":
+                            parts.append(v)
+                if parts:
+                    return "\n".join(parts)
+                return None
 
-        return raw
+        except Exception:
+            return None
+
+        return None
         
     def list_faq_keys(self, tenant_id: str, language_code: str) -> set[str]:
         faq = self._load_tenant_faq(tenant_id, language_code) or {}

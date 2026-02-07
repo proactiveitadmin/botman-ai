@@ -23,7 +23,7 @@ def test_inbound_rate_limited_returns_429(aws_stack, monkeypatch):
     
     # erzatz SpamService, który zawsze blokuje
     class FakeSpam:
-        def is_blocked(self, tenant_id, phone):
+        def is_blocked(self, tenant_id=None, phone=None, **kwargs):
             return True
 
     monkeypatch.setattr(
@@ -68,7 +68,7 @@ def test_inbound_pushes_to_sqs(monkeypatch):
 
     # 2) stub SpamService, żeby nie dotykać DDB i żeby NIE blokował
     class FakeSpam:
-        def is_blocked(self, tenant_id, phone):
+        def is_blocked(self, tenant_id=None, phone=None, **kwargs):
             return False
 
     # 3) ustaw env dla URL kolejki (jeśli handler z niego korzysta)

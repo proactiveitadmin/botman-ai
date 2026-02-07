@@ -57,7 +57,14 @@ class SpamService:
             "sk": ph,
         }
 
-    def is_blocked(self, tenant_id: str, phone: Optional[str]) -> bool:
+    def is_blocked(
+        self,
+        *,
+        tenant_id: str,
+        phone: Optional[str],
+        max_per_bucket: Optional[int] = None,
+        tenant_max_per_bucket: Optional[int] = None,
+    ) -> bool:
         """
         Zwiększa licznik wiadomości w aktualnym buckecie
         i zwraca True, jeśli numer powinien być zablokowany.
@@ -147,7 +154,8 @@ class SpamService:
             return True
 
         # 2) Jeżeli przekroczono limit w buckecie – ustawiamy blokadę i zwracamy True
-        if cnt > self.max_per_bucket:
+        max_phone = int(max_per_bucket) if max_per_bucket is not None else self.max_per_bucket
+        if cnt > max_phone:
             new_blocked_until = now_ts + self.bucket_seconds
             try:
                 # odświeżamy też ttl_ts, żeby rekord nie żył dłużej niż max_age
@@ -172,20 +180,27 @@ class SpamService:
                     "tenant_id": tenant_id,
                     "phone": mask_phone(phone),
                     "cnt": cnt,
-                    "max_per_bucket": self.max_per_bucket,
+                    "max_per_bucket": max_phone,
                     "bucket_seconds": self.bucket_seconds,
                 }
             )
             return True
 
         # 3) Jeżeli przekroczono limit TENANTA w buckecie – też blokujemy ten request
-        if self.tenant_max_per_bucket and total_cnt > self.tenant_max_per_bucket:
+        max_tenant = (
+            int(tenant_max_per_bucket)
+            if tenant_max_per_bucket is not None
+            else self.tenant_max_per_bucket
+        )
+
+        if max_tenant and total_cnt > max_tenant:
             logger.warning(
                 {
                     "spam": "tenant_bucket_limit_exceeded",
                     "tenant_id": tenant_id,
                     "phone": mask_phone(phone),
                     "total_cnt": total_cnt,
+                    "tenant_max_per_bucket": max_tenant,
                 }
             )
             # nie ustawiamy tu osobnego blocked_until dla wszystkich,

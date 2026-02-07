@@ -21,7 +21,7 @@ def test_spam_service_blocks_after_limit(aws_stack):
     bucket = svc._bucket_for_ts(fixed_ts)
     table.delete_item(Key={"pk": f"{tenant}#{bucket}", "sk": phone})
 
-    blocked_flags = [svc.is_blocked(tenant, phone) for _ in range(5)]
+    blocked_flags = [svc.is_blocked(tenant_id=tenant, phone=phone) for _ in range(5)]
 
     # Pierwsze 3 wiadomości przechodzą, 4 i 5 są blokowane
     assert blocked_flags[:3] == [False, False, False]

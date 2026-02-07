@@ -243,7 +243,7 @@ class RoutingService:
             
             with timed("list_faq_keys", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
                 if faq_key:
-                    # lista kluczy z realnej bazy FAQ (S3/default), bez hardcode
+                    # lista kluczy z realnej bazy FAQ (S3/default)
                     if faq_key not in self.kb.list_faq_keys(msg.tenant_id, lang):
                         faq_key = ""
             if faq_key:
@@ -285,18 +285,12 @@ class RoutingService:
                     history_items = []
                 else:
                     for item in reversed(history_items):
-                        direction = item.get("direction")
-                        body_item = item.get("body") or ""
+                        if item.get("direction") != "inbound":
+                            continue
+                        body_item = (item.get("body") or "").strip()
                         if not body_item:
                             continue
-                        if direction == "inbound":
-                            chat_history.append(
-                                {"role": "user", "content": body_item}
-                            )
-                        elif direction == "outbound":
-                            chat_history.append(
-                                {"role": "assistant", "content": body_item}
-                            )
+                        chat_history.append({"role": "user", "content": body_item})
                     chat_history = chat_history[-6:]
 
             # 3) Fallback – jeśli NLU nie podało topic albo FAQ nie ma wpisu,
@@ -309,7 +303,24 @@ class RoutingService:
             )
 
             if ai_body:
-                body = ai_body
+                if ai_body.lstrip().startswith("{"):
+                    try:
+                        data = json.loads(ai_body)
+                        if isinstance(data, dict):
+                            if isinstance(data.get("answer"), str):
+                                body = data["answer"].strip()
+                            else:
+                                parts = []
+                                for v in data.values():
+                                    if isinstance(v, str):
+                                        v = v.strip()
+                                        if v and v != "__NO_INFO__":
+                                            parts.append(v)
+                                body = "\n".join(parts) if parts else None
+                    except Exception:
+                        body = None
+                else:    
+                    body = ai_body             
             else:
                 # Deterministic fallback (no extra LLM calls).
                 body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})         

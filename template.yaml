@@ -122,6 +122,8 @@ Globals:
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
         
         TENANT_CONFIG_CACHE_TTL: "300"
+        METRICS_NAMESPACE: "BotmanAI"
+        DASHBOARD_PREFIX: !Sub 'tenant-${AWS::StackName}-'
         OPENAI_TIMEOUT_S: 12
         OPENAI_MAX_ATTEMPTS: 3
         OPENAI_RETRY_MAX_DELAY_S: 2
@@ -590,8 +592,6 @@ Resources:
       Handler: src/lambdas/message_router/handler.lambda_handler
       MemorySize: 2048
       AutoPublishAlias: live
-      ProvisionedConcurrencyConfig:
-        ProvisionedConcurrentExecutions: 1
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt InboundEventsQueue.QueueName
@@ -661,8 +661,6 @@ Resources:
       Handler: src/lambdas/outbound_sender/handler.lambda_handler
       MemorySize: 2048
       AutoPublishAlias: live
-      ProvisionedConcurrencyConfig:
-        ProvisionedConcurrentExecutions: 1
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt OutboundQueue.QueueName      
@@ -965,6 +963,37 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/health-${AWS::StackName}'
       RetentionInDays: 30
+
+  # --- Multi-tenant observability: per-tenant CloudWatch dashboards ---
+  DashboardProvisionerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'dashboard-provisioner-${AWS::StackName}'
+      CodeUri: .
+      Handler: src/lambdas/dashboard_provisioner/handler.lambda_handler
+      Timeout: 60
+      MemorySize: 512
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref Tenants
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutDashboard
+                - cloudwatch:DeleteDashboards
+              Resource: "*"
+
+  DashboardProvisionerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt DashboardProvisionerFunction.Arn
+      Principal: cloudformation.amazonaws.com
+
+  TenantDashboards:
+    Type: Custom::TenantDashboards
+    Properties:
+      ServiceToken: !GetAtt DashboardProvisionerFunction.Arn
 
 Outputs:
   TwilioApiUrl:

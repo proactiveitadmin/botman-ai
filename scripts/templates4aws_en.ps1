@@ -73,7 +73,7 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "Thank you — your request has been created. Case number: %{ticket}. We’ll get back to you as soon as it’s reviewed."
+        "S": "Thank you — your request has been created. Case number: *{ticket}*. We’ll get back to you as soon as it’s reviewed."
     },
     "placeholders": {
         "L": [
@@ -1117,7 +1117,7 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "Verification is temporarily blocked. Please wait about {{minutes}} min and try again later, or contact reception."
+        "S": "Verification is temporarily blocked. Please wait about *{minutes}* min and try again later, or contact reception."
     },
     "placeholders": {
         "L": [
@@ -1149,7 +1149,7 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "We’ve sent a verification code to {{email}}. Enter it here to continue."
+        "S": "We’ve sent a verification code to *{email}*. Enter it here to continue."
     },
     "placeholders": {
         "L": [
@@ -1237,7 +1237,7 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "Your verification code is: {{verification_code}}\n\nThe code is valid for {{ttl_minutes}} minutes.\n\nIf you didn’t request this verification, please ignore this message."
+        "S": "Your verification code is: *{verification_code}*\n\nThe code is valid for *{ttl_minutes}* minutes.\n\nIf you didn’t request this verification, please ignore this message."
     },
     "placeholders": {
         "L": [

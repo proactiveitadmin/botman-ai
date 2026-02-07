@@ -399,10 +399,11 @@ def build_kb_prompt(
 
     sys = (
         "You are a helpful customer-support assistant.\n"
-        "Answer the user's question ONLY using the knowledge snippets below.\n"
-        "If the snippets do not contain the needed information,\n"
-        "reply that you don't know AND ask the user if there is anything else you can help with.\n"
-        "Always respond as a JSON object with a single key \"answer\".\n"
+        "The user's message may contain multiple questions or topics.\n"
+        "Answer ONLY using the knowledge snippets below.\n"
+        "- If you can answer at least one part using the snippets, answer the supported part(s) and ignore unsupported parts.\n"
+        "- If none of the snippets support any part of the user's message, respond with the exact JSON {\"answer\":\"__NO_INFO__\"} and nothing else.\n"
+        "Output MUST be valid JSON with exactly one key: \"answer\". No other keys.\n"
         "Knowledge snippets:\n"
         f"{context}\n"
     )

@@ -7,11 +7,17 @@ from ...common.logging_utils import mask_phone, shorten_body
 from ...services.metrics_service import MetricsService
 from ...repos.idempotency_repo import IdempotencyRepo
 from ...services.clients_factory import ClientsFactory
+from ...services.tenant_config_service import default_tenant_config_service
+from ...common.rate_limiter import InMemoryRateLimiter
 
 
 clients = ClientsFactory()
 metrics = MetricsService()
 IDEMPOTENCY = IdempotencyRepo()
+tenant_cfg = default_tenant_config_service()
+tenant_limiter = InMemoryRateLimiter()
+tenant_cfg = default_tenant_config_service()
+tenant_limiter = InMemoryRateLimiter()
 
 def _queue_delay_ms(record: dict) -> int | None:
     try:
@@ -32,6 +38,11 @@ def _normalize_whatsapp_channel_user_id(to: str | None) -> str | None:
     return t if t.startswith("whatsapp:") else f"whatsapp:{t}"
         
 def lambda_handler(event, context):
+    try:
+        tenant_limiter.reset()
+    except Exception:
+        pass
+
     records = event.get("Records", [])
     if not records:
         logger.info({"sender": "no_records"})
@@ -64,13 +75,33 @@ def lambda_handler(event, context):
             text = payload.get("body")
             tenant_id = payload.get("tenant_id", "default")
 
+            # --- per-tenant soft limiter (no sleep; retry via batch failure) ---
+            try:
+                cfg = tenant_cfg.get(tenant_id)
+            except Exception:
+                cfg = {}
+            lim = (cfg.get("limits") or {}).get("outbound") or {}
+            try:
+                rate = float(lim.get("per_tenant_rps") or 0)
+                burst = float(lim.get("per_tenant_burst") or max(1.0, rate))
+            except Exception:
+                rate, burst = 0.0, 0.0
+
+            if rate > 0 and not tenant_limiter.try_acquire(f"out#{tenant_id}", rate=rate, burst=burst):
+                logger.warning({"handler": "outbound_sender", "event": "tenant_throttled", "tenant_id": tenant_id})
+                metrics.incr("TenantOutboundThrottled", tenant_id=tenant_id, component="outbound_sender")
+                if msg_id:
+                    batch_failures.append({"itemIdentifier": msg_id})
+                continue
+
             # Idempotency for outbound send (Twilio / web queue)
             idem_key = payload.get("idempotency_key") or (f"out#{tenant_id}#{msg_id}" if msg_id else None)
             if idem_key:
                 acquired = IDEMPOTENCY.try_acquire(f"snd#{idem_key}", meta={"scope": "outbound", "channel": channel})
                 if not acquired:
                     logger.info({"handler": "outbound_sender", "event": "duplicate_outbound", "tenant_id": tenant_id})
-                    metrics.incr("message_sent_duplicate", channel=channel, status="DUPLICATE")
+                    metrics.incr("TenantOutboundDuplicate", tenant_id=tenant_id, component="outbound_sender", channel=channel)
+                    metrics.incr("message_sent_duplicate", tenant_id=tenant_id, component="outbound_sender", channel=channel, status="DUPLICATE")
                     continue
             else:
                 logger.warning({"handler": "outbound_sender", "event": "missing_idempotency_key", "tenant_id": tenant_id})
@@ -88,7 +119,9 @@ def lambda_handler(event, context):
                         QueueUrl=web_q_url,
                         MessageBody=json.dumps(web_msg),
                     )
-                    metrics.incr("message_sent", channel="web", status="QUEUED")
+                    metrics.incr("TenantOutboundQueued", tenant_id=tenant_id, component="outbound_sender", channel="web")
+                    metrics.incr("TenantOutboundQueued", tenant_id=tenant_id, component="outbound_sender", channel="web")
+                    metrics.incr("message_sent", tenant_id=tenant_id, component="outbound_sender", channel="web", status="QUEUED")
                     logger.info(
                         {
                             "handler": "outbound_sender",
@@ -99,7 +132,8 @@ def lambda_handler(event, context):
                         }
                     )
                 else:
-                    metrics.incr("message_sent", channel="web", status="NO_QUEUE")
+                    metrics.incr("TenantOutboundQueued", tenant_id=tenant_id, component="outbound_sender", channel="web", status="NO_QUEUE")
+                    metrics.incr("message_sent", tenant_id=tenant_id, component="outbound_sender", channel="web", status="NO_QUEUE")
                     logger.info(
                         {
                             "handler": "outbound_sender",
@@ -120,7 +154,10 @@ def lambda_handler(event, context):
             res = clients.whatsapp(tenant_id).send_text(to=to, body=text)
             res_status = res.get("status", "UNKNOWN")
 
-            metrics.incr("message_sent", channel="whatsapp", status=res_status)
+            metrics.incr("TenantOutboundSent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
+            metrics.incr("TenantOutboundSent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
+            metrics.incr("TenantOutboundSent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
+            metrics.incr("message_sent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
 
             logger.info(
                 {

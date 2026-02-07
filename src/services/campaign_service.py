@@ -199,8 +199,8 @@ class CampaignService:
                 context,
             )
         else:
-            # fallback – zachowanie zgodne z dotychczasowym kodem
-            body = campaign.get("body", "Nowa oferta klubu!")
+            # fallback – neutral language: require explicit campaign body
+            body = campaign.get("body") or ""
 
         return {
             "body": body,

@@ -78,7 +78,7 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Dziękuję — zgłoszenie zostało utworzone. Numer sprawy: %{ticket}. Wrócimy do Ciebie, gdy tylko je sprawdzimy."
+        "S": "Dziękuję — zgłoszenie zostało utworzone. Numer sprawy: *{ticket}*. Wrócimy do Ciebie, gdy tylko je sprawdzimy."
     },
     "placeholders": {
         "L": [
@@ -1031,7 +1031,7 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\n• Jeśli korzystasz z czatu WWW: kliknij link, aby otworzyć WhatsApp i wyślij kod.\n• Jeśli jesteś już w WhatsApp: po prostu wyślij kod.\n\nKod: {{verification_code}}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć tutaj — zweryfikuję konto i odblokuję dostęp do danych PerfectGym."
+        "S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\n• Jeśli korzystasz z czatu WWW: kliknij link, aby otworzyć WhatsApp i wyślij kod.\n• Jeśli jesteś już w WhatsApp: po prostu wyślij kod.\n\nKod: {*{verification_code}*}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć tutaj — zweryfikuję konto i odblokuję dostęp do danych PerfectGym."
     },
     "placeholders": {
         "L": [
@@ -1188,7 +1188,7 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Weryfikacja została tymczasowo zablokowana na {{minutes}} min. Spróbuj ponownie później lub skontaktuj się z recepcją."
+        "S": "Weryfikacja została tymczasowo zablokowana na *{minutes}* min. Spróbuj ponownie później lub skontaktuj się z recepcją."
     },
     "placeholders": {
         "L": [
@@ -1222,7 +1222,7 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Wysłaliśmy kod weryfikacyjny na adres {{email}}. Wpisz go tutaj, aby kontynuować."
+        "S": "Wysłaliśmy kod weryfikacyjny na adres *{email}*. Wpisz go tutaj, aby kontynuować."
     },
     "placeholders": {
         "L": [
@@ -1316,7 +1316,7 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Twój kod weryfikacyjny to: {{verification_code}}\n\nKod jest ważny przez {{ttl_minutes}} minut.\n\nJeśli to nie Ty inicjowałeś/aś weryfikację, zignoruj tę wiadomość."
+        "S": "Twój kod weryfikacyjny to: *{verification_code}*\n\nKod jest ważny przez {ttl_minutes} minut.\n\nJeśli to nie Ty inicjowałeś/aś weryfikację, zignoruj tę wiadomość."
     },
     "placeholders": {
         "L": [

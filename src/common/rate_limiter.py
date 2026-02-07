@@ -62,3 +62,26 @@ class InMemoryRateLimiter:
         b.tokens = min(b.burst, b.tokens + elapsed2 * b.rate)
         b.ts = now2
         b.tokens = max(0.0, b.tokens - cost)
+
+    def try_acquire(self, key: str, *, rate: float, burst: float, cost: float = 1.0) -> bool:
+        """Non-blocking acquire.
+
+        Returns True if tokens were available, False otherwise.
+        """
+        if rate <= 0:
+            return True
+
+        now = time.monotonic()
+        b = self._buckets.get(key)
+        if b is None:
+            b = _Bucket(rate=rate, burst=burst, tokens=burst, ts=now)
+            self._buckets[key] = b
+
+        elapsed = max(0.0, now - b.ts)
+        b.tokens = min(b.burst, b.tokens + elapsed * b.rate)
+        b.ts = now
+
+        if b.tokens >= cost:
+            b.tokens -= cost
+            return True
+        return False

@@ -211,15 +211,13 @@ class CRMFlowService:
         for name in template_names:
             try:
                 body = self.tpl.render_named(tenant_id, name, lang, ctx)
-            except Exception:
+            except Exception as e:
+                logger.error({"sender": "crm_flow", "event": "render_failed", "details": str(e)})
                 body = None
             if body:
                 return body
-        # twardy fallback (nie powinien się zdarzyć, ale lepiej niż pustka)
-        minutes = ctx.get("minutes")
-        if minutes:
-            return f"Weryfikacja jest tymczasowo zablokowana na {minutes} min. Czy chcesz połączyć się z obsługą lub założyć zgłoszenie?"
-        return "Czy chcesz połączyć się z obsługą lub założyć zgłoszenie?"
+        
+        return None
 
     def _block_verification_15m_and_offer_options(
         self,

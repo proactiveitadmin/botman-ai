@@ -11,8 +11,10 @@ import os
 import json
 import urllib.parse
 import re
+import time
 
 from ...services.spam_service import SpamService
+from ...services.metrics_service import MetricsService
 from ...repos.tenants_repo import TenantsRepo
 from ...services.tenant_config_service import default_tenant_config_service
 from ...common.utils import new_id
@@ -25,6 +27,7 @@ from ...common.security import user_hmac
 
 NGROK_HOST_HINTS = (".ngrok-free.app", ".ngrok.io")
 spam_service = SpamService()
+metrics = MetricsService()
 tenants_repo = TenantsRepo()
 tenant_cfg = default_tenant_config_service()
 
@@ -129,6 +132,8 @@ def lambda_handler(event, context):
     - buduje obiekt zdarzenia wewnętrznego,
     - wysyła go do kolejki InboundEventsQueueUrl.
     """
+    t0 = time.perf_counter()
+    tenant_id: str | None = None
     try:
         body_raw = event.get("body") or ""
         if event.get("isBase64Encoded"):
@@ -166,8 +171,9 @@ def lambda_handler(event, context):
         signature = headers_in.get("X-Twilio-Signature", "")
 
         token = None
+        cfg = {}
         try:
-            cfg = tenant_cfg.get(tenant_id)
+            cfg = tenant_cfg.get(tenant_id) or {}
             token = ((cfg.get("twilio") or {}).get("auth_token") or "").strip() or None
         except Exception as e:
             logger.error({"webhook": "tenant_cfg_load_failed", "tenant_id": tenant_id, "error": str(e)})
@@ -175,6 +181,7 @@ def lambda_handler(event, context):
 
         if not verify_twilio_signature(url, params, signature, auth_token=token):
             logger.warning({"webhook": "invalid_signature", "tenant_id": tenant_id})
+            metrics.incr("TenantInboundError", tenant_id=tenant_id, component="inbound_webhook", reason="invalid_signature")
             return {"statusCode": 403, "body": "Forbidden"}
         
         if not tenant_id:
@@ -195,8 +202,18 @@ def lambda_handler(event, context):
         uid = user_hmac(tenant_id, "whatsapp", channel_user_id)
         conv_id = f"conv#whatsapp#{uid}"
 
-        # --- SPAM / RATE LIMIT ---
-        if spam_service.is_blocked(tenant_id=tenant_id, phone=from_phone):
+        # --- SPAM / RATE LIMIT (per tenant config override) ---
+        limits = (cfg.get("limits") or {}) if isinstance(cfg, dict) else {}
+        inbound_limits = (limits.get("inbound") or {}) if isinstance(limits, dict) else {}
+        per_phone = inbound_limits.get("per_phone_per_minute")
+        per_tenant = inbound_limits.get("per_tenant_per_minute")
+
+        if spam_service.is_blocked(
+            tenant_id=tenant_id,
+            phone=from_phone,
+            max_per_bucket=int(per_phone) if per_phone is not None else None,
+            tenant_max_per_bucket=int(per_tenant) if per_tenant is not None else None,
+        ):
             logger.warning(
                 {
                     "webhook": "rate_limited",
@@ -204,6 +221,7 @@ def lambda_handler(event, context):
                     "tenant_id": tenant_id,
                 }
             )
+            metrics.incr("TenantInboundBlocked", tenant_id=tenant_id, component="inbound_webhook")
             # Twilio akceptuje dowolne body, ważny jest status HTTP
             return {"statusCode": 429, "body": "Too Many Requests"}
 
@@ -240,6 +258,14 @@ def lambda_handler(event, context):
             "body": shorten_body(msg.get("body")),
             "tenant_id": msg.get("tenant_id"),
         })
+
+        metrics.incr("TenantInboundAccepted", tenant_id=tenant_id, component="inbound_webhook")
+        metrics.timing_ms(
+            "TenantInboundLatencyMs",
+            (time.perf_counter() - t0) * 1000,
+            tenant_id=tenant_id,
+            component="inbound_webhook",
+        )
         
         return {
             "statusCode": 200,
@@ -248,5 +274,7 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        logger.error({"inbound_error": str(e)})
+        logger.error({"inbound_error": str(e), "tenant_id": tenant_id})
+        if tenant_id:
+            metrics.incr("TenantInboundError", tenant_id=tenant_id, component="inbound_webhook")
         return {"statusCode": 200, "body": "<Response></Response>"}
