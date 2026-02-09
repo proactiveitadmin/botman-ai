@@ -13,6 +13,21 @@ import json
 import time
 import random
 import asyncio
+from ..common.constants import (
+    INTENT_FAQ,
+    INTENT_HANDOVER,
+    INTENT_VERIFICATION,
+    INTENT_CLARIFY,
+    INTENT_TICKET,
+    INTENT_TICKET_STATUS,
+    INTENT_AVAILABLE_CLASSES,
+    INTENT_CONTRACT_STATUS,
+    INTENT_CRM_MEMBER_BALANCE,
+    INTENT_ACK,
+    INTENT_MARKETING_OPTOUT,
+    INTENT_MARKETING_OPTIN,
+    _VALID_INTENTS,
+)
 
 from openai import OpenAI
 from openai import APIError, APIConnectionError, APIStatusError, RateLimitError
@@ -58,7 +73,7 @@ Rules:
 - Prefer faq over clarify
 - Messages describing urgent problems, lost items, access to personal belongings,
   safety issues, or situations requiring immediate human assistance
-  MUST be classified as intent "ticket".
+  MUST be classified as intent INTENT_TICKET.
   
 Conversational shortcuts:
 - Single-token or very short greetings, farewells, and politeness expressions
@@ -72,15 +87,9 @@ If the message is a greeting or farewell:
 
 If the message is a short acknowledgement or politeness response
 (e.g. confirming, thanking, or reacting to a previous message):
-- Use intent "ack".
+- Use intent INTENT_ACK.
 - These messages are HIGH confidence (>= 0.9).
 """
-
-_VALID_INTENTS = {
-    "reserve_class", "faq", "handover", "verification", "clarify", "ticket",
-    "crm_available_classes", "crm_contract_status", "crm_member_balance", "ack",
-    "ticket_status", "marketing_optout", "marketing_optin",
-}
 
 class OpenAIClient:
     """
@@ -139,7 +148,7 @@ class OpenAIClient:
             )
             return json.dumps(
                 {
-                    "intent": "clarify",
+                    "intent": INTENT_CLARIFY,
                     "confidence": 0.49,
                     "slots": {"echo": user_msg[:80]},
                 }
@@ -274,7 +283,7 @@ class OpenAIClient:
 
         return json.dumps(
             {
-                "intent": "clarify",
+                "intent": INTENT_CLARIFY,
                 "confidence": 0.3,
                 "slots": {"note": note},
             }
@@ -349,11 +358,11 @@ class OpenAIClient:
         try:
             data = json.loads(content or "{}")
         except Exception:
-            return {"intent": "clarify", "confidence": 0.3, "slots": {}}
+            return {"intent": INTENT_CLARIFY, "confidence": 0.3, "slots": {}}
 
-        intent = str(data.get("intent", "clarify")).strip()
+        intent = str(data.get("intent", INTENT_CLARIFY)).strip()
         if intent not in _VALID_INTENTS:
-            intent = "clarify"
+            intent = INTENT_CLARIFY
 
         # confidence -> float 0..1
         try:

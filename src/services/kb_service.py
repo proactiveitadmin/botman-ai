@@ -24,6 +24,9 @@ from ..common.aws import s3_client
 from ..common.config import settings
 from ..adapters.openai_client import OpenAIClient
 from ..common.timing import timed
+from ..common.constants import (
+    STR_CHUNK_SCORE,
+)
 
 
 class KBService:
@@ -357,6 +360,12 @@ class KBService:
                 strict_mode = (strict_mode or force_strict or (top1 < high_threshold))
 
 
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "temp",
+                }
+            )
         # FAST PATH: if vector retrieval returns chunks that already include "A: ...",
         # return the best-match answer directly and avoid an extra LLM call.
         if retrieved_chunks:
@@ -369,15 +378,42 @@ class KBService:
 
             max_fastpath = 2  # keep latency predictable
             for idx, best in enumerate((retrieved_chunks or [])[:max_fastpath]):  
-                best_score = getattr(best, "score", 0.0) or 0.0
+                logger.info(
+                    {
+                        "component": "kb_service",
+                        "event": "temp",
+                    }
+                )
+
+                best_score = getattr(best, STR_CHUNK_SCORE, 0.0) or 0.0
                 # reuse gap computed earlier
                 if best_score < min_score:
+                    logger.info(
+                        {
+                            "component": "kb_service",
+                            "event": "temp",
+                        }
+                    )
+
                     continue
 
                 # Extract the answer portion from the chunk (chunk_faq uses "Q:" and "A:").
                 txt = (best.text or "").strip()
                 if not txt:
+                    logger.info(
+                        {
+                            "component": "kb_service",
+                            "event": "temp",
+                        }
+                    )
+
                     continue
+                logger.info(
+                    {
+                        "component": "kb_service",
+                        "event": "temp",
+                    }
+                )
                     
                 m = re.search(r"\n\s*A:\s*(.*)$", txt, flags=re.IGNORECASE | re.DOTALL)
                 if m:
@@ -386,7 +422,14 @@ class KBService:
                     # Fallback: try split on 'A:' if newlines differ
                     parts = re.split(r"\bA:\s*", txt, maxsplit=1, flags=re.IGNORECASE)
                     ans = parts[1].strip() if len(parts) == 2 else ""
-                if not ans:
+                if not ans:                
+                    logger.info(
+                        {
+                            "component": "kb_service",
+                            "event": "temp",
+                        }
+                    )
+
                     continue
                 if ans == "__NO_INFO__":
                     logger.info(
@@ -410,6 +453,12 @@ class KBService:
                 )
                 if ans and ans != "__NO_INFO__":
                     return ans
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "temp",
+                }
+            )
 
             system_prompt = build_kb_prompt(chunks=retrieved_chunks, language_code=language_code)
             if strict_mode:
@@ -622,3 +671,23 @@ class KBService:
             return self._vector.index_faq(tenant_id=tenant_id, language_code=tenant_language, faq=tenant_faq)
         return self._vector.index_faq(tenant_id=tenant_id, language_code=language_code, faq=tenant_faq)
       
+    def normalize_ai_answer(self, text: str) -> str | None:
+        if text.lstrip().startswith("{"):
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    if isinstance(data.get("answer"), str):
+                        body = data["answer"].strip()
+                    else:
+                        parts = []
+                        for v in data.values():
+                            if isinstance(v, str):
+                                v = v.strip()
+                                if v and v != "__NO_INFO__":
+                                    parts.append(v)
+                        body = "\n".join(parts) if parts else None
+            except Exception:
+                body = None
+        else:    
+            body = text
+        return body

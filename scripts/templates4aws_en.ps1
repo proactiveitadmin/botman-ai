@@ -58,6 +58,43 @@ aws dynamodb put-item `
   --item $item
 
 
+
+# ==== 2.1. ticket_description ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_description#en"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_description"
+    },
+    "language_code": {
+        "S": "en"
+    },
+    "body": {
+        "S": "Request from chat.\nLast message:\n{body}\nHistory:\n{history_block}"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "body"
+            },
+            {
+                "S": "history_block"
+            }
+		]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
   $item = @'
 {
     "pk": {
@@ -958,29 +995,22 @@ aws dynamodb put-item `
   $item = @'
 {
     "pk": {
-        "S": "clubProactiveIT#crm_web_verification_required#en"
+        "S": "clubProactiveIT#web_crm_not_available#en"
     },
     "tenant_id": {
         "S": "clubProactiveIT"
     },
     "template_code": {
-        "S": "crm_web_verification_required"
+        "S": "web_crm_not_available"
     },
     "language_code": {
         "S": "en"
     },
     "body": {
-        "S": "To continue, I need to verify your account. I’ll send a verification code to your email address."
+        "S": "This feature is available only for Whatsapp channel. Please use your whatsapp to continue."
     },
     "placeholders": {
-        "L": [
-            {
-                "S": "verification_code"
-            },
-            {
-                "S": "whatsapp_link"
-            }
-        ]
+        "L": []
     }
 }
 '@
@@ -1237,7 +1267,7 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "Your verification code is: *{verification_code}*\n\nThe code is valid for *{ttl_minutes}* minutes.\n\nIf you didn’t request this verification, please ignore this message."
+        "S": "<p>Your verification code is: <strong>{verification_code}</strong><br><br>The code is valid for {ttl_minutes} minutes.<br><br>If you didn’t request this verification, please ignore this message.</p>"
     },
     "placeholders": {
         "L": [
@@ -1290,7 +1320,7 @@ aws dynamodb put-item `
   $item = @'
 {
     "pk": {
-        "S": "clubProactiveIT#crm_verification_active#pl"
+        "S": "clubProactiveIT#crm_verification_active#en"
     },
     "tenant_id": {
         "S": "clubProactiveIT"
@@ -1299,7 +1329,7 @@ aws dynamodb put-item `
         "S": "crm_verification_active"
     },
     "language_code": {
-        "S": "pl"
+        "S": "en"
     },
     "body": {
         "S": "Your previous verification is still active."
@@ -1511,6 +1541,65 @@ $item = @'
     },
     "body": {
         "S": "yes,yes.,confirm,I confirm,ok,okay,sure,of course,certainly,no problem,all good"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+# ==== 49. today_words (EN) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#today_words#en"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "today_words"
+    },
+    "language_code": {
+        "S": "en"
+    },
+    "body": {
+        "S": "today"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 49. ticket_more_info (en) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_more_info#en"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_more_info"
+    },
+    "language_code": {
+        "S": "en"
+    },
+    "body": {
+        "S": "I will create a ticket for you shortly. I will attach the history of the last 10 messages to the ticket. If you would like to add anything else, please write now or simply type 'no'. Thank you."
     },
     "placeholders": {
         "L": []

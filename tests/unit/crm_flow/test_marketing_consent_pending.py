@@ -37,6 +37,11 @@ class FakeCRMService:
             raise NotImplementedError("not implemented")
         self.grant_calls.append({"tenant_id": tenant_id, "member_id": int(member_id), "reason": reason})
 
+    def get_member_id_by_msg(self, tenant_id: str, msg: str) -> str | None:
+        return "member-123"
+        
+    def get_email_by_msg(self, tenant_id: str, msg: str) -> str | None:
+        return "user@example.com"
 
 @pytest.fixture
 def conv():

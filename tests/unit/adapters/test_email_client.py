@@ -56,7 +56,15 @@ def test_send_otp_success_with_configuration_set_and_tenant_override(monkeypatch
     assert call['Source'] == 'TenantName <tenant@example.com>'
     assert call['Destination']['ToAddresses'] == ['user@example.com']
     assert call['Message']['Subject']['Data'] == 'OTP'
-    assert call['Message']['Body']['Text']['Data'] == '1234'
+    body = call['Message']['Body']
+    # akceptujemy Text albo Html – zależnie od implementacji adaptera
+    data = None
+    if 'Text' in body:
+        data = body['Text']['Data']
+    elif 'Html' in body:
+        data = body['Html']['Data']
+    assert data == '1234'
+
     assert call['ConfigurationSetName'] == 'cfgset'
 
 

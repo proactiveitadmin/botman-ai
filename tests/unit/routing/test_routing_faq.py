@@ -20,6 +20,9 @@ def test_faq_intent_uses_kb_service_answer(monkeypatch):
             
         def stylize_answer(self, *args, **kwargs):
             return " KB AI answer "
+            
+        def normalize_ai_answer(self, *args, **kwargs):
+            return " KB AI answer "
 
     class DummyTemplateService:
         """

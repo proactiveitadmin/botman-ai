@@ -90,6 +90,43 @@ aws dynamodb put-item `
   --item $item
 
 
+# ==== 2.1. ticket_description ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_description#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_description"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "Request from chat.\nLast message:\n{body}\nHistory:\n{history_block}"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "body"
+            },
+            {
+                "S": "history_block"
+            }
+		]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
   $item = @'
 {
     "pk": {
@@ -958,29 +995,22 @@ aws dynamodb put-item `
   $item = @'
 {
     "pk": {
-        "S": "clubProactiveIT#crm_web_verification_required#ar-AE"
+        "S": "clubProactiveIT#web_crm_not_available#ar"
     },
     "tenant_id": {
         "S": "clubProactiveIT"
     },
     "template_code": {
-        "S": "crm_web_verification_required"
+        "S": "web_crm_not_available"
     },
     "language_code": {
-        "S": "ar-AE"
+        "S": "ar"
     },
     "body": {
-        "S": "للمتابعة، أحتاج إلى التحقق من حسابك. سأرسل رمز تحقق إلى بريدك الإلكتروني."
+        "S": "هذه الميزة متاحة فقط عبر قناة واتساب. يُرجى استخدام واتساب للمتابعة."
     },
     "placeholders": {
-        "L": [
-            {
-                "S": "verification_code"
-            },
-            {
-                "S": "whatsapp_link"
-            }
-        ]
+        "L": []
     }
 }
 '@
@@ -1237,7 +1267,7 @@ aws dynamodb put-item `
         "S": "ar-AE"
     },
     "body": {
-        "S": "رمز التحقق الخاص بك هو: *{verification_code}*\n\nالرمز صالح لمدة {ttl_minutes} دقيقة.\n\nإذا لم تطلب هذا التحقق، يرجى تجاهل هذه الرسالة."
+        "S": "<p>رمز التحقق الخاص بك هو: <strong>{verification_code}</strong><br><br>الرمز صالح لمدة {ttl_minutes} دقيقة.<br><br>إذا لم تطلب هذا التحقق، يرجى تجاهل هذه الرسالة.</p>"
     },
     "placeholders": {
         "L": [
@@ -1290,7 +1320,7 @@ aws dynamodb put-item `
   $item = @'
 {
     "pk": {
-        "S": "clubProactiveIT#crm_verification_active#pl"
+        "S": "clubProactiveIT#crm_verification_active#ar"
     },
     "tenant_id": {
         "S": "clubProactiveIT"
@@ -1299,7 +1329,7 @@ aws dynamodb put-item `
         "S": "crm_verification_active"
     },
     "language_code": {
-        "S": "pl"
+        "S": "ar"
     },
     "body": {
         "S": "لا تزال عملية التحقق السابقة الخاصة بك نشطة."
@@ -1511,6 +1541,66 @@ $item = @'
     },
     "body": {
         "S": "نعم,نعم.,ايوه,أيوه,تمام,موافق,أوافق,أكيد,طبعاً,بالطبع"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+# ==== 49. today_words (ar) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#today_words#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "today_words"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "اليوم"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 49. ticket_more_info (ar) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_more_info#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_more_info"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "سأقوم الآن بإنشاء بلاغ لك. سأرفق مع البلاغ سجل آخر 10 رسائل. إذا كنت ترغب في إضافة أي شيء آخر، يرجى الكتابة الآن أو فقط اكتب 'لا'. شكرًا لك."
     },
     "placeholders": {
         "L": []

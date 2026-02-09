@@ -61,6 +61,43 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
   --item $item
 
 
+
+# ==== 2.1. ticket_description ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_description#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_description"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Zgłoszenie z chatu.\nOstatnia wiadomość:\n{body}\nHistoria:\n{history_block}"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "body"
+            },
+            {
+                "S": "history_block"
+            }
+		]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
 # ==== 3. ticket_created_ok ====
 
   $item = @'
@@ -1013,42 +1050,33 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
   --region $region `
   --item $item
 
-
-# ==== 31. crm_web_verification_required ====
-
   $item = @'
 {
     "pk": {
-        "S": "clubProactiveIT#crm_web_verification_required#pl"
+        "S": "clubProactiveIT#web_crm_not_available#pl"
     },
     "tenant_id": {
         "S": "clubProactiveIT"
     },
     "template_code": {
-        "S": "crm_web_verification_required"
+        "S": "web_crm_not_available"
     },
     "language_code": {
         "S": "pl"
     },
     "body": {
-        "S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\n• Jeśli korzystasz z czatu WWW: kliknij link, aby otworzyć WhatsApp i wyślij kod.\n• Jeśli jesteś już w WhatsApp: po prostu wyślij kod.\n\nKod: {*{verification_code}*}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć tutaj — zweryfikuję konto i odblokuję dostęp do danych PerfectGym."
+        "S": "This feature is available only for Whatsapp channel. Please use your whatsapp to continue."
     },
     "placeholders": {
-        "L": [
-            {
-                "S": "verification_code"
-            },
-            {
-                "S": "whatsapp_link"
-            }
-        ]
+        "L": []
     }
 }
 '@
-aws --endpoint-url http://localhost:4566 dynamodb put-item `
+aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item $item
+
 
 
 # ==== 32. faq_no_info ====
@@ -1316,7 +1344,7 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Twój kod weryfikacyjny to: *{verification_code}*\n\nKod jest ważny przez {ttl_minutes} minut.\n\nJeśli to nie Ty inicjowałeś/aś weryfikację, zignoruj tę wiadomość."
+        "S": "<p>Twój kod weryfikacyjny to: <strong>{verification_code}</strong><br><br>Kod jest ważny przez {ttl_minutes} minut.<br><br>Jeśli to nie Ty inicjowałeś/aś weryfikację, zignoruj tę wiadomość.</p>"
     },
     "placeholders": {
         "L": [
@@ -1609,3 +1637,62 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
   --region $region `
   --item $item
 
+
+# ==== 49. today_words (pl) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#today_words#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "today_words"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "dzisiaj, dziś, dzis"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+# ==== 49. ticket_more_info (pl) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_more_info#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_more_info"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Zaraz utworzę dla Ciebie zgłoszenie. Do zgłoszenia załączę historię 10 ostatnich wiadomości. Jeści chcesz coś jeszcze dodać, prosze napisz teraz lub po prostu napisz 'nie'. Dziękuję"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item

@@ -4,7 +4,7 @@ from src.common.security import otp_hash
 from src.domain.models import Message
 from src.services.language_service import LanguageService
 from src.services.routing_service import RoutingService
-from src.common.constants import STATE_AWAITING_MESSAGE
+from src.common.constants import STATE_AWAITING_MESSAGE, ENUM_CRM_RETURN_ALREADY_BOOKED
 
 from tests.helpers.fakes_routing import (
     InMemoryConversations,
@@ -226,12 +226,7 @@ def test_pending_reservation_confirmation_yes_when_already_booked_returns_dedica
                 "comments": kwargs.get("comments"),
             }
         )
-        return {
-            "ok": False,
-            "status_code": 400,
-            "mapped_error": "classes_already_booked",
-            "pg_error": {"code": "ClassesAlreadyBooked"},
-        }
+        return ENUM_CRM_RETURN_ALREADY_BOOKED
 
     monkeypatch.setattr(crm, "reserve_class", fake_reserve_class)
 
@@ -272,7 +267,6 @@ def test_email_otp_success_clears_state_and_runs_post_intent(monkeypatch):
     conv.data[key] = {
         "language_code": "pl",
         "state_machine_status": "awaiting_challenge",
-        "crm_challenge_type": "email_otp",
         "crm_challenge_attempts": 0,  # opcjonalnie
         "crm_post_intent": "crm_member_balance",
         "crm_post_slots": {},
@@ -317,7 +311,6 @@ def test_email_otp_success_clears_state_and_runs_post_intent(monkeypatch):
     # 2) challenge state wyczyszczony
     assert (tenant_id, channel, channel_user_id) in conv.cleared_calls
     for field in (
-        "crm_challenge_type",
         "crm_challenge_attempts",
         "crm_post_intent",
         "crm_post_slots",

@@ -154,6 +154,11 @@ DUMMY_TEMPLATES = {
         ),
         "placeholders": ["verification_code", "ttl_minutes"],
     },
+    ("ticket_more_info", "pl"): {
+        "body": "Doprecyzuj proszę zgłoszenie (krótki komentarz).",
+        "placeholders": [],
+    },
+
 }
 class DummyMembersIndex:
     """
@@ -250,9 +255,14 @@ class DummyCRM:
         norm = (answer or "").strip().replace(".", "-").replace("/", "-")
         return norm == "01-05-1990"
         
-    def get_member_by_phone(self, tenant_id: str, phone: str) -> dict:
+    def get_member_by_phone(self, *args, **kwargs):
         return {"id": "105"}
-
+    
+    def get_member_id_by_msg(self, *args, **kwargs):
+        return "member-123"
+        
+    def get_email_by_msg(self, tenant_id: str, msg: str) -> str | None:
+        return "user@example.com"
 
 class DummyTemplatesRepo:
     """
@@ -347,27 +357,24 @@ def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
         "Nie znaleziono odpowiedzi FAQ w wiadomościach: "
         f"{[p.get('body') for p in payloads]}"
     )
-  
+
 def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch):
     """
-    Sprawdzamy, że przy intencie 'ticket' bot:
-    - woła JiraClient.create_ticket,
-    - wysyła do użytkownika odpowiedź z szablonu 'ticket_created_ok'.
+    Nowy flow 'ticket' jest 2-etapowy:
+    1) intent=ticket -> bot prosi o komentarz (ticket_more_info) i ustawia stan
+    2) kolejna wiadomość -> bot tworzy ticket (create_data_and_ticket) i wysyła ticket_created_ok
     """
     outbound_url = aws_stack["outbound"]
-
 
     class DummyTicketing:
         def __init__(self):
             self.calls = []
 
-        def create_ticket(self, tenant_id, summary, description, meta=None):
+        def create_data_and_ticket(self, msg,  *args, **kwargs):
             self.calls.append(
                 {
-                    "tenant_id": tenant_id,
-                    "summary": summary,
-                    "description": description,
-                    "meta": meta or {},
+                    "tenant_id": getattr(msg, "tenant_id", None),
+                    "body": getattr(msg, "body", None),
                 }
             )
             # RoutingService oczekuje dict-a z kluczem 'ticket' lub 'key'
@@ -376,7 +383,8 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
     dummy_ticketing = DummyTicketing()
     router_handler.ROUTER.ticketing = dummy_ticketing
 
-    event = {
+    # --- KROK 1: start -> prosba o komentarz, bez tworzenia ticketa ---
+    event1 = {
         "Records": [
             {
                 "body": json.dumps(
@@ -388,62 +396,92 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
                         "tenant_id": "default",
                         # ustawiamy intent 'ticket', żeby pominąć NLU
                         "intent": "ticket",
-                        "slots": {
-                            "summary": "Problem z karnetem",
-                            # description zostawiamy routerowi – on umie zbudować z historii
-                        },
+                        "slots": {"summary": "Problem z karnetem"},
                     }
                 )
             }
         ]
     }
 
-    # Uruchamiamy router
-    router_handler.lambda_handler(event, None)
+    router_handler.lambda_handler(event1, None)
 
-    # Sprawdzamy, że TicketingService zostało zawołane
-    assert dummy_ticketing.calls, "TicketingService.create_ticket powinno zostać wywołane"
+    # W 1. kroku ticket nie powinien być jeszcze tworzony
+    assert not dummy_ticketing.calls, "Ticket nie powinien być tworzony na 1. wiadomość (bot ma poprosić o komentarz)."
 
-    # Czytamy wiadomości z kolejki outbound
-    msgs = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs, "Brak jakichkolwiek wiadomości w kolejce outbound po utworzeniu ticketa"
+    msgs_1 = _read_all_messages(outbound_url, max_msgs=10)
+    assert msgs_1, "Brak wiadomości outbound po 1. kroku"
 
-    payloads = [json.loads(m["Body"]) for m in msgs]
+    payloads_1 = [json.loads(m["Body"]) for m in msgs_1]
+    ask_more = [
+        p
+        for p in payloads_1
+        if p.get("to") == "whatsapp:+48123123123"
+        and (
+            "doprecyz" in (p.get("body") or "").lower()
+            or "ticket_more_info" in (p.get("body") or "")
+        )
+    ]
+    assert ask_more, f"Nie znaleziono prośby o doprecyzowanie. Outbound: {[p.get('body') for p in payloads_1]}"
 
-    # Szukamy odpowiedzi do użytkownika z numerem ticketa
+    # --- KROK 2: komentarz -> tworzymy ticket + potwierdzenie ---
+    event2 = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-ticket-2",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "Nie mogę przedłużyć karnetu w aplikacji, wyskakuje błąd.",
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+
+    router_handler.lambda_handler(event2, None)
+
+    assert dummy_ticketing.calls, "Ticket powinien zostać utworzony po komentarzu (2. krok)."
+
+    msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
+    assert msgs_2, "Brak wiadomości outbound po 2. kroku"
+
+    payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
     ticket_msgs = [
         p
-        for p in payloads
+        for p in payloads_2
         if p.get("to") == "whatsapp:+48123123123"
         and (
             "utworzyłem zgłoszenie" in (p.get("body") or "").lower()
-            or "numer: " in (p.get("body") or "").lower()
+            or "numer:" in (p.get("body") or "").lower()
             or "ticket_created_ok" in (p.get("body") or "")
         )
     ]
 
     assert ticket_msgs, (
         "Nie znaleziono wiadomości potwierdzającej utworzenie zgłoszenia.\n"
-        f"Wiadomości w kolejce: {[p.get('body') for p in payloads]}"
+        f"Wiadomości w kolejce: {[p.get('body') for p in payloads_2]}"
     )
 
-    # Dla pewności – sprawdzamy, że numer ticketa (ABC-123) pojawił się w treści
     assert any("ABC-123" in (p.get("body") or "") for p in ticket_msgs)
-
 
 def test_reservation_flow_with_email_otp(aws_stack, mock_ai, mock_pg, monkeypatch, router):
     outbound_url = aws_stack["outbound"]
     router_handler = router  # fixture z poprawnym repo templates
 
     # CRM z emailem
-    class DummyCRMWithEmail:
-        def get_member_by_phone(self, tenant_id, phone):
-            return {"value": [{"id": "123", "email": "user@example.com"}]}
-
+    class FakeCRMService:
         def verify_member_challenge(self, *args, **kwargs):
             return True
+            
+        def get_email_by_msg(self, *args, **kwargs):
+            return "user@example.com"
 
-    monkeypatch.setattr(router_handler.ROUTER.crm_flow, "crm", DummyCRMWithEmail(), raising=False)
+        def get_member_id_by_msg(self, *args, **kwargs):
+            return "123"
+
+    monkeypatch.setattr(router_handler.ROUTER.crm_flow, "crm", FakeCRMService(), raising=False)
     monkeypatch.setattr(router_handler.ROUTER.language, "_detect_language", lambda text: "pl")
 
     # przechwyt maila i wyciągnij 6 cyfr

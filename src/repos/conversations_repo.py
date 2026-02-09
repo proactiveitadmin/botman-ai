@@ -71,7 +71,6 @@ class ConversationsRepo:
         crm_verification_level=_UNSET,
         crm_verified_until=_UNSET,
         verification_code=_UNSET,
-        crm_challenge_type=_UNSET,
         crm_challenge_attempts=_UNSET,
         crm_otp_hash=_UNSET,
         crm_otp_expires_at=_UNSET,
@@ -115,7 +114,6 @@ class ConversationsRepo:
         maybe_set_or_remove("crm_verification_level", crm_verification_level)
         maybe_set_or_remove("crm_verified_until", crm_verified_until)
         maybe_set_or_remove("verification_code", verification_code)
-        maybe_set_or_remove("crm_challenge_type", crm_challenge_type)
         maybe_set_or_remove("crm_challenge_attempts", crm_challenge_attempts)
         maybe_set_or_remove("crm_otp_hash", crm_otp_hash)
         maybe_set_or_remove("crm_otp_expires_at", crm_otp_expires_at)
@@ -181,7 +179,6 @@ class ConversationsRepo:
         crm_verification_level=_UNSET,
         crm_verified_until=_UNSET,
         verification_code=_UNSET,
-        crm_challenge_type=_UNSET,
         crm_challenge_attempts=_UNSET,
         crm_otp_hash=_UNSET,
         crm_otp_expires_at=_UNSET,
@@ -230,7 +227,6 @@ class ConversationsRepo:
         maybe_set_or_remove("crm_verification_level", crm_verification_level)
         maybe_set_or_remove("crm_verified_until", crm_verified_until)
         maybe_set_or_remove("verification_code", verification_code)
-        maybe_set_or_remove("crm_challenge_type", crm_challenge_type)
         maybe_set_or_remove("crm_challenge_attempts", crm_challenge_attempts)
         maybe_set_or_remove("crm_otp_hash", crm_otp_hash)
         maybe_set_or_remove("crm_otp_expires_at", crm_otp_expires_at)
@@ -263,7 +259,7 @@ class ConversationsRepo:
         self.table.update_item(
             Key=key,
             UpdateExpression=(
-                "REMOVE crm_challenge_type, crm_challenge_attempts, crm_post_intent, crm_post_slots, crm_otp_hash, crm_otp_expires_at, crm_otp_attempts_left, crm_otp_last_sent_at, crm_otp_email"
+                "REMOVE crm_challenge_attempts, crm_post_intent, crm_post_slots, crm_otp_hash, crm_otp_expires_at, crm_otp_attempts_left, crm_otp_last_sent_at, crm_otp_email"
             ),
         )
         

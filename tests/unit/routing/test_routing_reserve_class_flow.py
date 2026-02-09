@@ -85,7 +85,12 @@ class FakeCRMService:
             }
         )
         return {"ok": True}
-
+        
+    def get_member_id_by_msg(self, *args, **kwargs):
+        return "member-123"
+        
+    def get_email_by_msg(self, *args, **kwargs):
+        return "user@example.com"
 
 class FakeTenantsRepo:
     def get(self, tenant_id: str):
@@ -127,8 +132,7 @@ class FakeConversationsRepo:
     def clear_crm_challenge(self, tenant_id: str, channel: str, channel_user_id: str):
         key = (tenant_id, channel, channel_user_id)
         conv = self.convs.get(key, {})
-        for k in ["crm_challenge_type", 
-                    "crm_challenge_attempts", 
+        for k in ["crm_challenge_attempts", 
                     "crm_post_intent", 
                     "crm_post_slots",
                     "crm_otp_hash",
@@ -298,5 +302,5 @@ def test_reserve_class_selection_does_not_hit_nlu_and_starts_email_otp_challenge
     # Stan rozmowy => oczekiwanie na challenge
     conv2 = routing.conv.get_conversation(TENANT_ID, "whatsapp", PHONE)
     assert conv2["state_machine_status"] == STATE_AWAITING_CHALLENGE
-    assert conv2.get("crm_challenge_type") == "email_otp"
+ 
 
