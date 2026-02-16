@@ -2,6 +2,7 @@ import json
 
 def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
     import json
+    from typing import List
     from src.common.config import settings
     from src.services.kb_service import KBService
         
@@ -30,7 +31,7 @@ def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
         def enabled(self, tenant_id):
             return True
 
-        def retrieve(self, *, tenant_id, language_code, question):
+        def retrieve(self, *, tenant_id, language_code, question, category, top_k):
             return [
                 type(
                     "Chunk",
@@ -43,6 +44,13 @@ def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
                     },
                 )
             ]
+        def build_kb_prompt( self, chunks, language_code, strict_mode):
+            lines: List[str] = []
+            for i, ch in enumerate(chunks, start=1):
+                lines.append(f"[C{i}] {ch.text}")
+            context = "\n\n".join(lines).strip()
+            return (f"{context}\n" )
+        
 
     svc._vector = DummyVector()
 
@@ -72,5 +80,4 @@ def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
     assert openai_client.last_messages is not None
 
     system_prompt = openai_client.last_messages[0]["content"]
-    assert "Knowledge snippets" in system_prompt
     assert "Q: Hours" in system_prompt

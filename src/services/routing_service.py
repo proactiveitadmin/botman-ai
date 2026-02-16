@@ -295,24 +295,22 @@ class RoutingService:
         # 4x) Fast-path intents (bez LLM/CRM/KB) – tylko szablony.
         #      Zero hardkodowania: treść kontroluje TemplatesRepo.
         if intent == INTENT_ACK:
-            tpl_name = "system_ack"
+            tpl_name = "ack_fallback_text"
             body = self.tpl.render_named(msg.tenant_id, tpl_name, lang, {})
-            if body == tpl_name:
-                body = "ack_fallback_text"  # absolutny fallback
             self._update_conversation_state(msg, lang, intent, slots)
             return [self._reply(msg, lang, body)]
 
         # 4a) Kontekstowa poprawka: follow-up po FAQ
-        # Jeśli poprzednia intencja była "faq", sesja jest ciągle ta sama,
+        # Jeśli poprzednia intencja była INTENT_FAQ, sesja jest ciągle ta sama,
         # a NLU zwróciło INTENT_CLARIFY (bo pytanie jest krótkie, typu "A w sobotę?"),
         # to traktujemy to jako FAQ z kontekstem.
         last_intent = conv.get("last_intent")
         if (
             not is_new_session
-            and last_intent == "faq"
+            and last_intent == INTENT_FAQ
             and intent == INTENT_CLARIFY
         ):
-            intent = "faq"
+            intent = INTENT_FAQ
             # Slots zwykle i tak nie są potrzebne dla AI-FAQ,
             # więc nie musimy ich tu ruszać.
             
@@ -321,29 +319,7 @@ class RoutingService:
 
         # 6) Routing po intencji
         # 6.1.a FAQ
-        if intent == "faq":
-            slots = slots or {}
-            faq_key = (slots.get("faq_key") or "").strip()
-            
-            with timed("list_faq_keys", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
-                if faq_key:
-                    # lista kluczy z realnej bazy FAQ (S3/default)
-                    if faq_key not in self.kb.list_faq_keys(msg.tenant_id, lang):
-                        faq_key = ""
-            if faq_key:
-                with timed("answer_by_key", logger=logger, component="routing_service", extra={"tenant_id": msg.tenant_id}):
-            
-                    direct = self.kb.answer_by_key(
-                        tenant_id=msg.tenant_id,
-                        language_code=lang,
-                        faq_key=faq_key,
-                    )
-                    if direct:
-                        return [self._reply(msg, lang, direct)]
-
-                body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})
-                return [self._reply(msg, lang, body)]
-            
+        if intent == INTENT_FAQ:
             conv_key = self._conv_key(msg)
             chat_history: list[dict] = []
 

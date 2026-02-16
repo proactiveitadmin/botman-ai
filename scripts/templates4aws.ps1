@@ -1699,3 +1699,32 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item $item
+
+# ==== 49. ack_fallback_text (pl) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ack_fallback_text#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ack_fallback_text"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "ok"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item

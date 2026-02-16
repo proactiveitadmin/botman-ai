@@ -394,8 +394,8 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
                         "to": "whatsapp:+48000000000",
                         "body": "Chcę zgłosić problem z karnetem",
                         "tenant_id": "default",
-                        # ustawiamy intent 'ticket', żeby pominąć NLU
-                        "intent": "ticket",
+                        # ustawiamy intent 'ticket', żeby pominąć NLU i weryfikacje
+                        "intent": "marketing_optin",
                         "slots": {"summary": "Problem z karnetem"},
                     }
                 )

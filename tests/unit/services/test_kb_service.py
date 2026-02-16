@@ -130,6 +130,10 @@ def test_answer_ai_happy_path_with_json(monkeypatch):
         def chat(self, messages, max_tokens=None):
             self.last_messages = messages
             return json.dumps({"answer": "We are open 8-20"})
+        def build_kb_prompt( self, strict_mode, language_code, context):
+            return None
+        def build_old_prompt( self, language_code, faq_context):
+            return None
 
     svc._client = DummyClient()
     ans = svc.answer_ai(question="What are your opening hours?", tenant_id="t1", language_code="pl")
@@ -145,6 +149,11 @@ def test_answer_ai_llm_failure_returns_none(monkeypatch):
     class DummyClient:
         def chat(self, *a, **k):
             raise RuntimeError("boom")
+        def build_kb_prompt( self, strict_mode, language_code, context):
+            return None
+        def build_old_prompt( self, language_code, faq_context):
+            return None
+
 
     svc._client = DummyClient()
     ans = svc.answer_ai(question="q", tenant_id="t1")

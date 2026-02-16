@@ -14,6 +14,11 @@ from ..adapters.pinecone_client import PineconeClient
 from .clients_factory import ClientsFactory
 
 from ..common.timing import timed
+from ..common.constants import (
+    QUESTION_SPLIT_REGEX,
+    QUESTION_NO_OF_PARTS,
+    PC_NAME_KB,
+)
 
 
 @dataclass(frozen=True)
@@ -63,7 +68,7 @@ class KBVectorService:
               "event": "enabled_check",
               "tenant_id": tenant_id,
               "has_api_key": bool(getattr(pc, "api_key", "")),
-              "index_host": bool(getattr(pc, "index_host", "")),
+              "index_host": (getattr(pc, "index_host", "") or ""),
               "pc_enabled": bool(getattr(pc, "enabled", False)),
             })
             return bool(self._openai and pc and pc.enabled)
@@ -86,8 +91,8 @@ class KBVectorService:
         return bool(val)
 
     def _namespace(self, tenant_id: str, language_code: Optional[str]) -> str:
-        lang = (language_code or "").strip() or "default"
-        prefix = getattr(settings, "pinecone_namespace_prefix", "kb") or "kb"
+        lang = (language_code or "").strip() or "en"
+        prefix = getattr(settings, "pinecone_namespace_prefix", PC_NAME_KB) or PC_NAME_KB
         return f"{prefix}:{tenant_id}:{lang}"
         
     def _extract_answer_from_text(self, text: str) -> str | None:
@@ -122,29 +127,59 @@ class KBVectorService:
         q = (question or "").strip()
         if not q:
             return []
-        parts = [q]
 
-        raw_parts = re.split(r"[\n\r;|/]+|\s+[,]+\s+|\?+|\.+", q)
-        for p in raw_parts:
-            p = (p or "").strip()
-            if len(p) < 4:
+        # zawsze zachowaj pełne pytanie
+        parts: List[str] = [q]
+
+        norm = re.sub(r"\s+", " ", q).strip()
+
+        # split po mocnych separatorach; przecinek zostawiamy jako "miękki"
+        split_re = re.compile(
+            r"(?:[\n\r]+)|(?:\s*[;|/]\s*)|(?:\s*(?:\?+|!+|\.{2,})\s*)",
+            re.UNICODE,
+        )
+        raw = [p.strip() for p in split_re.split(norm) if (p or "").strip()]
+
+        def token_count(s: str) -> int:
+            return len(re.findall(r"\w+", s, flags=re.UNICODE))
+
+        def too_thin(s: str) -> bool:
+            # "cienkie" = słabe jako osobne zapytanie wektorowe; nie usuwamy, tylko scalamy
+            tc = token_count(s)
+            if tc == 0:
+                return True
+            if tc == 1:
+                w = re.findall(r"\w+", s, flags=re.UNICODE)[0]
+                has_digit = any(ch.isdigit() for ch in w)
+                is_acronymish = (len(w) <= 6 and w.upper() == w and any(ch.isalpha() for ch in w))
+                longish = len(w) >= 6
+                return not (has_digit or is_acronymish or longish)
+            return False
+
+        merged: List[str] = []
+        for seg in raw:
+            if not merged:
+                merged.append(seg)
                 continue
+            if too_thin(seg):
+                merged[-1] = f"{merged[-1]} {seg}".strip()
+            else:
+                merged.append(seg)
 
-            # avoid near-duplicate that only differs by trailing punctuation
-            if re.sub(r"[^\w]+$", "", p.lower()) == re.sub(r"[^\w]+$", "", q.lower()):
-                continue
-            parts.append(p)
-
-        # de-dup (case-insensitive) + cap
+        # de-dup + cap
         out, seen = [], set()
-        for p in parts:
-            k = p.lower()
-            if k in seen:
+        for seg in [q] + merged:
+            k = seg.lower()
+            k = re.sub(r"[^\w]+$", "", k, flags=re.UNICODE).strip()
+            if not k or k in seen:
                 continue
             seen.add(k)
-            out.append(p)
-        return out[:3]
-                
+            out.append(seg)
+            if seg != q:
+                logger.warning({"event": "_split_question", "part": seg})
+
+        return out[:QUESTION_NO_OF_PARTS]    
+        
     def index_faq(
         self,
         *,
@@ -167,6 +202,8 @@ class KBVectorService:
             extra={"tenant_id": tenant_id, "max_chars": max_chars},
         ):
             chunks = chunk_faq(faq, max_chars=max_chars)
+        
+        logger.warning({"event":"chunk_faq_done","chunks":len(chunks),"sample":chunks[0].text[:80] if chunks else None})
 
         if not chunks:
             return False
@@ -185,7 +222,11 @@ class KBVectorService:
             logger.info({"event":"embed_dim", "dim": len(vectors[0]) if vectors else 0, "dims_param": emb_dims})
 
         if not vectors or len(vectors) != len(chunks):
-            logger.error({...})
+            logger.error({
+                "event": "index_faq error",
+                "len(vectors)": len(vectors),
+                "len(chunks)": len(chunks),
+            })
             return False
 
         ns = self._namespace(tenant_id, language_code)
@@ -205,16 +246,33 @@ class KBVectorService:
                             "text": ch.text,
                             "faq_key": ch.faq_key,
                             "chunk_id": ch.chunk_id,
+                            "lang": ((language_code or "").strip() or "en"),
+                            "category": getattr(ch, "category", PC_NAME_KB),
+                            # Optional: helps prevent mixing when you migrate embedding models
+                            "embed_model": getattr(settings, "embedding_model", "") or "",
+
                         },
                     }
                 )
-
+            logger.warning({
+              "event": "upsert_payload_meta_sample",
+              "namespace": ns,
+              "meta": payload_vectors[0].get("metadata") if payload_vectors else None,
+            })
             with timed(
                 "pinecone_upsert_batch",
                 logger=logger, 
                 component="kb_vector_service",
                 extra={"tenant_id": tenant_id, "namespace": ns, "batch_size": len(payload_vectors)},
             ):
+                logger.warning({
+                  "event": "upsert_sample_meta",
+                  "namespace": ns,
+                  "chunk_id": chunks[0].chunk_id if chunks else None,
+                  "faq_key": chunks[0].faq_key if chunks else None,
+                  "category": getattr(chunks[0], "category", None) if chunks else None,
+                })
+
                 ok = self._client_for(tenant_id).upsert(vectors=payload_vectors, namespace=ns)
             ok_all = ok_all and ok
 
@@ -229,6 +287,7 @@ class KBVectorService:
         tenant_id: str,
         language_code: Optional[str],
         question: str,
+        category: str | None = None,
         top_k: Optional[int] = None,
     ) -> List[RetrievedChunk]:
         if not self.enabled(tenant_id):
@@ -270,11 +329,18 @@ class KBVectorService:
             for vec in q_vecs:
                 if not vec:
                     continue
+                lang = (language_code or "").strip() or "en"
+                filtr = {"lang": {"$eq": lang}}
+                logger.warning({"event":"retrieve_debug","namespace":ns,"lang":lang,"category":category})
+
+                if category:
+                    filtr["category"] = {"$eq": category}
                 matches = self._client_for(tenant_id).query(
                     vector=vec,
                     namespace=ns,
                     top_k=k,
                     include_metadata=True,
+                    filter=filtr
                 )
                 all_matches.extend(matches or [])
 
@@ -305,7 +371,9 @@ class KBVectorService:
                 prev = best_by_faq.get(dedupe_key)
                 if (prev is None) or (rc.score > prev.score):
                     best_by_faq[dedupe_key] = rc
-
+                logger.info({
+                    "faq_key": faq_key,
+                })
             out = sorted(best_by_faq.values(), key=lambda x: x.score, reverse=True)[:k]
  
         logger.info({
@@ -382,33 +450,20 @@ class KBVectorService:
         txt = md.get("text") or ""
         return self._extract_answer_from_text(txt)
         
-def build_kb_prompt(
-    *,
-    chunks: List[RetrievedChunk],
-    language_code: Optional[str],
-) -> str:
-    """Prompt template for KB answering.
+    def build_kb_prompt( self, 
+        chunks: List[RetrievedChunk],
+        language_code: Optional[str],
+        strict_mode: bool,
+    ) -> str:
+        """Prompt template for KB answering.
 
-    We keep the legacy contract: assistant must return JSON {"answer": "..."}.
-    """
-    lines: List[str] = []
-    for i, ch in enumerate(chunks, start=1):
-        lines.append(f"[C{i}] {ch.text}")
+        We keep the legacy contract: assistant must return JSON {"answer": "..."}.
+        """
+        lines: List[str] = []
+        for i, ch in enumerate(chunks, start=1):
+            lines.append(f"[C{i}] {ch.text}")
 
-    context = "\n\n".join(lines).strip()
-
-    sys = (
-        "You are a helpful customer-support assistant.\n"
-        "The user's message may contain multiple questions or topics.\n"
-        "Answer ONLY using the knowledge snippets below.\n"
-        "- If you can answer at least one part using the snippets, answer the supported part(s) and ignore unsupported parts.\n"
-        "- If none of the snippets support any part of the user's message, respond with the exact JSON {\"answer\":\"__NO_INFO__\"} and nothing else.\n"
-        "Output MUST be valid JSON with exactly one key: \"answer\". No other keys.\n"
-        "Knowledge snippets:\n"
-        f"{context}\n"
-    )
-    if language_code:
-        sys += f"\nAnswer in the language {language_code} (ISO language code)."
-    else:
-        sys += "\nAnswer in the same language as the user's question."
-    return sys
+        context = "\n\n".join(lines).strip()
+        
+        return self._openai.build_kb_prompt(strict_mode, language_code, context)
+        

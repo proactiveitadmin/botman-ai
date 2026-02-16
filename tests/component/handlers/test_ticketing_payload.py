@@ -1,6 +1,7 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
 from tests.conftest import wire_subservices
+import src.services.routing_service as routing_module
 
 def test_ticket_payload_contains_history_and_meta(monkeypatch):
     class DummyNLU:
@@ -30,7 +31,8 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
 
     class DummyConvRepo:
         def __init__(self):
-            self.conv = {}
+            # żeby _require_member_id nie “blokowało” flow
+            self.conv = {"crm_member_id": "m-1"}
 
         def get_conversation(self, tenant_id, channel, channel_user_id):
             return self.conv or {}
@@ -54,7 +56,6 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
                 {"direction": "out", "body": "W czym mogę pomóc?"},
                 {"direction": "in", "body": "Mam problem z karnetem."},
             ]
-
 
     class DummyTenants:
         def get(self, tenant_id):
@@ -86,6 +87,8 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     wire_subservices(svc)
 
     monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
+    monkeypatch.setattr(svc.crm_flow, "ensure_crm_verification", lambda *a, **k: None)
+    monkeypatch.setattr(routing_module, "history_fetch_limit", 10, raising=False)
 
     # --- krok 1: intent=ticket -> bot prosi o komentarz, NIE tworzy ticketa ---
     msg1 = Message(
@@ -98,7 +101,6 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
         intent="ticket",
         slots={"summary": "Problem z karnetem", "description": "Użytkownik zgłasza problem z karnetem."},
     )
-
     actions1 = svc.handle(msg1)
 
     assert actions1
@@ -121,10 +123,8 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
 
     call = svc.ticketing.calls[0]
 
-    # conv_key powinien bazować na tenant/channel/channel_user_id (tak jak w routing_service._conv_key)
     assert "conv#whatsapp#" in call["conv_key"]
 
-    # history_block powinien zawierać historię (routing robi "direction: body")
     hb = call["history_block"]
     assert "in: Cześć" in hb
     assert "out: W czym mogę pomóc?" in hb

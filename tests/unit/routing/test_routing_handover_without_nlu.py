@@ -1,6 +1,7 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message, Action
 from tests.conftest import wire_subservices
+import src.services.routing_service as routing_module
 
 def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     called = {"nlu_called": False}
@@ -12,7 +13,7 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
 
     class DummyConvRepo:
         def __init__(self):
-            self.conv = {}
+            self.conv = {"crm_member_id": "m-1"}
 
         def get_conversation(self, *args, **kwargs):
             return self.conv or {}
@@ -36,6 +37,8 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
         def answer(self, *args, **kwargs):
             return "KB answer"
         def answer_ai(self, *args, **kwargs):
+            return "KB AI answer"
+        def normalize_ai_answer(self, *args, **kwargs):
             return "KB AI answer"
 
     class DummyTpl:
@@ -73,7 +76,9 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     wire_subservices(svc)
 
     monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
-
+    monkeypatch.setattr(svc.crm_flow, "ensure_crm_verification", lambda *a, **k: None)
+    monkeypatch.setattr(routing_module, "history_fetch_limit", 10, raising=False)
+    
     # krok 1: intent=handover (precomputed) -> prosba o komentarz, bez ticketa
     msg1 = Message(
         tenant_id="t-1",

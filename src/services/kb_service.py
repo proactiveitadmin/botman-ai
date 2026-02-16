@@ -14,7 +14,7 @@ import random
 from typing import Dict, Optional, List
 
 from botocore.exceptions import ClientError
-from .kb_vector_service import KBVectorService, build_kb_prompt
+from .kb_vector_service import KBVectorService
 from .clients_factory import ClientsFactory
 from .tenant_config_service import default_tenant_config_service
 from ..common.logging import logger
@@ -26,6 +26,25 @@ from ..adapters.openai_client import OpenAIClient
 from ..common.timing import timed
 from ..common.constants import (
     STR_CHUNK_SCORE,
+    ANSWER_NO_INFO,
+    PC_NAME_SMALLTALK,
+    PC_NAME_KB,
+    FAQ_ANSWER_KEY,
+    KB_SMALLTALK_MIN_SCORE,
+    KB_VECTOR_MIN_SCORE_LOW,
+    KB_VECTOR_FASTPATH_MIN_SCORE,
+    KB_RETRIEVED_CHUNKS,
+    SMALLTALK_RETRIEVED_CHUNKS,
+    KB_FETCHED_CHUNKS,
+    SMALLTALK_SEARCH_REGEX,
+    FAQ_FIND_REGEX,
+    SMALLTALK_SUB1_REGEX,
+    SMALLTALK_SUB2_REGEX,
+    FASTPATCH_SEARCH_REGEX,
+    FASTPATCH_SPLIT_REGEX,
+    FAQ_MSG_JSON,
+    FAQ_ROLE_USER,
+    FAQ_NO_KEY_ERR,
 )
 
 
@@ -60,7 +79,7 @@ class KBService:
             clients_factory=self._clients_factory,
         )
     # -------------------------------------------------------------------------
-    # Helpery cache
+    # Helpery 
     # -------------------------------------------------------------------------
     def _tenant_default_lang(self, tenant_id: str) -> str:
         tenant = self.tenants.get(tenant_id) or {}
@@ -76,6 +95,12 @@ class KBService:
     def _cache_key(self, tenant_id: str, language_code: str | None) -> str:
         return f"{tenant_id}#{language_code or 'en'}"
 
+    def _get_env_float(self, name: str, default: float) -> float:
+        value: Optional[str] = os.getenv(name)
+        try:
+            return float(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
 
     # -------------------------------------------------------------------------
     # FAQ z S3
@@ -114,11 +139,15 @@ class KBService:
             if not isinstance(data, dict):
                 data = {}
             # normalizujemy klucze
+            if isinstance(data.get("entries"), list):
+                # new format: keep as-is
+                self._cache[cache_key] = data
+                return data
             normalized = {(k or "").strip().lower(): v for k, v in data.items()}
             self._cache[cache_key] = normalized
             return normalized
         except ClientError as e:
-            if e.response["Error"]["Code"] != "NoSuchKey":
+            if e.response["Error"]["Code"] != FAQ_NO_KEY_ERR:
                 logger.warning(
                     {
                         "component": "kb_service",
@@ -159,7 +188,7 @@ class KBService:
                 continue
 
             text = f"{key} {answer}".lower()
-            t_tokens = set(re.findall(r"\w+", text))
+            t_tokens = set(re.findall(FAQ_FIND_REGEX, text))
             overlap = len(q_tokens & t_tokens)
 
             # mały fallback: pełne pytanie w tekście
@@ -180,7 +209,27 @@ class KBService:
             selected[key] = answer
 
         return selected
+        
+    def _is_smalltalk_only(self, q: str) -> bool:
+        q = (q or "").strip()
+        if not q:
+            return False
+        if "?" in q:
+            return False
+        tokens = re.findall(FAQ_FIND_REGEX, q, flags=re.UNICODE)
+        if len(tokens) > 2:
+            return False
+        # jeśli są przecinki/średniki i jest więcej treści, to raczej nie smalltalk-only
+        if re.search(SMALLTALK_SEARCH_REGEX, q) and len(tokens) > 1:
+            return False
+        return True
 
+    def _norm(self, s: str) -> str:
+        s = (s or "").strip().lower()
+        # usuń trailing interpunkcję i zredukuj spacje
+        s = re.sub(SMALLTALK_SUB1_REGEX, "", s, flags=re.UNICODE)
+        s = re.sub(SMALLTALK_SUB2_REGEX, " ", s).strip()
+        return s
     # -------------------------------------------------------------------------
     # Publiczne API
     # -------------------------------------------------------------------------
@@ -254,7 +303,7 @@ class KBService:
 
         - wybiera kilka najbardziej pasujących wpisów FAQ (retrieval),
         - opcjonalnie dokleja historię rozmowy (user/assistant),
-        - oczekuje JSON-a {"answer": "..."} i zwraca sam tekst odpowiedzi.
+        - oczekuje JSON-a {FAQ_ANSWER_KEY: "..."} i zwraca sam tekst odpowiedzi.
         """
         question = (question or "").strip()
         if not question:
@@ -264,174 +313,129 @@ class KBService:
         top2 = 0.0
         gap = 0.0
         strict_mode = False
+        chunks_for_prompt = []
+        retrieved_chunks = []
             
         # 2) retrieval: prefer Pinecone (vector DB) when configured.
         vector_enabled = self._vector.enabled(tenant_id)
-        retrieved_chunks = []
         if vector_enabled:
-            retrieved_chunks = self._vector.retrieve(
+            # 0) smalltalk fast-path (NO LLM)
+            #1--------------
+            st = self._vector.retrieve(
                 tenant_id=tenant_id,
                 language_code=language_code,
                 question=question,
+                category=PC_NAME_SMALLTALK,
+                top_k=SMALLTALK_RETRIEVED_CHUNKS,
             )
 
+            if st:
+                if self._is_smalltalk_only(question):
+                    qn = self._norm(question)
+                    txt0 = (st[0].text or "").strip()
+
+                    # 1) deterministic: czy w chunku jest dokładnie takie Q: ?
+                    qs = re.findall(r"^\s*Q:\s*(.+)$", txt0, flags=re.IGNORECASE | re.MULTILINE)
+                    if any(self._norm(qline) == qn for qline in qs):
+                        ans = self._vector._extract_answer_from_text(txt0)  # albo lokalnie ten sam regex na A:
+                        if ans:
+                            return ans
+
+                    # 2) dopiero potem próg score (fallback)
+                    st_top1 = float(getattr(st[0], "score", 0.0) or 0.0)
+                    self._get_env_float("KB_SMALLTALK_MIN_SCORE", KB_SMALLTALK_MIN_SCORE)
+                    if st_top1 >= st_min:
+                        ans = self._vector._extract_answer_from_text(txt0)
+                        if ans:
+                            return ans
+            #1--------------
+                chunks_for_prompt += st[:1]
+            if chunks_for_prompt and self._is_smalltalk_only(question):
+                retrieved_chunks = []
+            else:
+                retrieved_chunks = self._vector.retrieve(
+                    tenant_id=tenant_id,
+                    language_code=language_code,
+                    question=question,
+                    category=PC_NAME_KB,
+                    top_k=KB_RETRIEVED_CHUNKS,
+                )
+
             # Vector confidence gating:
-            # - no matches OR very low score -> deterministic fallback WITHOUT calling the KB LLM
-            # - mid score -> call LLM in a STRICT mode (must return a sentinel when unsure)
-            # - high score -> normal KB LLM (still constrained to provided snippets)
-            try:
-                low_threshold = float(os.getenv("KB_VECTOR_MIN_SCORE_LOW", "0.3"))
-            except Exception:
-                low_threshold = 0.3
-
-            try:
-                high_threshold = float(os.getenv("KB_VECTOR_MIN_SCORE", "0.72"))
-            except Exception:
-                high_threshold = 0.72
-
-            # NEW: gap thresholds (tunable)
-            try:
-                gap_high = float(os.getenv("KB_VECTOR_GAP_HIGH", "0.10"))
-            except Exception:
-                gap_high = 0.10
-
-            try:
-                gap_strict = float(os.getenv("KB_VECTOR_GAP_STRICT", "0.12"))
-            except Exception:
-                gap_strict = 0.12
-
-            try:
-                top1_high_min = float(os.getenv("KB_VECTOR_TOP1_HIGH_MIN", "0.65"))
-            except Exception:
-                top1_high_min = 0.65
-
-            try:
-                top1_strict_min = float(os.getenv("KB_VECTOR_TOP1_STRICT_MIN", "0.55"))
-            except Exception:
-                top1_strict_min = 0.55
-
-        
+            strict_threshold = self._get_env_float("KB_VECTOR_MIN_SCORE_LOW", KB_VECTOR_MIN_SCORE_LOW)
+       
             if retrieved_chunks:
                 try:
-                    top1 = float(getattr(retrieved_chunks[0], "score", 0.0) or 0.0)
+                    top1 = float(getattr(retrieved_chunks[0], STR_CHUNK_SCORE, 0.0) or 0.0)
                 except Exception:
                     top1 = 0.0
                 if len(retrieved_chunks) > 1:
                     try:
-                        top2 = float(getattr(retrieved_chunks[1], "score", 0.0) or 0.0)
+                        top2 = float(getattr(retrieved_chunks[1], STR_CHUNK_SCORE, 0.0) or 0.0)
                     except Exception:
                         top2 = 0.0
                 gap = max(0.0, top1 - top2)
-
-            if (not retrieved_chunks):
-                return None
-
-            if top1 < low_threshold:
-                strict_mode = True
-
-            #treat as high confidence even if top1 < high_threshold
-            force_high = (top1 >= top1_high_min and gap >= gap_high)
-
-            # if it would fall below_low, but it's clearly the best vs #2,
-            # do NOT return None; instead go strict LLM.
-            force_strict = (top1 >= top1_strict_min and gap >= gap_strict)
-
-            logger.info({
-                "component": "kb_service",
-                "event": "vector_scores",
-                "tenant_id": tenant_id,
-                "lang": language_code,
-                "matches": len(retrieved_chunks) if retrieved_chunks else 0,
-                "top1": top1,
-                "top2": top2,
-                "gap": gap,
-                "low_threshold": low_threshold,
-                "high_threshold": high_threshold,
-                "force_high": force_high,
-                "force_strict": force_strict,
-            })
-
-            # Decide strict_mode:
-            # - If force_high -> not strict
-            # - Else strict if top1 < high_threshold OR force_strict explicitly
-            if force_high:
-                strict_mode = False
-            else:
-                strict_mode = (strict_mode or force_strict or (top1 < high_threshold))
-
-
-            logger.info(
-                {
+                if top1 < strict_threshold:
+                    strict_mode = True
+                logger.info({
                     "component": "kb_service",
-                    "event": "temp",
-                }
-            )
+                    "event": "vector_scores",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "matches": len(retrieved_chunks) if retrieved_chunks else 0,
+                    "top1": top1,
+                    "top2": top2,
+                    "gap": gap,
+                    "strict_threshold": strict_threshold,
+                })
+            if not retrieved_chunks and not chunks_for_prompt:
+                logger.info({"component":"kb_service","event":"no_chunks_smalltalk_and_kb"})
+
+            if not retrieved_chunks and chunks_for_prompt:
+                logger.info({"component":"kb_service","event":"kb_empty_using_smalltalk_only", })
+
         # FAST PATH: if vector retrieval returns chunks that already include "A: ...",
         # return the best-match answer directly and avoid an extra LLM call.
         if retrieved_chunks:
+            #2--------------
             # FAST-PATH safety: only return a direct FAQ answer when similarity is high.
             # Otherwise fall back to LLM synthesis / explicit "no info" response.
-            try:
-                min_score = float(os.getenv("KB_VECTOR_FASTPATH_MIN_SCORE", "0.70"))
-            except Exception:
-                min_score = 0.70
+            for i, ch in enumerate(retrieved_chunks[:KB_RETRIEVED_CHUNKS], start=1):
+                logger.warning({
+                    "component": "kb_service",
+                    "event": "retrieved_top",
+                    "rank": i,
+                    "score": getattr(ch, "score", None),
+                    "faq_key": getattr(ch, "faq_key", None),
+                    "text[:200]": (getattr(ch, "text", "") or "")[:200],
+                })
 
-            max_fastpath = 2  # keep latency predictable
-            for idx, best in enumerate((retrieved_chunks or [])[:max_fastpath]):  
-                logger.info(
-                    {
-                        "component": "kb_service",
-                        "event": "temp",
-                    }
-                )
+            min_score  = self._get_env_float("KB_VECTOR_FASTPATH_MIN_SCORE", KB_VECTOR_FASTPATH_MIN_SCORE)
+
+            for idx, best in enumerate((retrieved_chunks or [])[:KB_FETCHED_CHUNKS]):  
 
                 best_score = getattr(best, STR_CHUNK_SCORE, 0.0) or 0.0
                 # reuse gap computed earlier
                 if best_score < min_score:
-                    logger.info(
-                        {
-                            "component": "kb_service",
-                            "event": "temp",
-                        }
-                    )
-
                     continue
 
                 # Extract the answer portion from the chunk (chunk_faq uses "Q:" and "A:").
                 txt = (best.text or "").strip()
                 if not txt:
-                    logger.info(
-                        {
-                            "component": "kb_service",
-                            "event": "temp",
-                        }
-                    )
 
                     continue
-                logger.info(
-                    {
-                        "component": "kb_service",
-                        "event": "temp",
-                    }
-                )
                     
-                m = re.search(r"\n\s*A:\s*(.*)$", txt, flags=re.IGNORECASE | re.DOTALL)
+                m = re.search(FASTPATCH_SEARCH_REGEX, txt, flags=re.IGNORECASE | re.DOTALL)
                 if m:
                     ans = (m.group(1) or "").strip()
                 else:
                     # Fallback: try split on 'A:' if newlines differ
-                    parts = re.split(r"\bA:\s*", txt, maxsplit=1, flags=re.IGNORECASE)
+                    parts = re.split(FASTPATCH_SPLIT_REGEX, txt, maxsplit=1, flags=re.IGNORECASE)
                     ans = parts[1].strip() if len(parts) == 2 else ""
                 if not ans:                
-                    logger.info(
-                        {
-                            "component": "kb_service",
-                            "event": "temp",
-                        }
-                    )
 
                     continue
-                if ans == "__NO_INFO__":
+                if ans == ANSWER_NO_INFO:
                     logger.info(
                         {
                             "component": "kb_service",
@@ -451,25 +455,16 @@ class KBService:
                         "ans": ans,
                     }
                 )
-                if ans and ans != "__NO_INFO__":
+                if ans and ans != ANSWER_NO_INFO:
                     return ans
-            logger.info(
-                {
-                    "component": "kb_service",
-                    "event": "temp",
-                }
-            )
-
-            system_prompt = build_kb_prompt(chunks=retrieved_chunks, language_code=language_code)
-            if strict_mode:
-                system_prompt += (        
-                    "\n\nThe user's message may contain multiple questions or topics. "
-                    "Answer using ONLY the provided snippets.\n"
-                    "- If you can answer at least one part, provide an answer for the part(s) supported by snippets and ignore unsupported parts.\n"
-                    "- If none of the snippets support any part of the user's message, respond with the exact JSON "
-                    "{\"answer\": \"__NO_INFO__\"} and nothing else."
-                )
+            #2--------------        
+            chunks_for_prompt += retrieved_chunks
+        if chunks_for_prompt and self._is_smalltalk_only(question):
+            strict_mode = True
+        if chunks_for_prompt:
+            system_prompt = self._vector.build_kb_prompt(chunks=chunks_for_prompt, language_code=language_code, strict_mode=strict_mode)
         else:
+            #3--------------
             # legacy retrieval (backward-compatible)
             logger.warning(
                 {
@@ -520,24 +515,8 @@ class KBService:
                 # (to powoduje halucynacje lub odpowiedzi grzecznościowe).
                 faq_context = ""
 
-            system_prompt = (
-                "You are a helpful customer-support assistant.\n"
-                "Answer the user's question ONLY using the FAQ entries below.\n"
-                "Always respond as a JSON object with a single key \"answer\".\n"
-                "In the \"answer\" value, paraphrase the relevant information. "
-                "If the FAQ does not contain the information needed to answer the question, "
-                "reply that you don't know AND ask the user if there is anything else you can help with.\n"
-                "FAQ entries:\n"
-                f"{faq_context}\n"
-            )
-
-            if language_code:
-                system_prompt += (
-                    f"\nAnswer in the language {language_code} (ISO language code)."
-                )
-            else:
-                system_prompt += "\nAnswer in the same language as the user's question."
- 
+            system_prompt = self._client.build_old_prompt(language_code, faq_context)
+            #3--------------
         with timed(
             "prompt_build",
             logger=logger,
@@ -550,20 +529,18 @@ class KBService:
             messages: list[dict] = [
                 {"role": "system", "content": system_prompt},
             ]
-            # 4) opcjonalna historia rozmowy (user / assistant)
             if history:
                 history = [m for m in history if m.get("role") == "user"]
-            if history:
                 messages.extend(history)
 
             # 5) aktualne pytanie
+            question_content = f"{question}\n\n"
+            question_content += FAQ_MSG_JSON
+            
             messages.append(
                 {
-                    "role": "user",
-                    "content": (
-                        f"{question}\n\n"
-                        'Respond strictly in JSON with a single key "answer".'
-                    ),
+                    "role": FAQ_ROLE_USER,
+                    "content": question_content,
                 }
             )
 
@@ -583,9 +560,9 @@ class KBService:
         except Exception:
             pass
 
-        # 6) Wołamy LLM – max_tokens mniejsze niż wcześniej, żeby odpowiedź była szybsza
+        # 6) Wołamy LLM
         try:
-            raw = self._client.chat(messages=messages, max_tokens=512)  # było 512
+            raw = self._client.chat(messages=messages, max_tokens=512)
         except Exception as e:
             logger.error(
                 {
@@ -600,7 +577,7 @@ class KBService:
             return None
 
         raw = raw.strip()
-        if raw == "__NO_INFO__":
+        if raw == ANSWER_NO_INFO:
             logger.info(
                 {
                     "component": "kb_service",
@@ -612,15 +589,23 @@ class KBService:
             )
             return None
 
-        # 7) próbujemy wyciągnąć "answer" z JSON-a
+        # 7) próbujemy wyciągnąć FAQ_ANSWER_KEY z JSON-a
+        #4--------------
         try:
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": FAQ_ANSWER_KEY,
+                    "raw[:200]": raw[:200],
+                }
+            )
             data = json.loads(raw)
             if isinstance(data, dict):
-                if "answer" in data:
-                    ans = data.get("answer")
+                if FAQ_ANSWER_KEY in data:
+                    ans = data.get(FAQ_ANSWER_KEY)
                     if isinstance(ans, str):
                         ans = ans.strip()
-                        if ans == "__NO_INFO__":
+                        if ans == ANSWER_NO_INFO:
                             return None
                         return ans
                     return None
@@ -628,7 +613,7 @@ class KBService:
                 for v in data.values():
                     if isinstance(v, str):
                         v = v.strip()
-                        if v and v != "__NO_INFO__":
+                        if v and v != ANSWER_NO_INFO:
                             parts.append(v)
                 if parts:
                     return "\n".join(parts)
@@ -636,7 +621,7 @@ class KBService:
 
         except Exception:
             return None
-
+        #4--------------
         return None
         
     def list_faq_keys(self, tenant_id: str, language_code: str) -> set[str]:
@@ -676,14 +661,14 @@ class KBService:
             try:
                 data = json.loads(text)
                 if isinstance(data, dict):
-                    if isinstance(data.get("answer"), str):
-                        body = data["answer"].strip()
+                    if isinstance(data.get(FAQ_ANSWER_KEY), str):
+                        body = data[FAQ_ANSWER_KEY].strip()
                     else:
                         parts = []
                         for v in data.values():
                             if isinstance(v, str):
                                 v = v.strip()
-                                if v and v != "__NO_INFO__":
+                                if v and v != ANSWER_NO_INFO:
                                     parts.append(v)
                         body = "\n".join(parts) if parts else None
             except Exception:

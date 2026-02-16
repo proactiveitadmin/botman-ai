@@ -1,87 +1,604 @@
 {
-  "greeting": "Cześć! 👋 Jak mogę pomóc? Mogę podać godziny otwarcia, zasady wejścia, ceny karnetów, rezerwacje zajęć i inne informacje o klubie.",
-  "farewell": "Dziękuję za kontakt. Do zobaczenia w klubie! 👋 Jeśli będziesz czegoś potrzebować, napisz śmiało.",
-  "thanks": "Nie ma sprawy — cieszę się, że mogłem pomóc! 😊",
-  "youre_welcome": "Z przyjemnością! Jeśli masz kolejne pytania, jestem do dyspozycji.",
-  
-  "hours": "Klub jest otwarty od poniedziałku do piątku w godzinach 6:00–22:00, a w weekendy 8:00–20:00.",
-  "opening_hours": "Klub jest otwarty od poniedziałku do piątku w godzinach 6:00–22:00, a w weekendy 8:00–20:00.",
-
-  "entry_policy": "Wejście do klubu odbywa się za pomocą aplikacji lub karty klubowej. Każde wejście jest rejestrowane w systemie.",
-  "entry": "Wejście do klubu możliwe jest przy użyciu aplikacji mobilnej lub karty klubowej.",
-
-  "membership_price": "Cena karnetu miesięcznego zaczyna się od 139 zł. Dostępne są również plany kwartalne i roczne, a także zniżki dla studentów i seniorów.",
-  "membership_types": "Oferujemy karnety: Open, Off-Peak, Basen+Siłownia, oraz Family. Szczegóły dostępne w recepcji i na stronie www.",
-  "membership": "Klub oferuje różne rodzaje karnetów dopasowane do potrzeb klubowiczów.",
-  "carnet": "Dostępne są karnety miesięczne, kwartalne i roczne.",
-
-  "payments": "Akceptujemy płatności kartą, BLIKIEM oraz płatności cykliczne.",
-  "payment_methods": "W klubie można płacić kartą, BLIKIEM oraz w formie płatności cyklicznych.",
-
-  "contract_freeze": "Umowę można zamrozić raz w roku, maksymalnie na 30 dni. Koszt zamrożenia to 29 zł.",
-  "contract_termination": "Rozwiązanie umowy wymaga podpisania formularza w recepcji. Okres wypowiedzenia wynosi 1 miesiąc.",
-  "contract_transfer": "Karnet można przepisać na inną osobę za opłatą administracyjną wynoszącą 39 zł.",
-  "contract": "Sprawy związane z umową, jej rozwiązaniem, zamrożeniem lub przepisaniem obsługuje recepcja klubu.",
-  "agreement": "Umowa członkowska określa warunki korzystania z klubu.",
-
-  "classes_booking": "Zajęcia grupowe można rezerwować przez aplikację mobilną lub kontaktując się z recepcją.",
-  "classes_cancellation": "Zajęcia można odwołać najpóźniej 2 godziny przed rozpoczęciem. Po tym czasie naliczana jest opłata zgodna z cennikiem.",
-  "classes_limit": "Liczba miejsc na zajęciach jest ograniczona. Rezerwacje realizowane są według kolejności zgłoszeń.",
-  "classes": "Klub oferuje szeroki wybór zajęć grupowych.",
-  "group_classes": "Zajęcia grupowe prowadzone są według harmonogramu dostępnego w aplikacji.",
-
-  "instructors": "Informacje o trenerach prowadzących zajęcia znajdziesz w aplikacji lub na tablicy przy sali fitness.",
-  "trainers": "Trenerzy dostępni w klubie prowadzą zajęcia grupowe oraz treningi personalne.",
-
-  "personal_trainer": "Trening personalny można umówić w recepcji lub kontaktując się bezpośrednio z wybranym trenerem.",
-  "personal_trainer_prices": "Ceny treningów personalnych zaczynają się od 120 zł za sesję. Dostępne są pakiety w niższej cenie.",
-  "pt": "Trening personalny pozwala na indywidualne dopasowanie planu treningowego.",
-
-  "pool_hours": "Basen jest dostępny codziennie od 6:00 do 21:30. Ostatnie wejście możliwe jest 45 minut przed zamknięciem.",
-  "pool": "Basen jest dostępny dla klubowiczów codziennie.",
-  "swimming_pool": "Basen znajduje się w strefie mokrej klubu.",
-
-  "sauna_hours": "Strefa saun jest czynna od 14:00 do 22:00 w dni powszednie oraz od 10:00 do 20:00 w weekendy.",
-  "sauna": "Strefa saun dostępna jest dla klubowiczów w określonych godzinach.",
-  "sauna_zone": "Sauna znajduje się w strefie wellness klubu.",
-
-  "locker_room": "Szafki działają na kod PIN. Jeśli zapomniałeś kodu — zgłoś się do recepcji.",
-  "lockers": "Szafki dostępne są w szatniach i zabezpieczone kodem PIN.",
-
-  "showers": "Prysznice są dostępne bez ograniczeń. Prosimy o korzystanie z własnych klapek.",
-  "changing_rooms": "Szatnie wyposażone są w prysznice i szafki.",
-
-  "towels": "Ręczniki dostępne są w recepcji za dodatkową opłatą 5 zł. Zalecamy korzystanie z ręcznika podczas ćwiczeń.",
-  "equipment_rules": "Prosimy o odkładanie sprzętu na miejsce po zakończonym treningu oraz o dezynfekcję maszyn po użyciu.",
-  "equipment": "Sprzęt treningowy dostępny jest dla wszystkich klubowiczów.",
-
-  "parking": "Dla klubowiczów dostępne są 2 godziny bezpłatnego parkingu. Pobierz bilet przy wjeździe i zachowaj go do wyjazdu.",
-  "parking_info": "Klub oferuje bezpłatny parking dla klubowiczów przez pierwsze 2 godziny.",
-
-  "bike_racks": "Przed klubem znajdują się stojaki rowerowe. Prosimy o zabezpieczanie rowerów własnym zapięciem.",
-  "bikes": "Do klubu można dojechać rowerem.",
-
-  "kids_zone": "Strefa dla dzieci/kącik zabaw/Kids Zone działa w soboty i niedziele w godzinach 10:00–18:00. Dzieci muszą przebywać pod opieką osoby dorosłej.",
-  "children": "Dzieci mogą przebywać na terenie klubu wyłącznie pod opieką dorosłych.",
-
-  "age_policy": "Osoby poniżej 16. roku życia mogą korzystać z klubu wyłącznie pod opieką dorosłych lub trenera.",
-  "rules": "Regulamin klubu dostępny jest na naszej stronie internetowej oraz w recepcji.",
-
-  "lost_items": "Zgubione rzeczy można odebrać w recepcji. Przechowujemy je przez 30 dni.",
-  "maintenance": "Aktualne prace serwisowe i wyłączenia stref znajdziesz na tablicy informacyjnej przy wejściu oraz w aplikacji.",
-  "cleaning_breaks": "Strefy mogą być czasowo wyłączone na potrzeby sprzątania. Informacja pojawia się z wyprzedzeniem.",
-
-  "safety": "W razie złego samopoczucia lub kontuzji zgłoś się natychmiast do personelu. Defibrylator AED znajduje się przy recepcji.",
-
-  "wifi": "Darmowe Wi-Fi jest dostępne na terenie całego klubu. Nazwa sieci: FITNESS_WIFI, hasło: trening2024.",
-  "internet": "Na terenie klubu dostępne jest darmowe Wi-Fi.",
-
-  "invoices": "Fakturę za karnet możesz otrzymać w recepcji lub mailowo po zgłoszeniu takiej potrzeby.",
-  "billing": "Sprawy związane z płatnościami i fakturami obsługuje recepcja.",
-
-  "app_help": "Jeśli masz problem z aplikacją, spróbuj zaktualizować ją do najnowszej wersji lub skontaktuj się z recepcją.",
-  "app": "Aplikacja mobilna umożliwia rezerwację zajęć i dostęp do klubu.",
-
-  "smalltalk_how_are_you": "Dzięki, wszystko dobrze! 😊 Jak mogę Ci pomóc w sprawie klubu?",
-  "smalltalk_who_are_you": "Jestem wirtualnym asystentem klubu. Pomagam szybko znaleźć informacje, np. o godzinach, karnetach, zajęciach i zasadach."
+  "entries": [
+    {
+      "key": "greeting",
+      "questions": [
+        "cześć",
+        "hej",
+        "dzień dobry",
+        "halo",
+        "witaj"
+      ],
+      "answer": "Cześć! 👋 Jak mogę pomóc? Mogę podać godziny otwarcia, zasady wejścia, ceny karnetów, rezerwacje zajęć i inne informacje o klubie.",
+      "category": "smalltalk"
+    },
+    {
+      "key": "farewell",
+      "questions": [
+        "do widzenia",
+        "na razie",
+        "dziękuję, to wszystko",
+        "koniec rozmowy"
+      ],
+      "answer": "Dziękuję za kontakt. Do zobaczenia w klubie! 👋 Jeśli będziesz czegoś potrzebować, napisz śmiało.",
+      "category": "smalltalk"
+    },
+    {
+      "key": "thanks",
+      "questions": [
+        "dzięki",
+        "dziękuję",
+        "super, dzięki"
+      ],
+      "answer": "Nie ma sprawy — cieszę się, że mogłem pomóc! 😊",
+      "category": "smalltalk"
+    },
+    {
+      "key": "youre_welcome",
+      "questions": [
+        "nie ma za co",
+        "dzięki za pomoc",
+        "ok, dzięki"
+      ],
+      "answer": "Z przyjemnością! Jeśli masz kolejne pytania, jestem do dyspozycji.",
+      "category": "smalltalk"
+    },
+    {
+      "key": "opening_hours",
+      "questions": [
+        "Jakie są godziny otwarcia klubu?",
+        "W jakich godzinach działa klub?",
+        "Do której jest otwarte w tygodniu?",
+        "Jakie są godziny otwarcia w weekend?"
+      ],
+      "answer": "Klub jest otwarty od poniedziałku do piątku w godzinach 6:00–22:00, a w weekendy 8:00–20:00.",
+      "category": "kb"
+    },
+    {
+      "key": "entry_policy",
+      "questions": [
+        "Jak wygląda wejście do klubu?",
+        "Jakie są zasady wejścia?",
+        "Czy wejście jest rejestrowane?"
+      ],
+      "answer": "Wejście do klubu odbywa się za pomocą aplikacji lub karty klubowej. Każde wejście jest rejestrowane w systemie.",
+      "category": "kb"
+    },
+    {
+      "key": "entry",
+      "questions": [
+        "Jak wejść do klubu?",
+        "Czy mogę wejść aplikacją?",
+        "Czy potrzebuję karty klubowej?"
+      ],
+      "answer": "Wejście do klubu możliwe jest przy użyciu aplikacji mobilnej lub karty klubowej.",
+      "category": "kb"
+    },
+    {
+      "key": "membership_price",
+      "questions": [
+        "Ile kosztuje karnet miesięczny?",
+        "Jaka jest cena członkostwa?",
+        "Czy są zniżki dla studentów lub seniorów?"
+      ],
+      "answer": "Cena karnetu miesięcznego zaczyna się od 139 zł. Dostępne są również plany kwartalne i roczne, a także zniżki dla studentów i seniorów.",
+      "category": "kb"
+    },
+    {
+      "key": "membership_types",
+      "questions": [
+        "Jakie są rodzaje karnetów?",
+        "Jakie członkostwa oferujecie?",
+        "Czym różni się Off-Peak od Open?"
+      ],
+      "answer": "Oferujemy karnety: Open, Off-Peak, Basen+Siłownia, oraz Family. Szczegóły dostępne w recepcji i na stronie www.",
+      "category": "kb"
+    },
+    {
+      "key": "membership",
+      "questions": [
+        "Jakie macie karnety?",
+        "Jakie opcje członkostwa są dostępne?"
+      ],
+      "answer": "Klub oferuje różne rodzaje karnetów dopasowane do potrzeb klubowiczów.",
+      "category": "kb"
+    },
+    {
+      "key": "carnet",
+      "questions": [
+        "Jakie są dostępne karnety?",
+        "Czy macie karnet roczny?",
+        "Czy są karnety kwartalne?"
+      ],
+      "answer": "Dostępne są karnety miesięczne, kwartalne i roczne.",
+      "category": "kb"
+    },
+    {
+      "key": "payments",
+      "questions": [
+        "Jak mogę zapłacić?",
+        "Jakie formy płatności akceptujecie?",
+        "Czy mogę zapłacić BLIKIEM?"
+      ],
+      "answer": "Akceptujemy płatności kartą, BLIKIEM oraz płatności cykliczne.",
+      "category": "kb"
+    },
+    {
+      "key": "payment_methods",
+      "questions": [
+        "Jak mogę zapłacić?",
+        "Czy można płacić kartą?",
+        "Czy są płatności cykliczne?"
+      ],
+      "answer": "W klubie można płacić kartą, BLIKIEM oraz w formie płatności cyklicznych.",
+      "category": "kb"
+    },
+    {
+      "key": "contract_freeze",
+      "questions": [
+        "Czy mogę zamrozić umowę?",
+        "Jak działa zamrożenie karnetu?",
+        "Ile kosztuje zamrożenie?"
+      ],
+      "answer": "Umowę można zamrozić raz w roku, maksymalnie na 30 dni. Koszt zamrożenia to 29 zł.",
+      "category": "kb"
+    },
+    {
+      "key": "contract_termination",
+      "questions": [
+        "Jak wypowiedzieć umowę?",
+        "Jaki jest okres wypowiedzenia?",
+        "Gdzie podpisać rozwiązanie umowy?"
+      ],
+      "answer": "Rozwiązanie umowy wymaga podpisania formularza w recepcji. Okres wypowiedzenia wynosi 1 miesiąc.",
+      "category": "kb"
+    },
+    {
+      "key": "contract_transfer",
+      "questions": [
+        "Czy mogę przepisać karnet na inną osobę?",
+        "Jak przenieść umowę/abonament?",
+        "Ile kosztuje przepisanie karnetu?"
+      ],
+      "answer": "Karnet można przepisać na inną osobę za opłatą administracyjną wynoszącą 39 zł.",
+      "category": "kb"
+    },
+    {
+      "key": "contract",
+      "questions": [
+        "Sprawy umowy – gdzie to załatwić?",
+        "Kto obsługuje umowę i jej zmiany?",
+        "Gdzie zgłosić sprawy związane z umową?"
+      ],
+      "answer": "Sprawy związane z umową, jej rozwiązaniem, zamrożeniem lub przepisaniem obsługuje recepcja klubu.",
+      "category": "kb"
+    },
+    {
+      "key": "agreement",
+      "questions": [
+        "Czym jest umowa członkowska?",
+        "Co określa umowa członkowska?"
+      ],
+      "answer": "Umowa członkowska określa warunki korzystania z klubu.",
+      "category": "kb"
+    },
+    {
+      "key": "classes_booking",
+      "questions": [
+        "Jak zarezerwować zajęcia?",
+        "Czy można rezerwować zajęcia w aplikacji?",
+        "Gdzie zrobić rezerwację zajęć grupowych?"
+      ],
+      "answer": "Zajęcia grupowe można rezerwować przez aplikację mobilną lub kontaktując się z recepcją.",
+      "category": "kb"
+    },
+    {
+      "key": "classes_cancellation",
+      "questions": [
+        "Jak odwołać zajęcia?",
+        "Do kiedy mogę anulować rezerwację zajęć?",
+        "Czy jest opłata za późne odwołanie?"
+      ],
+      "answer": "Zajęcia można odwołać najpóźniej 2 godziny przed rozpoczęciem. Po tym czasie naliczana jest opłata zgodna z cennikiem.",
+      "category": "kb"
+    },
+    {
+      "key": "classes_limit",
+      "questions": [
+        "Czy liczba miejsc na zajęciach jest ograniczona?",
+        "Jak działa limit miejsc na zajęcia?",
+        "Kto ma pierwszeństwo rezerwacji?"
+      ],
+      "answer": "Liczba miejsc na zajęciach jest ograniczona. Rezerwacje realizowane są według kolejności zgłoszeń.",
+      "category": "kb"
+    },
+    {
+      "key": "classes",
+      "questions": [
+        "Jakie zajęcia oferujecie?",
+        "Czy macie zajęcia grupowe?",
+        "Jakie są dostępne zajęcia fitness?"
+      ],
+      "answer": "Klub oferuje szeroki wybór zajęć grupowych.",
+      "category": "kb"
+    },
+    {
+      "key": "group_classes",
+      "questions": [
+        "Gdzie znaleźć harmonogram zajęć?",
+        "Kiedy są zajęcia grupowe?",
+        "Czy jest grafik zajęć w aplikacji?"
+      ],
+      "answer": "Zajęcia grupowe prowadzone są według harmonogramu dostępnego w aplikacji.",
+      "category": "kb"
+    },
+    {
+      "key": "instructors",
+      "questions": [
+        "Gdzie sprawdzić prowadzących zajęcia?",
+        "Kto prowadzi zajęcia grupowe?",
+        "Jak znaleźć informacje o instruktorach?"
+      ],
+      "answer": "Informacje o trenerach prowadzących zajęcia znajdziesz w aplikacji lub na tablicy przy sali fitness.",
+      "category": "kb"
+    },
+    {
+      "key": "trainers",
+      "questions": [
+        "Czy są trenerzy w klubie?",
+        "Czy oferujecie treningi personalne?",
+        "Kim są trenerzy w klubie?"
+      ],
+      "answer": "Trenerzy dostępni w klubie prowadzą zajęcia grupowe oraz treningi personalne.",
+      "category": "kb"
+    },
+    {
+      "key": "personal_trainer",
+      "questions": [
+        "Jak umówić trening personalny?",
+        "Czy mogę zapisać się na trenera personalnego?",
+        "Gdzie zarezerwować trening personalny?"
+      ],
+      "answer": "Trening personalny można umówić w recepcji lub kontaktując się bezpośrednio z wybranym trenerem.",
+      "category": "kb"
+    },
+    {
+      "key": "personal_trainer_prices",
+      "questions": [
+        "Ile kosztuje trening personalny?",
+        "Jaka jest cena trenera personalnego?",
+        "Czy są pakiety treningów personalnych?"
+      ],
+      "answer": "Ceny treningów personalnych zaczynają się od 120 zł za sesję. Dostępne są pakiety w niższej cenie.",
+      "category": "kb"
+    },
+    {
+      "key": "pt",
+      "questions": [
+        "Co to jest trening personalny?",
+        "Na czym polega trening personalny?"
+      ],
+      "answer": "Trening personalny pozwala na indywidualne dopasowanie planu treningowego.",
+      "category": "kb"
+    },
+    {
+      "key": "pool_hours",
+      "questions": [
+        "W jakich godzinach jest basen?",
+        "Do której czynny jest basen?",
+        "Kiedy jest ostatnie wejście na basen?"
+      ],
+      "answer": "Basen jest dostępny codziennie od 6:00 do 21:30. Ostatnie wejście możliwe jest 45 minut przed zamknięciem.",
+      "category": "kb"
+    },
+    {
+      "key": "pool",
+      "questions": [
+        "Czy basen jest dostępny codziennie?",
+        "Czy mogę korzystać z basenu?"
+      ],
+      "answer": "Basen jest dostępny dla klubowiczów codziennie.",
+      "category": "kb"
+    },
+    {
+      "key": "swimming_pool",
+      "questions": [
+        "Gdzie jest basen w klubie?",
+        "W której strefie znajduje się basen?"
+      ],
+      "answer": "Basen znajduje się w strefie mokrej klubu.",
+      "category": "kb"
+    },
+    {
+      "key": "sauna_hours",
+      "questions": [
+        "W jakich godzinach działa sauna?",
+        "Kiedy czynna jest strefa saun?",
+        "Czy sauna jest otwarta w weekend?"
+      ],
+      "answer": "Strefa saun jest czynna od 14:00 do 22:00 w dni powszednie oraz od 10:00 do 20:00 w weekendy.",
+      "category": "kb"
+    },
+    {
+      "key": "sauna",
+      "questions": [
+        "Czy sauna jest dostępna?",
+        "Kiedy mogę skorzystać z sauny?"
+      ],
+      "answer": "Strefa saun dostępna jest dla klubowiczów w określonych godzinach.",
+      "category": "kb"
+    },
+    {
+      "key": "sauna_zone",
+      "questions": [
+        "Gdzie znajduje się sauna?",
+        "W jakiej strefie jest sauna?"
+      ],
+      "answer": "Sauna znajduje się w strefie wellness klubu.",
+      "category": "kb"
+    },
+    {
+      "key": "locker_room",
+      "questions": [
+        "Jak działają szafki?",
+        "Co jeśli zapomniałem PIN do szafki?",
+        "Gdzie zgłosić problem z kodem do szafki?"
+      ],
+      "answer": "Szafki działają na kod PIN. Jeśli zapomniałeś kodu — zgłoś się do recepcji.",
+      "category": "kb"
+    },
+    {
+      "key": "lockers",
+      "questions": [
+        "Czy są szafki w szatni?",
+        "Jak zabezpieczone są szafki?"
+      ],
+      "answer": "Szafki dostępne są w szatniach i zabezpieczone kodem PIN.",
+      "category": "kb"
+    },
+    {
+      "key": "showers",
+      "questions": [
+        "Czy są prysznice?",
+        "Czy prysznice są bez limitu?",
+        "Czy potrzebuję klapek pod prysznic?"
+      ],
+      "answer": "Prysznice są dostępne bez ograniczeń. Prosimy o korzystanie z własnych klapek.",
+      "category": "kb"
+    },
+    {
+      "key": "changing_rooms",
+      "questions": [
+        "Czy są szatnie?",
+        "Co jest w szatniach?",
+        "Czy w szatniach są prysznice i szafki?"
+      ],
+      "answer": "Szatnie wyposażone są w prysznice i szafki.",
+      "category": "kb"
+    },
+    {
+      "key": "towels",
+      "questions": [
+        "Czy są ręczniki?",
+        "Ile kosztuje ręcznik?",
+        "Czy można wypożyczyć ręcznik w recepcji?"
+      ],
+      "answer": "Ręczniki dostępne są w recepcji za dodatkową opłatą 5 zł. Zalecamy korzystanie z ręcznika podczas ćwiczeń.",
+      "category": "kb"
+    },
+    {
+      "key": "equipment_rules",
+      "questions": [
+        "Jakie są zasady korzystania ze sprzętu?",
+        "Czy trzeba dezynfekować maszyny?",
+        "Czy trzeba odkładać sprzęt na miejsce?"
+      ],
+      "answer": "Prosimy o odkładanie sprzętu na miejsce po zakończonym treningu oraz o dezynfekcję maszyn po użyciu.",
+      "category": "kb"
+    },
+    {
+      "key": "equipment",
+      "questions": [
+        "Czy sprzęt jest dostępny dla wszystkich?",
+        "Jaki sprzęt jest w klubie?"
+      ],
+      "answer": "Sprzęt treningowy dostępny jest dla wszystkich klubowiczów.",
+      "category": "kb"
+    },
+    {
+      "key": "parking",
+      "questions": [
+        "Czy jest parking?",
+        "Ile darmowego parkingu przysługuje?",
+        "Jak działa darmowy parking?"
+      ],
+      "answer": "Dla klubowiczów dostępne są 2 godziny bezpłatnego parkingu. Pobierz bilet przy wjeździe i zachowaj go do wyjazdu.",
+      "category": "kb"
+    },
+    {
+      "key": "parking_info",
+      "questions": [
+        "Czy parking jest darmowy?",
+        "Ile godzin parkingu jest gratis?"
+      ],
+      "answer": "Klub oferuje bezpłatny parking dla klubowiczów przez pierwsze 2 godziny.",
+      "category": "kb"
+    },
+    {
+      "key": "bike_racks",
+      "questions": [
+        "Czy są stojaki na rowery?",
+        "Gdzie zostawić rower?",
+        "Czy trzeba mieć własne zapięcie?"
+      ],
+      "answer": "Przed klubem znajdują się stojaki rowerowe. Prosimy o zabezpieczanie rowerów własnym zapięciem.",
+      "category": "kb"
+    },
+    {
+      "key": "bikes",
+      "questions": [
+        "Czy mogę przyjechać rowerem?",
+        "Dojazd rowerem do klubu?"
+      ],
+      "answer": "Do klubu można dojechać rowerem.",
+      "category": "kb"
+    },
+    {
+      "key": "kids_zone",
+      "questions": [
+        "Czy jest Kids Zone?",
+        "W jakich godzinach działa strefa dla dzieci?",
+        "Czy dzieci muszą być pod opieką?"
+      ],
+      "answer": "Strefa dla dzieci/kącik zabaw/Kids Zone działa w soboty i niedziele w godzinach 10:00–18:00. Dzieci muszą przebywać pod opieką osoby dorosłej.",
+      "category": "kb"
+    },
+    {
+      "key": "children",
+      "questions": [
+        "Czy dzieci mogą wejść do klubu?",
+        "Jakie są zasady dla dzieci w klubie?"
+      ],
+      "answer": "Dzieci mogą przebywać na terenie klubu wyłącznie pod opieką dorosłych.",
+      "category": "kb"
+    },
+    {
+      "key": "age_policy",
+      "questions": [
+        "Od jakiego wieku można korzystać z klubu?",
+        "Czy osoba poniżej 16 lat może ćwiczyć?",
+        "Jakie są zasady dla niepełnoletnich?"
+      ],
+      "answer": "Osoby poniżej 16. roku życia mogą korzystać z klubu wyłącznie pod opieką dorosłych lub trenera.",
+      "category": "kb"
+    },
+    {
+      "key": "rules",
+      "questions": [
+        "Gdzie znajdę regulamin?",
+        "Czy regulamin jest w recepcji?",
+        "Czy regulamin jest na stronie?"
+      ],
+      "answer": "Regulamin klubu dostępny jest na naszej stronie internetowej oraz w recepcji.",
+      "category": "kb"
+    },
+    {
+      "key": "lost_items",
+      "questions": [
+        "Gdzie są rzeczy znalezione?",
+        "Co zrobić gdy coś zgubię?",
+        "Jak długo przechowujecie zgubione rzeczy?"
+      ],
+      "answer": "Zgubione rzeczy można odebrać w recepcji. Przechowujemy je przez 30 dni.",
+      "category": "kb"
+    },
+    {
+      "key": "maintenance",
+      "questions": [
+        "Gdzie sprawdzić prace serwisowe?",
+        "Czy są jakieś wyłączenia stref?",
+        "Gdzie są informacje o awariach/serwisie?"
+      ],
+      "answer": "Aktualne prace serwisowe i wyłączenia stref znajdziesz na tablicy informacyjnej przy wejściu oraz w aplikacji.",
+      "category": "kb"
+    },
+    {
+      "key": "cleaning_breaks",
+      "questions": [
+        "Czy strefy mogą być zamknięte na sprzątanie?",
+        "Czy są przerwy na sprzątanie?",
+        "Skąd dowiem się o wyłączeniach?"
+      ],
+      "answer": "Strefy mogą być czasowo wyłączone na potrzeby sprzątania. Informacja pojawia się z wyprzedzeniem.",
+      "category": "kb"
+    },
+    {
+      "key": "safety",
+      "questions": [
+        "Co zrobić w razie kontuzji?",
+        "Gdzie jest AED?",
+        "Zasady bezpieczeństwa w klubie?"
+      ],
+      "answer": "W razie złego samopoczucia lub kontuzji zgłoś się natychmiast do personelu. Defibrylator AED znajduje się przy recepcji.",
+      "category": "kb"
+    },
+    {
+      "key": "wifi",
+      "questions": [
+        "Czy jest Wi‑Fi?",
+        "Jakie jest hasło do Wi‑Fi?",
+        "Jaka jest nazwa sieci Wi‑Fi?"
+      ],
+      "answer": "Darmowe Wi-Fi jest dostępne na terenie całego klubu. Nazwa sieci: FITNESS_WIFI, hasło: trening2024.",
+      "category": "kb"
+    },
+    {
+      "key": "internet",
+      "questions": [
+        "Czy jest darmowe Wi‑Fi?",
+        "Czy w klubie działa internet?"
+      ],
+      "answer": "Na terenie klubu dostępne jest darmowe Wi-Fi.",
+      "category": "kb"
+    },
+    {
+      "key": "invoices",
+      "questions": [
+        "Jak dostać fakturę?",
+        "Czy mogę dostać fakturę mailowo?",
+        "Gdzie zgłosić prośbę o fakturę?"
+      ],
+      "answer": "Fakturę za karnet możesz otrzymać w recepcji lub mailowo po zgłoszeniu takiej potrzeby.",
+      "category": "kb"
+    },
+    {
+      "key": "billing",
+      "questions": [
+        "Sprawy płatności i faktur – gdzie?",
+        "Kto obsługuje rozliczenia?"
+      ],
+      "answer": "Sprawy związane z płatnościami i fakturami obsługuje recepcja.",
+      "category": "kb"
+    },
+    {
+      "key": "app_help",
+      "questions": [
+        "Mam problem z aplikacją. Co zrobić?",
+        "Aplikacja nie działa – jak naprawić?",
+        "Czy mam zaktualizować aplikację?"
+      ],
+      "answer": "Jeśli masz problem z aplikacją, spróbuj zaktualizować ją do najnowszej wersji lub skontaktuj się z recepcją.",
+      "category": "kb"
+    },
+    {
+      "key": "app",
+      "questions": [
+        "Do czego służy aplikacja?",
+        "Czy aplikacją mogę wejść do klubu?",
+        "Czy w aplikacji rezerwuje się zajęcia?"
+      ],
+      "answer": "Aplikacja mobilna umożliwia rezerwację zajęć i dostęp do klubu.",
+      "category": "kb"
+    },
+    {
+      "key": "smalltalk_how_are_you",
+      "questions": [
+        "jak się masz?",
+        "co słychać?",
+        "jak tam?"
+      ],
+      "answer": "Dzięki, wszystko dobrze! 😊 Jak mogę Ci pomóc w sprawie klubu?",
+      "category": "smalltalk"
+    },
+    {
+      "key": "smalltalk_who_are_you",
+      "questions": [
+        "kim jesteś?",
+        "co potrafisz?",
+        "jesteś botem?"
+      ],
+      "answer": "Jestem wirtualnym asystentem klubu. Pomagam szybko znaleźć informacje, np. o godzinach, karnetach, zajęciach i zasadach.",
+      "category": "smalltalk"
+    }
+  ]
 }
