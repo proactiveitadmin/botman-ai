@@ -13,6 +13,31 @@ import json
 import time
 import random
 import asyncio
+from ..common.constants import (
+    INTENT_FAQ,
+    INTENT_HANDOVER,
+    INTENT_VERIFICATION,
+    INTENT_CLARIFY,
+    INTENT_TICKET,
+    INTENT_TICKET_STATUS,
+    INTENT_AVAILABLE_CLASSES,
+    INTENT_CONTRACT_STATUS,
+    INTENT_CRM_MEMBER_BALANCE,
+    INTENT_ACK,
+    INTENT_MARKETING_OPTOUT,
+    INTENT_MARKETING_OPTIN,
+    _VALID_INTENTS,
+    SYSTEM_PROMPT_INTENT,
+    SYSTEM_PROMPT_FAQ,
+    SYSTEM_PROMPT_FAQ_JSON,
+    SYSTEM_PROMPT_FAQ_STRICT,
+    SYSTEM_PROMPT_FAQ_NO_STRICT,
+    SYSTEM_PROMPT_FAQ_OLD,
+    SYSTEM_PROMPT_LANG_FIRST,
+    SYSTEM_PROMPT_LANG_SECOND,
+    SYSTEM_PROMPT_NO_LANG,
+    SYSTEM_PROMPT_HISTORY,
+)
 
 from openai import OpenAI
 from openai import APIError, APIConnectionError, APIStatusError, RateLimitError
@@ -21,66 +46,6 @@ from ..common.config import settings
 from ..common.logging import logger
 from ..common.timing import timed
 
-
-SYSTEM_PROMPT = """
-Classify the user message and extract intent + slots.
-
-Return ONLY JSON:
-{"intent": "...", "confidence": 0..1, "slots": {...}}
-
-Intents:
-- reserve_class
-- crm_available_classes
-- crm_contract_status
-- crm_member_balance
-- verification
-- ticket
-- handover
-- ack
-- faq
-- clarify
-- ticket_status
-- marketing_optout
-- marketing_optin
-
-FAQ KEY POLICY (IMPORTANT):
-- slots.faq_key is OPTIONAL. Use it ONLY when the message unambiguously maps to exactly ONE FAQ key.
-- Do NOT guess. If there is any ambiguity between multiple keys, omit slots.faq_key.
-- If the user asks a general question that could match multiple FAQ entries (e.g., "hours" without specifying what),
-  omit slots.faq_key.
-- If the user mentions a specific entity (e.g., "sauna", "pool", "locker room", "kids zone"), prefer the matching key ONLY
-  if that entity is explicitly present in the user's text.
-- Do NOT map between similar categories (e.g., sauna vs pool) unless the user's text explicitly contains the target entity.
-- If unsure, return intent="faq" and leave slots empty.
-
-Rules:
-- If message is only a number -> intent=clarify (confidence 0.01)
-- Prefer faq over clarify
-- Messages describing urgent problems, lost items, access to personal belongings,
-  safety issues, or situations requiring immediate human assistance
-  MUST be classified as intent "ticket".
-  
-Conversational shortcuts:
-- Single-token or very short greetings, farewells, and politeness expressions
-  (e.g. greetings, goodbyes, thanks, acknowledgements) are HIGH confidence.
-- For such messages, set confidence >= 0.9.
-- These messages are NOT ambiguous and should not be classified as clarify.
-
-If the message is a greeting or farewell:
-- Use intent "faq".
-- These messages are HIGH confidence (>= 0.9).
-
-If the message is a short acknowledgement or politeness response
-(e.g. confirming, thanking, or reacting to a previous message):
-- Use intent "ack".
-- These messages are HIGH confidence (>= 0.9).
-"""
-
-_VALID_INTENTS = {
-    "reserve_class", "faq", "handover", "verification", "clarify", "ticket",
-    "crm_available_classes", "crm_contract_status", "crm_member_balance", "ack",
-    "ticket_status", "marketing_optout", "marketing_optin",
-}
 
 class OpenAIClient:
     """
@@ -139,7 +104,7 @@ class OpenAIClient:
             )
             return json.dumps(
                 {
-                    "intent": "clarify",
+                    "intent": INTENT_CLARIFY,
                     "confidence": 0.49,
                     "slots": {"echo": user_msg[:80]},
                 }
@@ -274,7 +239,7 @@ class OpenAIClient:
 
         return json.dumps(
             {
-                "intent": "clarify",
+                "intent": INTENT_CLARIFY,
                 "confidence": 0.3,
                 "slots": {"note": note},
             }
@@ -303,7 +268,7 @@ class OpenAIClient:
             extra={"prompt": "intent_classification", "lang": lang},
         ):
             messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT_INTENT},
             {
                 "role": "user",
                 "content": (
@@ -333,7 +298,7 @@ class OpenAIClient:
         Asynchroniczna wersja classify, przydatna w potencjalnie asynchronicznych workerach.
         """
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": SYSTEM_PROMPT_INTENT},
             {"role": "user", "content": f"LANG={lang}\nTEXT={text}"},
         ]
         content = await self.chat_async(messages, model=self.model, max_tokens=256)
@@ -349,11 +314,11 @@ class OpenAIClient:
         try:
             data = json.loads(content or "{}")
         except Exception:
-            return {"intent": "clarify", "confidence": 0.3, "slots": {}}
+            return {"intent": INTENT_CLARIFY, "confidence": 0.3, "slots": {}}
 
-        intent = str(data.get("intent", "clarify")).strip()
+        intent = str(data.get("intent", INTENT_CLARIFY)).strip()
         if intent not in _VALID_INTENTS:
-            intent = "clarify"
+            intent = INTENT_CLARIFY
 
         # confidence -> float 0..1
         try:
@@ -442,3 +407,34 @@ class OpenAIClient:
             self._embed_cache[key] = (now + self._embed_cache_ttl_s, vec)
 
         return [v or [] for v in cached_vecs]
+
+
+    def build_kb_prompt( self, strict_mode: bool, language_code: Optional[str], context: str) -> str:
+        sys = SYSTEM_PROMPT_FAQ
+        if strict_mode:
+            sys += SYSTEM_PROMPT_FAQ_STRICT
+        else:
+            sys += SYSTEM_PROMPT_FAQ_NO_STRICT
+        sys += SYSTEM_PROMPT_FAQ_JSON
+        
+        sys += f"{context}\n"
+        sys += SYSTEM_PROMPT_HISTORY
+        if language_code:
+            sys += SYSTEM_PROMPT_LANG_FIRST
+            sys += f"{language_code}"
+            sys += SYSTEM_PROMPT_LANG_SECOND
+        else:
+            sys += SYSTEM_PROMPT_FAQ_NO_LANG
+        return sys
+        
+    def build_old_prompt( self, language_code: Optional[str], context: str) -> str:
+        sys = SYSTEM_PROMPT_FAQ_OLD        
+        sys += f"{context}\n"
+        sys += SYSTEM_PROMPT_HISTORY
+        if language_code:
+            sys += SYSTEM_PROMPT_LANG_FIRST
+            sys += f"{language_code}"
+            sys += SYSTEM_PROMPT_LANG_SECOND
+        else:
+            sys += SYSTEM_PROMPT_FAQ_NO_LANG
+        return sys

@@ -1,5 +1,19 @@
 from __future__ import annotations
 import re
+from ..common.constants import (
+    INTENT_FAQ,
+    INTENT_HANDOVER,
+    INTENT_VERIFICATION,
+    INTENT_CLARIFY,
+    INTENT_TICKET,
+    INTENT_TICKET_STATUS,
+    INTENT_AVAILABLE_CLASSES,
+    INTENT_CONTRACT_STATUS,
+    INTENT_CRM_MEMBER_BALANCE,
+    INTENT_ACK,
+    INTENT_MARKETING_OPTOUT,
+    INTENT_MARKETING_OPTIN,
+)
 from ..adapters.openai_client import OpenAIClient
 
 _RE_ONLY_EMOJI_OR_PUNCT = re.compile(r"^[^\w\d]{1,12}$", re.UNICODE)
@@ -12,11 +26,11 @@ class NLUService:
     def _fast_classify(self, text: str) -> dict | None:
         t = (text or "").strip()
         if not t:
-            return {"intent": "clarify", "confidence": 0.4, "slots": {"reason": "empty"}}
+            return {"intent": INTENT_CLARIFY, "confidence": 0.4, "slots": {"reason": "empty"}}
 
         # Emoji / interpunkcja typu "👍" "🙂" "!" – traktujemy jak szybkie potwierdzenie.
         if _RE_ONLY_EMOJI_OR_PUNCT.match(t):
-            return {"intent": "ack", "confidence": 0.9, "slots": {}}
+            return {"intent": INTENT_ACK, "confidence": 0.9, "slots": {}}
 
         return None
 

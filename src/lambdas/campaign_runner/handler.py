@@ -18,6 +18,7 @@ from ...repos.conversations_repo import ConversationsRepo
 from ...common.aws import sqs_client, ddb_resource, resolve_queue_url
 from ...repos.members_index_repo import MembersIndexRepo
 from ...common.logging import logger
+from ...services.crm_service import CRMService
 
 OUTBOUND_QUEUE_URL = os.getenv("OutboundQueueUrl")
 CAMPAIGNS_TABLE = os.getenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
@@ -26,6 +27,7 @@ CAMPAIGNS_TENANT_NEXT_RUN_INDEX = os.getenv("DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN
 svc = CampaignService()
 members_index = MembersIndexRepo()
 conv_repo = ConversationsRepo()
+crm = CRMService()
 
 
 def _resolve_outbound_queue_url() -> str:

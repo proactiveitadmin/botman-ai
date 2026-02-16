@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict, List, Optional
 
+ENUM_CRM_RETURN_OK=0
 
 class InMemoryConversations:
     """Minimalny in-memory odpowiednik ConversationsRepo.
@@ -57,7 +58,7 @@ class InMemoryConversations:
     def clear_crm_challenge(self, tenant_id: str, channel: str, channel_user_id: str):
         key = self.conversation_pk(tenant_id, channel, channel_user_id)
         conv = self.data.get(key, {})
-        for field in ("crm_challenge_type", "crm_challenge_attempts", "crm_post_intent", "crm_post_slots", "crm_otp_hash", "crm_otp_expires_at", "crm_otp_attempts_left", "crm_otp_last_sent_at", "crm_otp_email"):
+        for field in ("crm_challenge_attempts", "crm_post_intent", "crm_post_slots", "crm_otp_hash", "crm_otp_expires_at", "crm_otp_attempts_left", "crm_otp_last_sent_at", "crm_otp_email"):
             conv.pop(field, None)
         self.cleared_calls.append((tenant_id, channel, channel_user_id))
 
@@ -124,7 +125,7 @@ class FakeCRM:
                 "comments": comments,
             }
         )
-        return {"ok": True}
+        return ENUM_CRM_RETURN_OK
 
     def get_member_balance(self, tenant_id: str, member_id: int):
         return {"balance": 123.45}
@@ -149,6 +150,10 @@ class FakeCRM:
 
     def get_member_by_phone(self, tenant_id: str, phone: str) -> dict:
         return {"value": []}
+        
+    def get_member_id_by_msg(self, tenant_id: str, msg: str) -> str | None:
+        return "123"
+        
 
 
 class FakeTemplateServicePG:

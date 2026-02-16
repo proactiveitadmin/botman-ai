@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import time
 import random
 import requests
+import traceback
 
 from ..common.logging_utils import logger
 from ..common.config import settings
@@ -97,9 +98,25 @@ class PineconeClient:
                         r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
 
                     if 200 <= r.status_code < 300:
+                        logger.warning({
+                          "event": "pinecone_upsert_ok",
+                          "namespace": namespace,
+                          "status": r.status_code,
+                          "resp": r.text[:300],
+                        })
+
                         return True
 
-                    logger.info({"component": "pinecone_client","event": "pinecone_upsert_http", "status": r.status_code, "body": r.text[:500]})
+                    logger.warning({
+                        "component": "pinecone_client",
+                        "event": "pinecone_upsert_http_error",
+                        "status": r.status_code,
+                        "body": (r.text or "")[:1000],
+                        "namespace": namespace,
+                        "vectors": len(vectors),
+                        "index_host": self.index_host,
+                        "url": url,
+                    })
                 except Exception as e:
                     logger.error({"component": "pinecone_client","event": "pinecone_upsert_err", "err": str(e)})
 
@@ -107,6 +124,13 @@ class PineconeClient:
                 with timed("pinecone_retry_sleep", logger=logger, component="pinecone_client", extra={"attempt": attempt + 1, "sleep_s": round(sleep_s, 3)}):
                     time.sleep(sleep_s)
 
+        logger.error({
+            "component": "pinecone_client",
+            "event": "pinecone_upsert_failed",
+            "namespace": namespace,
+            "vectors": len(vectors),
+            "index_host": self.index_host,
+        })
         return False
 
     def query(

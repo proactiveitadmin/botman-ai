@@ -61,6 +61,44 @@ aws dynamodb put-item `
   --item $item
 
 
+
+# ==== 2.1. ticket_description ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_description#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_description"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Request from chat.\nLast message:\n{body}\nHistory:\n{history_block}"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "body"
+            },
+            {
+                "S": "history_block"
+            }
+		]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
 # ==== 3. ticket_created_ok ====
 
   $item = @'
@@ -78,7 +116,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Dziękuję — zgłoszenie zostało utworzone. Numer sprawy: %{ticket}. Wrócimy do Ciebie, gdy tylko je sprawdzimy."
+        "S": "Dziękuję — zgłoszenie zostało utworzone. Numer sprawy: *{ticket}*. Wrócimy do Ciebie, gdy tylko je sprawdzimy."
     },
     "placeholders": {
         "L": [
@@ -1014,34 +1052,25 @@ aws dynamodb put-item `
   --item $item
 
 
-# ==== 31. crm_web_verification_required ====
-
   $item = @'
 {
     "pk": {
-        "S": "clubProactiveIT#crm_web_verification_required#pl"
+        "S": "clubProactiveIT#web_crm_not_available#en"
     },
     "tenant_id": {
         "S": "clubProactiveIT"
     },
     "template_code": {
-        "S": "crm_web_verification_required"
+        "S": "web_crm_not_available"
     },
     "language_code": {
-        "S": "pl"
+        "S": "en"
     },
     "body": {
-        "S": "Aby kontynuować, musimy potwierdzić Twoją tożsamość.\n\n• Jeśli korzystasz z czatu WWW: kliknij link, aby otworzyć WhatsApp i wyślij kod.\n• Jeśli jesteś już w WhatsApp: po prostu wyślij kod.\n\nKod: {{verification_code}}\nLink: {{whatsapp_link}}\n\nPo wysłaniu kodu wróć tutaj — zweryfikuję konto i odblokuję dostęp do danych PerfectGym."
+        "S": "This feature is available only for Whatsapp channel. Please use your whatsapp to continue."
     },
     "placeholders": {
-        "L": [
-            {
-                "S": "verification_code"
-            },
-            {
-                "S": "whatsapp_link"
-            }
-        ]
+        "L": []
     }
 }
 '@
@@ -1049,6 +1078,7 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item $item
+
 
 
 # ==== 32. faq_no_info ====
@@ -1188,7 +1218,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Weryfikacja została tymczasowo zablokowana na {{minutes}} min. Spróbuj ponownie później lub skontaktuj się z recepcją."
+        "S": "Weryfikacja została tymczasowo zablokowana na *{minutes}* min. Spróbuj ponownie później lub skontaktuj się z recepcją."
     },
     "placeholders": {
         "L": [
@@ -1222,7 +1252,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Wysłaliśmy kod weryfikacyjny na adres {{email}}. Wpisz go tutaj, aby kontynuować."
+        "S": "Wysłaliśmy kod weryfikacyjny na adres *{email}*. Wpisz go tutaj, aby kontynuować."
     },
     "placeholders": {
         "L": [
@@ -1316,7 +1346,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Twój kod weryfikacyjny to: {{verification_code}}\n\nKod jest ważny przez {{ttl_minutes}} minut.\n\nJeśli to nie Ty inicjowałeś/aś weryfikację, zignoruj tę wiadomość."
+        "S": "<p>Twój kod weryfikacyjny to: <strong>{verification_code}</strong><br><br>Kod jest ważny przez {ttl_minutes} minut.<br><br>Jeśli to nie Ty inicjowałeś/aś weryfikację, zignoruj tę wiadomość.</p>"
     },
     "placeholders": {
         "L": [
@@ -1609,3 +1639,92 @@ aws dynamodb put-item `
   --region $region `
   --item $item
 
+
+# ==== 49. today_words (pl) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#today_words#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "today_words"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "dzisiaj, dziś, dzis"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+
+
+# ==== 49. ticket_more_info (pl) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_more_info#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_more_info"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Zaraz utworzę dla Ciebie zgłoszenie. Do zgłoszenia załączę historię 10 ostatnich wiadomości. Jeści chcesz coś jeszcze dodać, prosze napisz teraz lub po prostu napisz 'nie'. Dziękuję"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+# ==== 49. ack_fallback_text (pl) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ack_fallback_text#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ack_fallback_text"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "ok"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item

@@ -57,7 +57,7 @@ class EmailClient:
                 Destination={"ToAddresses": [to_email]},
                 Message={
                     "Subject": {"Data": subject, "Charset": "UTF-8"},
-                    "Body": {"Text": {"Data": body_text, "Charset": "UTF-8"}},
+                    "Body": {"Html": {"Data": body_text, "Charset": "UTF-8"}},
                 },
                 **kwargs,
             )

@@ -1,7 +1,7 @@
 from src.services.routing_service import RoutingService
 from src.domain.models import Message
 from tests.conftest import wire_subservices
-
+import src.services.routing_service as routing_module
 
 def test_ticket_payload_contains_history_and_meta(monkeypatch):
     class DummyNLU:
@@ -21,33 +21,36 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
 
     class DummyTpl:
         def render_named(self, tenant, template_name, lang, ctx):
-            if template_name == "ticket_summary":
-                return "Zgłoszenie klienta"
+            if template_name == "ticket_more_info":
+                return "Doprecyzuj proszę zgłoszenie."
+            if template_name == "ticket_created_ok":
+                return f"OK {ctx.get('ticket', ctx.get('key', ''))}"
+            if template_name == "ticket_created_failed":
+                return "FAILED"
             return "x"
 
     class DummyConvRepo:
         def __init__(self):
-            self.pending = {}
+            # żeby _require_member_id nie “blokowało” flow
+            self.conv = {"crm_member_id": "m-1"}
 
-        def get_conversation(self, *args, **kwargs):
-            return {}  # brak wcześniejszej rozmowy
+        def get_conversation(self, tenant_id, channel, channel_user_id):
+            return self.conv or {}
 
-        def upsert_conversation(self, *args, **kwargs):
-            pass
+        def upsert_conversation(self, **kwargs):
+            self.conv.update(kwargs)
 
         def get(self, key, sk):
-            return self.pending.get(key)
+            return None
 
         def put(self, item: dict):
-            pk = item.get("pk")
-            if pk:
-                self.pending[pk] = item
+            pass
 
         def delete(self, key):
-            self.pending.pop(key, None)
+            pass
 
     class DummyMessagesRepo:
-        def get_last_messages(self, tenant_id, conv_key, limit=10):
+        def get_last_messages(self, tenant_id, conv_key, limit=None):
             return [
                 {"direction": "in", "body": "Cześć"},
                 {"direction": "out", "body": "W czym mogę pomóc?"},
@@ -58,14 +61,20 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
         def get(self, tenant_id):
             return {"language_code": "pl"}
 
-    called = {}
-
     class DummyTicketing:
-        def create_ticket(self, tenant_id, summary, description, meta=None):
-            called["summary"] = summary
-            called["description"] = description
-            called["meta"] = meta or {}
-            return {"ok": True, "ticket": "KEY-1"}
+        def __init__(self):
+            self.calls = []
+
+        def create_data_and_ticket(self, msg, lang, conv_key, history_block):
+            self.calls.append(
+                {
+                    "tenant_id": getattr(msg, "tenant_id", None),
+                    "body": getattr(msg, "body", None),
+                    "conv_key": conv_key,
+                    "history_block": history_block,
+                }
+            )
+            return {"key": "KEY-1"}
 
     svc = RoutingService()
     svc.nlu = DummyNLU()
@@ -76,33 +85,47 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     svc.conv = DummyConvRepo()
     svc.tenants = DummyTenants()
     wire_subservices(svc)
-    
+
     monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
-    
-    msg = Message(
+    monkeypatch.setattr(svc.crm_flow, "ensure_crm_verification", lambda *a, **k: None)
+    monkeypatch.setattr(routing_module, "history_fetch_limit", 10, raising=False)
+
+    # --- krok 1: intent=ticket -> bot prosi o komentarz, NIE tworzy ticketa ---
+    msg1 = Message(
         tenant_id="t-1",
         from_phone="+48123123123",
         to_phone="+48xxx",
         body="Zgłoś ticket",
         channel="whatsapp",
         channel_user_id="whatsapp:+48123123123",
+        intent="ticket",
+        slots={"summary": "Problem z karnetem", "description": "Użytkownik zgłasza problem z karnetem."},
     )
+    actions1 = svc.handle(msg1)
 
-    actions = svc.handle(msg)
+    assert actions1
+    assert len(svc.ticketing.calls) == 0, "Ticket nie powinien być tworzony w 1. kroku (bot prosi o komentarz)."
 
-    # upewniamy się, że TicketingService.create_ticket zostało wywołane
-    assert called, "TicketingService.create_ticket powinno zostać wywołane"
-    assert "Problem z karnetem" in called["summary"] or "Zgłoszenie klienta" in called["summary"]
-    assert "problem z karnetem." in called["description"]
+    # --- krok 2: komentarz -> dopiero teraz tworzy się ticket ---
+    msg2 = Message(
+        tenant_id="t-1",
+        from_phone="+48123123123",
+        to_phone="+48xxx",
+        body="Komentarz: nie działa przedłużenie w aplikacji",
+        channel="whatsapp",
+        channel_user_id="whatsapp:+48123123123",
+    )
+    actions2 = svc.handle(msg2)
 
-    meta = called["meta"]
-    assert meta["phone"] == msg.from_phone
-    assert meta["channel"] == msg.channel
-    assert meta["channel_user_id"] == msg.channel_user_id
-    assert meta["intent"] == "ticket"
-    assert isinstance(meta["slots"], dict)
-    assert meta["language_code"] == "pl"
+    assert actions2
+    assert actions2[0].type == "reply"
+    assert len(svc.ticketing.calls) == 1, "Ticket powinien być utworzony po komentarzu (2. krok)."
 
-    # odpowiedź do użytkownika
-    assert actions
-    assert actions[0].type == "reply"
+    call = svc.ticketing.calls[0]
+
+    assert "conv#whatsapp#" in call["conv_key"]
+
+    hb = call["history_block"]
+    assert "in: Cześć" in hb
+    assert "out: W czym mogę pomóc?" in hb
+    assert "in: Mam problem z karnetem." in hb

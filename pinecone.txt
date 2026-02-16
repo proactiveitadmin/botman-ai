@@ -1,0 +1,392 @@
+--- a/scripts/seed.tenants.json
++++ b/scripts/seed.tenants.json
+@@ -43,7 +43,7 @@
+ 
+ 			"pinecone": {
+ 			  "M": {
+-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
++				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+ 			  }
+ 			}
+ 		}
+@@ -92,7 +92,7 @@
+ 
+ 			"pinecone": {
+ 			  "M": {
+-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
++				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+ 			  }
+ 			}
+ 		}
+diff --git a/scripts/seed.tenants.wa.json b/scripts/seed.tenants.wa.json
+index 24b1920..b5e4ae8 100644
+--- a/scripts/seed.tenants.wa.json
++++ b/scripts/seed.tenants.wa.json
+@@ -43,7 +43,7 @@
+ 
+ 			"pinecone": {
+ 			  "M": {
+-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
++				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+ 			  }
+ 			},
+ 
+@@ -99,7 +99,7 @@
+ 
+ 			"pinecone": {
+ 			  "M": {
+-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
++				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+ 			  }
+ 			},
+ 
+diff --git a/scripts/seed.tenants_local.json b/scripts/seed.tenants_local.json
+index 30a61a9..8928c67 100644
+--- a/scripts/seed.tenants_local.json
++++ b/scripts/seed.tenants_local.json
+@@ -43,7 +43,7 @@
+ 
+ 			"pinecone": {
+ 			  "M": {
+-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
++				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+ 			  }
+ 			}
+ 		}
+diff --git a/src/common/text_chunking.py b/src/common/text_chunking.py
+index 4be7dbd..33758d7 100644
+--- a/src/common/text_chunking.py
++++ b/src/common/text_chunking.py
+@@ -7,7 +7,7 @@ previous vectors in Pinecone.
+ from __future__ import annotations
+ 
+ from dataclasses import dataclass
+-from typing import Dict, List
++from typing import Any, Dict, List, Union, Iterable, Tuple
+ import re
+ import hashlib
+ 
+@@ -18,6 +18,7 @@ class FAQChunk:
+ 
+     chunk_id: str
+     faq_key: str
++    category: str
+     text: str
+ 
+ 
+@@ -30,8 +31,10 @@ def _stable_id(*parts: str) -> str:
+     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+ 
+ 
++    
++
+ def chunk_faq(
+-    faq: Dict[str, str],
++    faq: Union[Dict[str, str], Dict[str, Any]],
+     *,
+     max_chars: int = 1200,
+     overlap_chars: int = 150,
+@@ -54,69 +57,114 @@ def chunk_faq(
+     Returns:
+         List of FAQChunk with deterministic chunk_id.
+     """
++    
+     chunks: List[FAQChunk] = []
++    
++    def _iter_entries(obj: Union[Dict[str, str], Dict[str, Any]]) -> Iterable[Tuple[str, str, List[str], str]]:
++        """
++        Yields (faq_key, questions[], answer) for both formats:
++          - legacy: { "key": "answer" }
++          - new: { "entries": [ { "key": ..., "questions": [...], "answer": ... }, ... ] }
++        """
++        if not obj:
++            return []
++        if isinstance(obj, dict) and isinstance(obj.get("entries"), list):
++            out: List[Tuple[str, str, List[str], str]] = []
++            for e in obj.get("entries") or []:
++                if not isinstance(e, dict):
++                    continue
++                key = _normalize_ws(str(e.get("key") or ""))
++                ans = _normalize_ws(str(e.get("answer") or ""))
++                cat = _normalize_ws(str(e.get("category") or "kb")).lower()
++                if cat not in ("kb", "smalltalk"):
++                    cat = "kb"
++                qs_raw = e.get("questions") or []
++                qs: List[str] = []
++                if isinstance(qs_raw, list):
++                    for q in qs_raw:
++                        qn = _normalize_ws(str(q or ""))
++                        if qn:
++                            qs.append(qn)
++                if key and ans:
++                    out.append((key, cat, qs, ans))
++            return out
++        # legacy
++        if isinstance(obj, dict):
++            out2: List[Tuple[str, str, List[str], str]] = []
++            for k, v in obj.items():
++                key = _normalize_ws(str(k or ""))
++                ans = _normalize_ws(str(v or ""))
++                if key and ans:
++                    out2.append((key, "kb", [], ans))
++            return out2
++        return []
++        
++    for faq_key, category, questions, answer in _iter_entries(faq):
++        # Build one or multiple "documents" per entry:
++        # - if questions[] is provided -> chunk per natural question
++        # - else -> fallback to key as question (legacy)
++        q_list = questions if questions else [faq_key]
++
++        for q_item in q_list:
++            q = _normalize_ws(str(q_item))
++            a = _normalize_ws(str(answer))
++
++            doc = f"Q: {q}\nA: {a}" if include_q_prefix else f"{q}\n{a}"
++
++            doc = doc.strip()
++            if not doc:
++                continue
++
++            if len(doc) <= max_chars:
++                cid = _stable_id(faq_key, q, a)
++                chunks.append(FAQChunk(chunk_id=cid, faq_key=faq_key, category=category, text=doc))
+ 
+-    for faq_key, answer in (faq or {}).items():
+-        if not faq_key or not answer:
+-            continue
+-
+-        q = _normalize_ws(str(faq_key))
+-        a = _normalize_ws(str(answer))
+-
+-        doc = f"Q: {q}\nA: {a}" if include_q_prefix else f"{q}\n{a}"
+-        doc = doc.strip()
+-        if not doc:
+-            continue
+-
+-        if len(doc) <= max_chars:
+-            cid = _stable_id(q, doc)
+-            chunks.append(FAQChunk(chunk_id=cid, faq_key=q, text=doc))
+-            continue
+-
+-        # Prefer splitting on paragraphs, then sentences.
+-        parts: List[str] = []
+-        paras = [p.strip() for p in re.split(r"\n\n+", doc) if p.strip()]
+-        if len(paras) > 1:
+-            parts = paras
+-        else:
+-            # sentence-ish split
+-            parts = [p.strip() for p in re.split(r"(?<=[\.!\?])\s+", doc) if p.strip()]
+-
+-        buf = ""
+-        for part in parts:
+-            if not buf:
+-                buf = part
+                 continue
+-            if len(buf) + 1 + len(part) <= max_chars:
+-                buf = f"{buf} {part}"
++
++            # Prefer splitting on paragraphs, then sentences.
++            parts: List[str] = []
++            paras = [p.strip() for p in re.split(r"\n\n+", doc) if p.strip()]
++            if len(paras) > 1:
++                parts = paras
+             else:
+-                buf = buf.strip()
+-                if buf:
+-                    cid = _stable_id(q, buf)
+-                    chunks.append(FAQChunk(chunk_id=cid, faq_key=q, text=buf))
+-                buf = part
+-
+-        if buf.strip():
+-            cid = _stable_id(q, buf.strip())
+-            chunks.append(FAQChunk(chunk_id=cid, faq_key=q, text=buf.strip()))
+-
+-        # If still any chunk exceeds max_chars (rare), hard-split with overlap.
+-        final: List[FAQChunk] = []
+-        for ch in chunks:
+-            if ch.faq_key != q or len(ch.text) <= max_chars:
+-                final.append(ch)
+-                continue
+-            t = ch.text
+-            start = 0
+-            while start < len(t):
+-                end = min(len(t), start + max_chars)
+-                piece = t[start:end].strip()
+-                if piece:
+-                    cid = _stable_id(q, piece)
+-                    final.append(FAQChunk(chunk_id=cid, faq_key=q, text=piece))
+-                if end >= len(t):
+-                    break
+-                start = max(0, end - overlap_chars)
+-        chunks = final
++                # sentence-ish split
++                parts = [p.strip() for p in re.split(r"(?<=[\.!\?])\s+", doc) if p.strip()]
++
++            buf = ""
++            for part in parts:
++                if not buf:
++                    buf = part
++                    continue
++                if len(buf) + 1 + len(part) <= max_chars:
++                    buf = f"{buf} {part}"
++                else:
++                    buf = buf.strip()
++                    if buf:
++                        cid = _stable_id(faq_key,q, buf)
++                        chunks.append(FAQChunk(chunk_id=cid, faq_key=faq_key, category=category, text=buf))
++                    buf = part
++
++            if buf.strip():
++                cid = _stable_id(faq_key, q, buf.strip())
++                chunks.append(FAQChunk(chunk_id=cid, faq_key=faq_key, category=category, text=buf.strip()))
++
++            # If still any chunk exceeds max_chars (rare), hard-split with overlap.
++            final: List[FAQChunk] = []
++            for ch in chunks:
++                if ch.faq_key != faq_key or len(ch.text) <= max_chars:
++                    final.append(ch)
++                    continue
++                t = ch.text
++                start = 0
++                while start < len(t):
++                    end = min(len(t), start + max_chars)
++                    piece = t[start:end].strip()
++                    if piece:
++                        cid = _stable_id(faq_key, q, piece)
++                        final.append(FAQChunk(chunk_id=cid, faq_key=faq_key, category=category, text=piece))
++                    if end >= len(t):
++                        break
++                    start = max(0, end - overlap_chars)
++            chunks = final
+ 
+     return chunks
+diff --git a/src/services/kb_service.py b/src/services/kb_service.py
+index 6c499f8..7984891 100644
+--- a/src/services/kb_service.py
++++ b/src/services/kb_service.py
+@@ -114,6 +114,10 @@ class KBService:
+             if not isinstance(data, dict):
+                 data = {}
+             # normalizujemy klucze
++            if isinstance(data.get("entries"), list):
++                # new format: keep as-is
++                self._cache[cache_key] = data
++                return data
+             normalized = {(k or "").strip().lower(): v for k, v in data.items()}
+             self._cache[cache_key] = normalized
+             return normalized
+@@ -269,10 +273,37 @@ class KBService:
+         vector_enabled = self._vector.enabled(tenant_id)
+         retrieved_chunks = []
+         if vector_enabled:
+-            retrieved_chunks = self._vector.retrieve(
++            # 0) smalltalk fast-path (NO LLM)
++            st = self._vector.retrieve(
+                 tenant_id=tenant_id,
+                 language_code=language_code,
+                 question=question,
++                category="smalltalk",
++                top_k=3,
++            )
++
++            if st:
++                st_top1 = float(getattr(st[0], "score", 0.0) or 0.0)
++                try:
++                    st_min = float(os.getenv("KB_SMALLTALK_MIN_SCORE", "0.78"))
++                except Exception:
++                    st_min = 0.78
++
++                if st_top1 >= st_min:
++                    # extract A: from st[0].text exactly like your fastpath
++                    txt = (st[0].text or "").strip()
++                    m = re.search(r"\n\s*A:\s*(.*)$", txt, flags=re.IGNORECASE | re.DOTALL)
++                    ans = (m.group(1) if m else "").strip()
++                    if ans:
++                        return ans
++
++            # 2) Otherwise normal KB
++            retrieved_chunks  = self._vector.retrieve(
++                tenant_id=tenant_id,
++                language_code=language_code,
++                question=question,
++                category="kb",
++                top_k=12,
+             )
+ 
+             # Vector confidence gating:
+@@ -351,15 +382,6 @@ class KBService:
+                 "force_strict": force_strict,
+             })
+ 
+-            # Decide strict_mode:
+-            # - If force_high -> not strict
+-            # - Else strict if top1 < high_threshold OR force_strict explicitly
+-            if force_high:
+-                strict_mode = False
+-            else:
+-                strict_mode = (strict_mode or force_strict or (top1 < high_threshold))
+-
+-
+             logger.info(
+                 {
+                     "component": "kb_service",
+diff --git a/src/services/kb_vector_service.py b/src/services/kb_vector_service.py
+index afa7957..0de3186 100644
+--- a/src/services/kb_vector_service.py
++++ b/src/services/kb_vector_service.py
+@@ -86,7 +86,7 @@ class KBVectorService:
+         return bool(val)
+ 
+     def _namespace(self, tenant_id: str, language_code: Optional[str]) -> str:
+-        lang = (language_code or "").strip() or "default"
++        lang = (language_code or "").strip() or "en"
+         prefix = getattr(settings, "pinecone_namespace_prefix", "kb") or "kb"
+         return f"{prefix}:{tenant_id}:{lang}"
+         
+@@ -167,6 +167,8 @@ class KBVectorService:
+             extra={"tenant_id": tenant_id, "max_chars": max_chars},
+         ):
+             chunks = chunk_faq(faq, max_chars=max_chars)
++        
++        logger.warning({"event":"chunk_faq_done","chunks":len(chunks),"sample":chunks[0].text[:80] if chunks else None})
+ 
+         if not chunks:
+             return False
+@@ -205,6 +207,11 @@ class KBVectorService:
+                             "text": ch.text,
+                             "faq_key": ch.faq_key,
+                             "chunk_id": ch.chunk_id,
++                            "lang": ((language_code or "").strip() or "en"),
++                            "category": getattr(ch, "category", "kb"),
++                            # Optional: helps prevent mixing when you migrate embedding models
++                            "embed_model": getattr(settings, "embedding_model", "") or "",
++
+                         },
+                     }
+                 )
+@@ -229,6 +236,7 @@ class KBVectorService:
+         tenant_id: str,
+         language_code: Optional[str],
+         question: str,
++        category: str | None = None,
+         top_k: Optional[int] = None,
+     ) -> List[RetrievedChunk]:
+         if not self.enabled(tenant_id):
+@@ -270,11 +278,16 @@ class KBVectorService:
+             for vec in q_vecs:
+                 if not vec:
+                     continue
++                lang = (language_code or "").strip() or "en"
++                filtr = {"lang": {"$eq": lang}}
++                if category:
++                    filtr["category"] = {"$eq": category}
+                 matches = self._client_for(tenant_id).query(
+                     vector=vec,
+                     namespace=ns,
+                     top_k=k,
+                     include_metadata=True,
++                    filter=filtr
+                 )
+                 all_matches.extend(matches or [])
+ 

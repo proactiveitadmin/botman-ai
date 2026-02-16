@@ -43,7 +43,7 @@
 
 			"pinecone": {
 			  "M": {
-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
 			  }
 			},
 
@@ -99,7 +99,7 @@
 
 			"pinecone": {
 			  "M": {
-				"index_host": { "S": "https://kb-faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
 			  }
 			},
 

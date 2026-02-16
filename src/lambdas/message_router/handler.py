@@ -23,11 +23,22 @@ from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
 from ...common.utils import new_id
 from ...common.security import conversation_key
+from ...services.metrics_service import MetricsService
+from ...services.tenant_config_service import default_tenant_config_service
+from ...common.rate_limiter import InMemoryRateLimiter
 
 IDEMPOTENCY = IdempotencyRepo()
 
 ROUTER = RoutingService()
 MESSAGES = MessagesRepo()
+
+metrics = MetricsService()
+tenant_cfg = default_tenant_config_service()
+tenant_limiter = InMemoryRateLimiter()
+
+metrics = MetricsService()
+tenant_cfg = default_tenant_config_service()
+tenant_limiter = InMemoryRateLimiter()
 
 
 def _parse_record(record: dict) -> dict | None:
@@ -174,6 +185,12 @@ def lambda_handler(event, context):
     except Exception:
         pass
 
+    # soft per-tenant limiter for this invocation (demo-safe)
+    try:
+        tenant_limiter.reset()
+    except Exception:
+        pass
+
     records = event.get("Records") or []
     
     # Defensive ordering: SQS FIFO guarantees ordering per MessageGroupId,
@@ -264,6 +281,29 @@ def lambda_handler(event, context):
             }
         )
 
+        # --- per-tenant soft limiter (no sleep; retry via batch failure) ---
+        try:
+            cfg = tenant_cfg.get(tenant_id)
+        except Exception:
+            cfg = {}
+        lim = (cfg.get("limits") or {}).get("router") or {}
+        try:
+            rate = float(lim.get("per_tenant_rps") or 0)
+            burst = float(lim.get("per_tenant_burst") or max(1.0, rate))
+        except Exception:
+            rate, burst = 0.0, 0.0
+
+        if rate > 0 and not tenant_limiter.try_acquire(f"router#{tenant_id}", rate=rate, burst=burst):
+            logger.warning({"handler": "message_router", "event": "tenant_throttled", "tenant_id": tenant_id})
+            metrics.incr("TenantRoutedThrottled", tenant_id=tenant_id, component="message_router")
+            # Let SQS retry later
+            batch_failures.append({"itemIdentifier": r.get("messageId")})
+            continue
+
+        metrics.incr("TenantRoutedInbound", tenant_id=tenant_id, component="message_router")
+
+        t_msg = time.perf_counter()
+
         msg = _build_message(msg_body)
         # Canonical conversation key for Messages history (no PII).
         conv_key = conversation_key(
@@ -290,8 +330,23 @@ def lambda_handler(event, context):
             # nie blokujemy flow jeśli logowanie padnie
             pass
 
-        actions = ROUTER.handle(msg)
-        _publish_actions(actions, msg_body)
+        try:
+            actions = ROUTER.handle(msg)
+            _publish_actions(actions, msg_body)
+            metrics.incr("TenantRoutedOk", tenant_id=tenant_id, component="message_router")
+        except Exception as e:
+            logger.error({"handler": "message_router", "event": "route_fail", "tenant_id": tenant_id, "err": str(e)})
+            metrics.incr("TenantRoutedError", tenant_id=tenant_id, component="message_router")
+            if r.get("messageId"):
+                batch_failures.append({"itemIdentifier": r.get("messageId")})
+            continue
+        finally:
+            metrics.timing_ms(
+                "TenantRoutingLatencyMs",
+                (time.perf_counter() - t_msg) * 1000,
+                tenant_id=tenant_id,
+                component="message_router",
+            )
 
     logger.info({"handler": "message_router", "event": "done", "failures": len(batch_failures)})
     # partial batch response for SQS event source mapping

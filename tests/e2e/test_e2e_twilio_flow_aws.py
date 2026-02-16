@@ -34,7 +34,7 @@ def test_e2e_twilio_to_outbound_queue_aws(aws_stack, mock_ai, monkeypatch):
 
     # Spam off
     class NoSpam:
-        def is_blocked(self, tenant_id, phone):
+        def is_blocked(self, tenant_id=None, phone=None, **kwargs):
             return False
 
     monkeypatch.setattr(inbound_lambda, "spam_service", NoSpam(), raising=False)

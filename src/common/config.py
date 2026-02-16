@@ -79,6 +79,11 @@ class Settings:
     inbound_queue_url: str = os.getenv("InboundEventsQueueUrl", "")
     outbound_queue_url: str = os.getenv("OutboundQueueUrl", "")
     
+    nlu_min_confidence: float = os.getenv("NLU_MIN_CONFIDENCE", "0.3")
+    history_fetch_limit: int = os.getenv("HISTORY_FETCH_LIMIT", "10")
+    faq_ai_history_limit: int = os.getenv("FAQ_AI_HISTORY_LIMIT", "6")
+    ack_fallback_text: string = os.getenv("ACK_FALLBACK_TEXT", "OK")
+    
     # np. w common/config.py
     def get_default_language(self) -> str:
         return self.tenant_default_lang or "en"

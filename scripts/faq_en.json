@@ -1,88 +1,604 @@
 {
-  "greeting": "Hi! 👋 How can I help you? I can provide opening hours, entry rules, membership prices, class bookings, and other club information.",
-  "farewell": "Thank you for contacting us. See you at the club! 👋 If you need anything else, feel free to ask.",
-  "thanks": "No problem — happy to help! 😊",
-  "youre_welcome": "You're welcome! If you have more questions, I'm here to help.",
-  "cant_answer": "I can’t find this information in the FAQ. If you’d like, I can create a request for you.",
-
-  "hours": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
-  "opening_hours": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
-
-  "entry_policy": "Club entry is possible using the mobile app or a membership card. Each entry is registered in the system.",
-  "entry": "You can enter the club using the mobile app or your membership card.",
-
-  "membership_price": "Monthly memberships start from 139 PLN. Quarterly and annual plans are also available, with discounts for students and seniors.",
-  "membership_types": "We offer Open, Off-Peak, Gym+Pool, and Family memberships. Details are available at reception and on our website.",
-  "membership": "The club offers various membership options tailored to different needs.",
-  "carnet": "Monthly, quarterly, and annual memberships are available.",
-
-  "payments": "We accept card payments, BLIK, and recurring payments.",
-  "payment_methods": "You can pay by card, BLIK, or via recurring payments.",
-
-  "contract_freeze": "You can freeze your contract once per year for up to 30 days. The freeze fee is 29 PLN.",
-  "contract_termination": "Contract termination requires signing a form at reception. The notice period is one month.",
-  "contract_transfer": "Membership can be transferred to another person for an administrative fee of 39 PLN.",
-  "contract": "All matters related to contracts are handled at the reception desk.",
-  "agreement": "The membership agreement defines the terms of club usage.",
-
-  "classes_booking": "Group classes can be booked via the mobile app or by contacting reception.",
-  "classes_cancellation": "Classes can be canceled up to 2 hours before they start. After that, a fee applies according to the price list.",
-  "classes_limit": "The number of spots in group classes is limited. Bookings are processed on a first-come, first-served basis.",
-  "classes": "The club offers a wide range of group classes.",
-  "group_classes": "Group classes are conducted according to the schedule available in the app.",
-
-  "instructors": "Information about instructors can be found in the app or on the notice board near the fitness studio.",
-  "trainers": "Our trainers conduct both group classes and personal training sessions.",
-
-  "personal_trainer": "Personal training sessions can be booked at reception or directly with the selected trainer.",
-  "personal_trainer_prices": "Personal training prices start from 120 PLN per session. Discounted packages are available.",
-  "pt": "Personal training allows for an individually tailored workout plan.",
-
-  "pool_hours": "The swimming pool is available daily from 6:00 AM to 9:30 PM. Last entry is 45 minutes before closing.",
-  "pool": "The swimming pool is available daily for members.",
-  "swimming_pool": "The swimming pool is located in the wet zone of the club.",
-
-  "sauna_hours": "The sauna area is open from 2:00 PM to 10:00 PM on weekdays and from 10:00 AM to 8:00 PM on weekends.",
-  "sauna": "The sauna area is available for members during designated hours.",
-  "sauna_zone": "The sauna is located in the club’s wellness area.",
-
-  "locker_room": "Lockers operate with a PIN code. If you forget your code, please contact reception.",
-  "lockers": "Lockers are available in the changing rooms and secured with PIN codes.",
-
-  "showers": "Showers are available without limits. Please use your own flip-flops.",
-  "changing_rooms": "Changing rooms are equipped with showers and lockers.",
-
-  "towels": "Towels are available at reception for an additional fee of 5 PLN. We recommend using a towel during workouts.",
-  "equipment_rules": "Please return equipment to its place after use and disinfect machines after training.",
-  "equipment": "Training equipment is available to all club members.",
-
-  "parking": "Members receive 2 hours of free parking. Please collect a ticket upon entry and keep it until exit.",
-  "parking_info": "The club offers up to 2 hours of free parking for members.",
-
-  "bike_racks": "Bike racks are located in front of the club. Please secure your bike with your own lock.",
-  "bikes": "You can access the club by bicycle.",
-
-  "kids_zone": "The Kids Zone is open on Saturdays and Sundays from 10:00 AM to 6:00 PM. Children must be supervised by an adult.",
-  "children": "Children are allowed in the club only under adult supervision.",
-
-  "age_policy": "Persons under 16 years of age may use the club only under adult or trainer supervision.",
-  "rules": "The club regulations are available on our website and at reception.",
-
-  "lost_items": "Lost items can be collected at reception. Items are stored for 30 days.",
-  "maintenance": "Current maintenance works and area closures are announced on the information board and in the app.",
-  "cleaning_breaks": "Areas may be temporarily closed for cleaning. Information is provided in advance.",
-
-  "safety": "In case of injury or discomfort, immediately inform staff. An AED defibrillator is located at reception.",
-
-  "wifi": "Free Wi-Fi is available throughout the club. Network name: FITNESS_WIFI, password: trening2024.",
-  "internet": "Free Wi-Fi is available in the club.",
-
-  "invoices": "You can receive an invoice for your membership at reception or by email upon request.",
-  "billing": "Payment and invoice-related matters are handled by reception.",
-
-  "app_help": "If you experience issues with the app, try updating it to the latest version or contact reception.",
-  "app": "The mobile app allows class bookings and club entry.",
-
-  "smalltalk_how_are_you": "Thanks, I’m doing well! 😊 How can I assist you with the club?",
-  "smalltalk_who_are_you": "I am the club’s virtual assistant. I help you quickly find information about hours, memberships, classes, and rules."
+  "entries": [
+    {
+      "key": "greeting",
+      "questions": [
+        "hi",
+        "hello",
+        "good morning",
+        "hey",
+        "how can you help?"
+      ],
+      "answer": "Hi! 👋 How can I help you? I can provide opening hours, entry rules, membership prices, class bookings, and other club information.",
+      "category": "smalltalk"
+    },
+    {
+      "key": "farewell",
+      "questions": [
+        "bye",
+        "goodbye",
+        "see you",
+        "that's all"
+      ],
+      "answer": "Thank you for contacting us. See you at the club! 👋 If you need anything else, feel free to ask.",
+      "category": "smalltalk"
+    },
+    {
+      "key": "thanks",
+      "questions": [
+        "thanks",
+        "thank you",
+        "appreciate it"
+      ],
+      "answer": "No problem — happy to help! 😊",
+      "category": "smalltalk"
+    },
+    {
+      "key": "youre_welcome",
+      "questions": [
+        "you're welcome",
+        "thanks for your help",
+        "ok thanks"
+      ],
+      "answer": "You're welcome! If you have more questions, I'm here to help.",
+      "category": "smalltalk"
+    },
+    {
+      "key": "opening_hours",
+      "questions": [
+        "What are the club opening hours?",
+        "When is the club open?",
+        "What time do you close on weekdays?",
+        "What are weekend opening hours?"
+      ],
+      "answer": "The club is open Monday to Friday from 6:00 AM to 10:00 PM, and on weekends from 8:00 AM to 8:00 PM.",
+      "category": "kb"
+    },
+    {
+      "key": "entry_policy",
+      "questions": [
+        "How does club entry work?",
+        "What are the entry rules?",
+        "Is each entry registered?"
+      ],
+      "answer": "Club entry is possible using the mobile app or a membership card. Each entry is registered in the system.",
+      "category": "kb"
+    },
+    {
+      "key": "entry",
+      "questions": [
+        "How can I enter the club?",
+        "Can I enter using the app?",
+        "Do I need a membership card?"
+      ],
+      "answer": "You can enter the club using the mobile app or your membership card.",
+      "category": "kb"
+    },
+    {
+      "key": "membership_price",
+      "questions": [
+        "How much is a monthly membership?",
+        "What is the membership price?",
+        "Are there discounts for students or seniors?"
+      ],
+      "answer": "Monthly memberships start from 139 PLN. Quarterly and annual plans are also available, with discounts for students and seniors.",
+      "category": "kb"
+    },
+    {
+      "key": "membership_types",
+      "questions": [
+        "What membership types do you offer?",
+        "What's the difference between Open and Off-Peak?",
+        "Do you have a Family membership?"
+      ],
+      "answer": "We offer Open, Off-Peak, Gym+Pool, and Family memberships. Details are available at reception and on our website.",
+      "category": "kb"
+    },
+    {
+      "key": "membership",
+      "questions": [
+        "What memberships are available?",
+        "Do you offer different membership options?"
+      ],
+      "answer": "The club offers various membership options tailored to different needs.",
+      "category": "kb"
+    },
+    {
+      "key": "carnet",
+      "questions": [
+        "Do you offer monthly/quarterly/annual plans?",
+        "Is there an annual membership?",
+        "What plans are available?"
+      ],
+      "answer": "Monthly, quarterly, and annual memberships are available.",
+      "category": "kb"
+    },
+    {
+      "key": "payments",
+      "questions": [
+        "How can I pay?",
+        "What payment methods do you accept?",
+        "Do you accept BLIK?"
+      ],
+      "answer": "We accept card payments, BLIK, and recurring payments.",
+      "category": "kb"
+    },
+    {
+      "key": "payment_methods",
+      "questions": [
+        "How can I pay?",
+        "Can I pay by card?",
+        "Do you offer recurring payments?"
+      ],
+      "answer": "You can pay by card, BLIK, or via recurring payments.",
+      "category": "kb"
+    },
+    {
+      "key": "contract_freeze",
+      "questions": [
+        "Can I freeze my contract?",
+        "How does a membership freeze work?",
+        "How much does freezing cost?"
+      ],
+      "answer": "You can freeze your contract once per year for up to 30 days. The freeze fee is 29 PLN.",
+      "category": "kb"
+    },
+    {
+      "key": "contract_termination",
+      "questions": [
+        "How do I terminate the contract?",
+        "What is the notice period?",
+        "Where do I sign the termination form?"
+      ],
+      "answer": "Contract termination requires signing a form at reception. The notice period is one month.",
+      "category": "kb"
+    },
+    {
+      "key": "contract_transfer",
+      "questions": [
+        "Can I transfer my membership to someone else?",
+        "How do I transfer a contract?",
+        "What is the transfer fee?"
+      ],
+      "answer": "Membership can be transferred to another person for an administrative fee of 39 PLN.",
+      "category": "kb"
+    },
+    {
+      "key": "contract",
+      "questions": [
+        "Who handles contract matters?",
+        "Where can I manage my contract?",
+        "Contract changes—where to contact?"
+      ],
+      "answer": "All matters related to contracts are handled at the reception desk.",
+      "category": "kb"
+    },
+    {
+      "key": "agreement",
+      "questions": [
+        "What is the membership agreement?",
+        "What does the membership agreement define?"
+      ],
+      "answer": "The membership agreement defines the terms of club usage.",
+      "category": "kb"
+    },
+    {
+      "key": "classes_booking",
+      "questions": [
+        "How do I book group classes?",
+        "Can I book classes in the app?",
+        "Where can I reserve a class?"
+      ],
+      "answer": "Group classes can be booked via the mobile app or by contacting reception.",
+      "category": "kb"
+    },
+    {
+      "key": "classes_cancellation",
+      "questions": [
+        "How do I cancel a class?",
+        "When can I cancel a booking?",
+        "Is there a fee for late cancellation?"
+      ],
+      "answer": "Classes can be canceled up to 2 hours before they start. After that, a fee applies according to the price list.",
+      "category": "kb"
+    },
+    {
+      "key": "classes_limit",
+      "questions": [
+        "Are spots limited for classes?",
+        "How does the class capacity limit work?",
+        "Is booking first-come, first-served?"
+      ],
+      "answer": "The number of spots in group classes is limited. Bookings are processed on a first-come, first-served basis.",
+      "category": "kb"
+    },
+    {
+      "key": "classes",
+      "questions": [
+        "What group classes do you offer?",
+        "Do you have fitness classes?",
+        "What classes are available?"
+      ],
+      "answer": "The club offers a wide range of group classes.",
+      "category": "kb"
+    },
+    {
+      "key": "group_classes",
+      "questions": [
+        "Where can I find the class schedule?",
+        "Is the timetable available in the app?",
+        "When are group classes held?"
+      ],
+      "answer": "Group classes are conducted according to the schedule available in the app.",
+      "category": "kb"
+    },
+    {
+      "key": "instructors",
+      "questions": [
+        "Where can I find instructor information?",
+        "Who teaches the classes?",
+        "How do I check the class instructors?"
+      ],
+      "answer": "Information about instructors can be found in the app or on the notice board near the fitness studio.",
+      "category": "kb"
+    },
+    {
+      "key": "trainers",
+      "questions": [
+        "Do you have trainers?",
+        "Do trainers offer personal training?",
+        "Tell me about your trainers."
+      ],
+      "answer": "Our trainers conduct both group classes and personal training sessions.",
+      "category": "kb"
+    },
+    {
+      "key": "personal_trainer",
+      "questions": [
+        "How can I book personal training?",
+        "Can I schedule a personal trainer?",
+        "Where do I book a PT session?"
+      ],
+      "answer": "Personal training sessions can be booked at reception or directly with the selected trainer.",
+      "category": "kb"
+    },
+    {
+      "key": "personal_trainer_prices",
+      "questions": [
+        "How much does personal training cost?",
+        "What are PT prices?",
+        "Do you offer PT packages?"
+      ],
+      "answer": "Personal training prices start from 120 PLN per session. Discounted packages are available.",
+      "category": "kb"
+    },
+    {
+      "key": "pt",
+      "questions": [
+        "What is personal training?",
+        "What does a PT session involve?"
+      ],
+      "answer": "Personal training allows for an individually tailored workout plan.",
+      "category": "kb"
+    },
+    {
+      "key": "pool_hours",
+      "questions": [
+        "What are the pool hours?",
+        "Until what time is the pool open?",
+        "When is the last entry to the pool?"
+      ],
+      "answer": "The swimming pool is available daily from 6:00 AM to 9:30 PM. Last entry is 45 minutes before closing.",
+      "category": "kb"
+    },
+    {
+      "key": "pool",
+      "questions": [
+        "Is the pool available daily?",
+        "Can I use the swimming pool?"
+      ],
+      "answer": "The swimming pool is available daily for members.",
+      "category": "kb"
+    },
+    {
+      "key": "swimming_pool",
+      "questions": [
+        "Where is the swimming pool located?",
+        "Which area is the pool in?"
+      ],
+      "answer": "The swimming pool is located in the wet zone of the club.",
+      "category": "kb"
+    },
+    {
+      "key": "sauna_hours",
+      "questions": [
+        "What are the sauna hours?",
+        "When is the sauna area open?",
+        "Is the sauna open on weekends?"
+      ],
+      "answer": "The sauna area is open from 2:00 PM to 10:00 PM on weekdays and from 10:00 AM to 8:00 PM on weekends.",
+      "category": "kb"
+    },
+    {
+      "key": "sauna",
+      "questions": [
+        "Is the sauna available?",
+        "Can members use the sauna?"
+      ],
+      "answer": "The sauna area is available for members during designated hours.",
+      "category": "kb"
+    },
+    {
+      "key": "sauna_zone",
+      "questions": [
+        "Where is the sauna located?",
+        "Which zone is the sauna in?"
+      ],
+      "answer": "The sauna is located in the club’s wellness area.",
+      "category": "kb"
+    },
+    {
+      "key": "locker_room",
+      "questions": [
+        "How do lockers work?",
+        "What if I forgot my locker PIN?",
+        "Who do I contact about locker issues?"
+      ],
+      "answer": "Lockers operate with a PIN code. If you forget your code, please contact reception.",
+      "category": "kb"
+    },
+    {
+      "key": "lockers",
+      "questions": [
+        "Are lockers available?",
+        "Are lockers secured with a PIN?"
+      ],
+      "answer": "Lockers are available in the changing rooms and secured with PIN codes.",
+      "category": "kb"
+    },
+    {
+      "key": "showers",
+      "questions": [
+        "Are showers available?",
+        "Are showers unlimited?",
+        "Do I need flip-flops for the showers?"
+      ],
+      "answer": "Showers are available without limits. Please use your own flip-flops.",
+      "category": "kb"
+    },
+    {
+      "key": "changing_rooms",
+      "questions": [
+        "Are there changing rooms?",
+        "What is in the changing rooms?",
+        "Do changing rooms have showers and lockers?"
+      ],
+      "answer": "Changing rooms are equipped with showers and lockers.",
+      "category": "kb"
+    },
+    {
+      "key": "towels",
+      "questions": [
+        "Do you provide towels?",
+        "How much is a towel?",
+        "Can I get a towel at reception?"
+      ],
+      "answer": "Towels are available at reception for an additional fee of 5 PLN. We recommend using a towel during workouts.",
+      "category": "kb"
+    },
+    {
+      "key": "equipment_rules",
+      "questions": [
+        "What are the equipment rules?",
+        "Do I need to disinfect machines?",
+        "Should I put equipment back after use?"
+      ],
+      "answer": "Please return equipment to its place after use and disinfect machines after training.",
+      "category": "kb"
+    },
+    {
+      "key": "equipment",
+      "questions": [
+        "Is equipment available to everyone?",
+        "What training equipment do you have?"
+      ],
+      "answer": "Training equipment is available to all club members.",
+      "category": "kb"
+    },
+    {
+      "key": "parking",
+      "questions": [
+        "Is parking available?",
+        "How does free parking work?",
+        "How many hours of free parking do members get?"
+      ],
+      "answer": "Members receive 2 hours of free parking. Please collect a ticket upon entry and keep it until exit.",
+      "category": "kb"
+    },
+    {
+      "key": "parking_info",
+      "questions": [
+        "Is parking free?",
+        "How many free parking hours do I get?"
+      ],
+      "answer": "The club offers up to 2 hours of free parking for members.",
+      "category": "kb"
+    },
+    {
+      "key": "bike_racks",
+      "questions": [
+        "Do you have bike racks?",
+        "Where can I leave my bike?",
+        "Do I need my own lock?"
+      ],
+      "answer": "Bike racks are located in front of the club. Please secure your bike with your own lock.",
+      "category": "kb"
+    },
+    {
+      "key": "bikes",
+      "questions": [
+        "Can I come by bike?",
+        "Is cycling to the club possible?"
+      ],
+      "answer": "You can access the club by bicycle.",
+      "category": "kb"
+    },
+    {
+      "key": "kids_zone",
+      "questions": [
+        "Is there a Kids Zone?",
+        "When is the Kids Zone open?",
+        "Do children need adult supervision?"
+      ],
+      "answer": "The Kids Zone is open on Saturdays and Sundays from 10:00 AM to 6:00 PM. Children must be supervised by an adult.",
+      "category": "kb"
+    },
+    {
+      "key": "children",
+      "questions": [
+        "Can children be in the club?",
+        "What are the rules for children?"
+      ],
+      "answer": "Children are allowed in the club only under adult supervision.",
+      "category": "kb"
+    },
+    {
+      "key": "age_policy",
+      "questions": [
+        "What is the minimum age?",
+        "Can someone under 16 use the club?",
+        "Rules for minors?"
+      ],
+      "answer": "Persons under 16 years of age may use the club only under adult or trainer supervision.",
+      "category": "kb"
+    },
+    {
+      "key": "rules",
+      "questions": [
+        "Where can I find the club rules?",
+        "Are the rules available at reception?",
+        "Are the rules online?"
+      ],
+      "answer": "The club regulations are available on our website and at reception.",
+      "category": "kb"
+    },
+    {
+      "key": "lost_items",
+      "questions": [
+        "Where do I collect lost items?",
+        "What if I lost something?",
+        "How long do you keep lost items?"
+      ],
+      "answer": "Lost items can be collected at reception. Items are stored for 30 days.",
+      "category": "kb"
+    },
+    {
+      "key": "maintenance",
+      "questions": [
+        "Where can I check maintenance notices?",
+        "Are any areas closed?",
+        "Where are service updates posted?"
+      ],
+      "answer": "Current maintenance works and area closures are announced on the information board and in the app.",
+      "category": "kb"
+    },
+    {
+      "key": "cleaning_breaks",
+      "questions": [
+        "Can areas close for cleaning?",
+        "Are there cleaning breaks?",
+        "How will I be informed about closures?"
+      ],
+      "answer": "Areas may be temporarily closed for cleaning. Information is provided in advance.",
+      "category": "kb"
+    },
+    {
+      "key": "safety",
+      "questions": [
+        "What should I do in case of injury?",
+        "Where is the AED located?",
+        "Safety rules?"
+      ],
+      "answer": "In case of injury or discomfort, immediately inform staff. An AED defibrillator is located at reception.",
+      "category": "kb"
+    },
+    {
+      "key": "wifi",
+      "questions": [
+        "Is there Wi‑Fi?",
+        "What is the Wi‑Fi password?",
+        "What is the Wi‑Fi network name?"
+      ],
+      "answer": "Free Wi-Fi is available throughout the club. Network name: FITNESS_WIFI, password: trening2024.",
+      "category": "kb"
+    },
+    {
+      "key": "internet",
+      "questions": [
+        "Is free Wi‑Fi available?",
+        "Is internet available in the club?"
+      ],
+      "answer": "Free Wi-Fi is available in the club.",
+      "category": "kb"
+    },
+    {
+      "key": "invoices",
+      "questions": [
+        "How do I get an invoice?",
+        "Can I receive an invoice by email?",
+        "Where do I request an invoice?"
+      ],
+      "answer": "You can receive an invoice for your membership at reception or by email upon request.",
+      "category": "kb"
+    },
+    {
+      "key": "billing",
+      "questions": [
+        "Who handles billing?",
+        "Payment and invoice matters—where to contact?"
+      ],
+      "answer": "Payment and invoice-related matters are handled by reception.",
+      "category": "kb"
+    },
+    {
+      "key": "app_help",
+      "questions": [
+        "I have an issue with the app. What should I do?",
+        "The app doesn't work—how to fix it?",
+        "Should I update the app?"
+      ],
+      "answer": "If you experience issues with the app, try updating it to the latest version or contact reception.",
+      "category": "kb"
+    },
+    {
+      "key": "app",
+      "questions": [
+        "What can I do in the app?",
+        "Can I enter using the app?",
+        "Can I book classes in the app?"
+      ],
+      "answer": "The mobile app allows class bookings and club entry.",
+      "category": "kb"
+    },
+    {
+      "key": "smalltalk_how_are_you",
+      "questions": [
+        "how are you?",
+        "how's it going?",
+        "what's up?"
+      ],
+      "answer": "Thanks, I’m doing well! 😊 How can I assist you with the club?",
+      "category": "smalltalk"
+    },
+    {
+      "key": "smalltalk_who_are_you",
+      "questions": [
+        "who are you?",
+        "what can you do?",
+        "are you a bot?"
+      ],
+      "answer": "I am the club’s virtual assistant. I help you quickly find information about hours, memberships, classes, and rules.",
+      "category": "smalltalk"
+    }
+  ]
 }
