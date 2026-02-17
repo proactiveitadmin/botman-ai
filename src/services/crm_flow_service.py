@@ -704,8 +704,22 @@ class CRMFlowService:
                 member = self.members_index.get_member(tenant_id, msg.from_phone)
                 if member:
                     member_id = str(member.get("id") or member.get("member_id"))
+                    logger.warning(
+                        {
+                            "crm flow service": "finalize_crm_verification_success",
+                            "event": "no member id",
+                            "member": member,
+                            "member_id": member_id,
+                        }
+                    )
             except Exception:
                 member_id = None
+                logger.warning(
+                    {
+                        "crm flow service": "finalize_crm_verification_success",
+                        "event": "no member id",
+                    }
+                )
 
         # aktualizacja rozmowy – wychodzimy ze stanu challenge
         self.conv.upsert_conversation(
@@ -769,45 +783,6 @@ class CRMFlowService:
 
         return actions
 
-    def verify_challenge_answer(
-        self,
-        tenant_id: str,
-        phone: str,
-        challenge_type: str,
-        answer: str,
-    ) -> bool:
-        """
-        Weryfikacja odpowiedzi na challenge PG.
-
-        Docelowo logika powinna siedzieć w CRMService (odpytywanie PerfectGym
-        / wewnętrznego indeksu członków). Tutaj delegujemy do metody
-        crm.verify_member_challenge.
-
-        Zwraca True/False.
-        """
-        answer = (answer or "").strip()
-        if not answer:
-            return False
-
-        try:
-            return bool(
-                self.crm.verify_member_challenge(
-                    tenant_id=tenant_id,
-                    phone=phone,
-                    challenge_type=challenge_type,
-                    answer=answer,
-                )
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                {
-                    "sender": "routing",
-                    "event": "crm_challenge_verify_failed",
-                    "details": str(e),
-                }
-            )
-            return False
-
     def clear_crm_challenge_state(
         self, tenant_id: str, channel: str, channel_user_id: str
     ) -> None:
@@ -828,17 +803,25 @@ class CRMFlowService:
     ) -> List[Action]:
         """
         """
+        if not member_id:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_member_not_linked",
+                lang,
+                {},
+            )
+            return [self._reply(msg, lang, body)]
         balance_resp = self.crm.get_member_balance(
             tenant_id=msg.tenant_id,
             member_id=member_id,
         )
-        balance = balance_resp.get("balance", 0)
+        current_balance = balance_resp.get("currentBalance", 0)
 
         body = self.tpl.render_named(
             msg.tenant_id,
             INTENT_CRM_MEMBER_BALANCE,
             lang,
-            {"balance": balance},
+            {"current_balance": current_balance},
         )
         return [self._reply(msg, lang, body)]
 

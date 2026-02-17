@@ -258,37 +258,7 @@ class KBService:
 
         # fallback na domyślne (na razie bez wariantów językowych)
         return DEFAULT_FAQ.get(topic)
-        
-    def answer_by_key(
-        self,
-        *,
-        tenant_id: str,
-        language_code: str,
-        faq_key: str,
-    ) -> str | None:
-        """
-        Deterministic FAQ answer from Pinecone by metadata faq_key.
-        No KB LLM.
-        """
-        try:
-            return self._vector.get_faq_by_key(
-                tenant_id=tenant_id,
-                language_code=language_code,
-                faq_key=faq_key,
-            )
-        except Exception as e:
-            logger.error(
-                {
-                    "component": "kb_service",
-                    "event": "answer_by_key_failed",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                    "faq_key": faq_key,
-                    "err": str(e),
-                }
-            )
-            return None
-
+ 
     def answer_ai(
         self,
         *,

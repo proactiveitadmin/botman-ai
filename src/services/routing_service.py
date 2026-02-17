@@ -175,13 +175,6 @@ class RoutingService:
 
         self._upsert_conv(msg, lang, intent, sm_state)
 
-    def _require_member_id(self, msg: Message, conv: dict, lang: str) -> str | None:
-        member_id = conv.get("crm_member_id")
-        if member_id:
-            return member_id
-        body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
-        return None, [self._reply(msg, lang, body)]
-
     def _conv_key(self, msg: Message) -> str:
         return conversation_key(
             msg.tenant_id,
@@ -406,7 +399,7 @@ class RoutingService:
             if verify_resp:
                 return verify_resp
 
-            self._require_member_id(msg, conv, lang)
+            member_id = self._require_member_id(msg, conv, lang)
             return self.crm_flow.reserve_class_with_id_core(
                 msg,
                 lang,
@@ -436,17 +429,19 @@ class RoutingService:
                 if verify_resp:
                     return verify_resp
 
-                self._require_member_id(msg, conv, lang)
-            self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
-
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "ticket_more_info",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
-       
+                member_id = conv.get("crm_member_id")
+                if member_id:
+                    self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
+                    body = self.tpl.render_named(
+                        msg.tenant_id,
+                        "ticket_more_info",
+                        lang,
+                        {},
+                    )
+                    return [self._reply(msg, lang, body)]
+                body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+                return [self._reply(msg, lang, body)]
+   
         # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
         if intent == INTENT_AVAILABLE_CLASSES:
             return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=False)
@@ -462,8 +457,11 @@ class RoutingService:
             )
             if verify_resp:
                 return verify_resp
-            self._require_member_id(msg, conv, lang)
-            return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
+            member_id = conv.get("crm_member_id")
+            if member_id:
+                return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
 
         # 6.7 Saldo członkowskie
         if intent == INTENT_CRM_MEMBER_BALANCE:
@@ -477,8 +475,11 @@ class RoutingService:
             if verify_resp:
                 return verify_resp
 
-            self._require_member_id(msg, conv, lang)
-            return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
+            member_id = conv.get("crm_member_id")
+            if member_id:
+                return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
         
         # 6.8 Prośba o weryfikację
         if intent == INTENT_VERIFICATION:
@@ -492,8 +493,10 @@ class RoutingService:
             if verify_resp:
                 return verify_resp
             member_id = conv.get("crm_member_id")
-            self._require_member_id(msg, conv, lang)
-            return self.crm_flow.verification_active(msg, lang, member_id)
+            if member_id:
+                return self.crm_flow.verification_active(msg, lang, member_id)
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
      
         # 6.10 Domyślny clarify
         body = self.tpl.render_named(

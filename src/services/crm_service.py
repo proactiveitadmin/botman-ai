@@ -90,7 +90,7 @@ class CRMService:
             if items:
                 return (items[0].get("email") or "").strip()
         except Exception:
-            self.logger.warning(
+            logger.warning(
                 {
                     "crm": "get_email_by_msg failed",
                     "tenant_id": tenant_id,
@@ -106,7 +106,7 @@ class CRMService:
             if items:
                 return str(items[0].get("id") or items[0].get("Id"))
         except Exception:
-            self.logger.warning(
+            logger.warning(
                 {
                     "crm": "get_member_id_by_msg failed",
                     "tenant_id": tenant_id,
@@ -230,7 +230,7 @@ class CRMService:
             data = resp.json() or {}
             return bool(data.get("value"))
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 {
                     "crm": "pg_marketing_consent_check_failed",
                     "tenant_id": tenant_id,
@@ -249,7 +249,7 @@ class CRMService:
         member_id: int,
         reason: str | None = None,
     ):
-        self.logger.warning(
+        logger.warning(
             {
                 "crm": "pg_revoke_marketing_consent_not_implemented",
                 "tenant_id": tenant_id,
@@ -269,7 +269,7 @@ class CRMService:
         member_id: int,
         reason: str | None = None,
     ):
-        self.logger.warning(
+        logger.warning(
             {
                 "crm": "pg_grant_marketing_consent_not_implemented",
                 "tenant_id": tenant_id,
@@ -311,83 +311,3 @@ class CRMService:
             if mapped_error == "classes_already_booked" or crm_code == "ClassesAlreadyBooked":
                 return ENUM_CRM_RETURN_ALREADY_BOOKED
         return ENUM_CRM_RETURN_FAIL
-
-    # ------------------------------------------------------------------ #
-    # verify_member_challenge – prawdziwa logika
-    # ------------------------------------------------------------------ #
-
-
-    def verify_member_challenge(
-        self,
-        tenant_id: str,
-        phone: str,
-        challenge_type: str,
-        answer: str,
-    ) -> bool:
-        """
-        Sprawdza odpowiedź użytkownika na challenge na bazie danych PerfectGym.
-
-        challenge_type:
-        - "dob"   → sprawdź dzień i miesiąc urodzenia (DD-MM),
-        - "email" → sprawdź email case-insensitive.
-
-        Zwraca True/False.
-        """
-        answer = (answer or "").strip()
-        if not answer:
-            return False
-
-        # 1) pobierz membera z PG po numerze telefonu
-        try:
-            members_resp = self.get_member_by_phone(tenant_id, phone)
-        except Exception as e:
-            logger.error(
-                {
-                    "crm": "verify_member_challenge_members_index_error",
-                    "tenant_id": tenant_id,
-                    "phone": mask_phone(phone),
-                    "error": str(e),
-                }
-            )
-            return False
-
-        items = (members_resp or {}).get("value") or []
-        if not items:
-            return False
-
-        # zazwyczaj 1 member, jak będzie więcej – bierzemy pierwszego
-        member = items[0]
-
-        if challenge_type == "dob":
-            # PerfectGym zwraca zwykle birthDate w formacie ISO 'YYYY-MM-DD...'
-            dob_raw = member.get("birthDate") or member.get("birthdate")
-            if not dob_raw:
-                return False
-
-            try:
-                dob = datetime.fromisoformat(dob_raw[:10])
-            except Exception:
-                return False
-
-            # normalizacja odpowiedzi: obsługujemy "01-05", "1.5", "01/05/1990" itd.
-            norm = (
-                answer.replace(" ", "")
-                .replace(".", "-")
-                .replace("/", "-")
-            )
-            parts = norm.split("-")
-            try:
-                day = int(parts[0])
-                month = int(parts[1])
-            except (ValueError, IndexError):
-                return False
-
-            return day == dob.day and month == dob.month
-
-        if challenge_type == "email":
-            expected = (member.get("email") or "").strip().lower()
-            given = answer.strip().lower()
-            return bool(expected) and expected == given
-
-        # inne typy challenge na razie nieobsługiwane
-        return False

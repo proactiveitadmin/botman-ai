@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import re
-
+import os, time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -45,7 +45,6 @@ class KBVectorService:
 
         # enabled() cache (per warm runtime)
         # tenant_id -> (expires_at_epoch, enabled_bool)
-        import os, time
         self._enabled_cache_ttl_s = float(os.getenv("KB_VECTOR_ENABLED_CACHE_TTL", "300") or 300)
         self._enabled_cache: dict[str, tuple[float, bool]] = {}
 
@@ -61,6 +60,10 @@ class KBVectorService:
     def _enabled_for(self, tenant_id: str) -> bool:
         with timed("enabled_check", logger=logger, component="kb_vector_service", extra={"tenant_id": tenant_id}):
             if not getattr(settings, "kb_vector_enabled", True):
+                logger.warning({
+                  "component": "kb_vector_service",
+                  "event": "kb_vector_enabled False",
+                })
                 return False
             pc = self._client_for(tenant_id)          
             logger.warning({
@@ -121,6 +124,11 @@ class KBVectorService:
             vecs = self._openai.embed([text], model=embed_model, dimensions=dims)
             return (vecs[0] if vecs else None) or []
         except Exception:
+            logger.warning({
+              "component": "kb_vector_service",
+              "event": "openai embed failed",
+              "text": text,
+            })
             return []
             
     def _split_question(self, question: str) -> list[str]:
@@ -193,6 +201,12 @@ class KBVectorService:
         This is idempotent: chunk IDs are deterministic so re-running updates vectors.
         """
         if not self.enabled(tenant_id):
+            logger.warning({
+              "component": "kb_vector_service",
+              "event": "vector service not enabled",
+              "tenant_id": tenant_id,
+              "language_code": language_code,
+            })
             return False
 
         with timed(
@@ -206,6 +220,12 @@ class KBVectorService:
         logger.warning({"event":"chunk_faq_done","chunks":len(chunks),"sample":chunks[0].text[:80] if chunks else None})
 
         if not chunks:
+            logger.warning({
+              "component": "kb_vector_service",
+              "event": "index FAQ no chunks",
+              "tenant_id": tenant_id,
+              "language_code": language_code,
+            })
             return False
 
         texts = [c.text for c in chunks]
@@ -291,11 +311,23 @@ class KBVectorService:
         top_k: Optional[int] = None,
     ) -> List[RetrievedChunk]:
         if not self.enabled(tenant_id):
-            logger.warning({...})
+            logger.warning({
+              "component": "kb_vector_service",
+              "event": "vector service not enabled",
+              "tenant_id": tenant_id,
+              "language_code": language_code,
+            })
             return []
 
         q = (question or "").strip()
         if not q:
+            logger.warning({
+              "component": "kb_vector_service",
+              "event": "strip question empty",
+              "tenant_id": tenant_id,
+              "language_code": language_code,
+              "question": question,
+            })
             return []
 
         emb_model = getattr(settings, "embedding_model", "text-embedding-3-small")
@@ -313,6 +345,13 @@ class KBVectorService:
             q_vecs = self._openai.embed(queries, model=emb_model, dimensions=emb_dims)
 
         if not q_vecs:
+            logger.warning({
+              "component": "kb_vector_service",
+              "event": "embed returns nothing",
+              "tenant_id": tenant_id,
+              "language_code": language_code,
+              "question": question,
+            })
             return []
 
         ns = self._namespace(tenant_id, language_code)
@@ -386,70 +425,6 @@ class KBVectorService:
         })
         return out
             
-    def get_faq_by_key(
-        self,
-        *,
-        tenant_id: str,
-        language_code: str,
-        faq_key: str,
-    ) -> str | None:
-        """
-        Deterministic lookup by metadata.faq_key (no KB LLM).
-        Still uses Pinecone /query, but filtered, so it does not depend on question semantics.
-        """
-        faq_key = (faq_key or "").strip()
-        if not faq_key:
-            logger.warning({
-                "component": "kb_vector_service",
-                "event": "KBVector: get_faq_by_key",
-                "tenant_id": tenant_id,
-                "language_code": language_code,
-                "reason": "faq_key missing",
-            })
-            return None
-
-        namespace = self._namespace(tenant_id, language_code)
-        qvec = self._embed_text(faq_key)
-        if not qvec:
-            logger.warning({
-                "component": "kb_vector_service",
-                "event": "KBVector: get_faq_by_key",
-                "tenant_id": tenant_id,
-                "language_code": language_code,
-                "faq_key": faq_key,
-                "reason": "no qvec",
-            })
-            return None
-
-        with timed(
-            "faq_by_key_query",
-            logger=logger,
-            component="kb_vector_service",
-            extra={"tenant_id": tenant_id, "lang": language_code, "faq_key": faq_key},
-        ):
-            matches = self._client_for(tenant_id).query(
-                namespace=namespace,
-                vector=qvec,
-                top_k=1,
-                include_metadata=True,
-                filter={"faq_key": {"$eq": faq_key}},  # patrz pkt 2
-            )
-
-        if not matches:
-            logger.warning({
-                "component": "kb_vector_service",
-                "event": "KBVector: get_faq_by_key",
-                "tenant_id": tenant_id,
-                "language_code": language_code,
-                "faq_key": faq_key,
-                "reason": "no match",
-            })
-            return None
-        first = matches[0]
-        md = getattr(first, "metadata", {}) or {}
-        txt = md.get("text") or ""
-        return self._extract_answer_from_text(txt)
-        
     def build_kb_prompt( self, 
         chunks: List[RetrievedChunk],
         language_code: Optional[str],
@@ -459,11 +434,14 @@ class KBVectorService:
 
         We keep the legacy contract: assistant must return JSON {"answer": "..."}.
         """
-        lines: List[str] = []
-        for i, ch in enumerate(chunks, start=1):
-            lines.append(f"[C{i}] {ch.text}")
+        if chunks:
+            lines: List[str] = []
+            for i, ch in enumerate(chunks, start=1):
+                lines.append(f"[C{i}] {ch.text}")
 
-        context = "\n\n".join(lines).strip()
+            context = "\n\n".join(lines).strip()
+        else:
+            context = ""
         
         return self._openai.build_kb_prompt(strict_mode, language_code, context)
         
