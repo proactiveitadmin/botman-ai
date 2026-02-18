@@ -356,6 +356,7 @@ class KBVectorService:
 
         ns = self._namespace(tenant_id, language_code)
         k = int(top_k or getattr(settings, "pinecone_top_k", 6) or 6)
+        lang = (language_code or "").strip() or "en"
 
         # Run Pinecone queries for each segment and merge matches.
         all_matches = []
@@ -366,11 +367,15 @@ class KBVectorService:
             extra={"tenant_id": tenant_id, "namespace": ns, "top_k": k, "queries": len(q_vecs)},
         ):
             for vec in q_vecs:
-                if not vec:
+                logger.info({
+                    "component": "kb_vector_service",
+                    "event": "retrieve_debug",
+                    "namespace": ns,
+                    "category": category,
+                })
+                if vec is None:
                     continue
-                lang = (language_code or "").strip() or "en"
                 filtr = {"lang": {"$eq": lang}}
-                logger.warning({"event":"retrieve_debug","namespace":ns,"lang":lang,"category":category})
 
                 if category:
                     filtr["category"] = {"$eq": category}

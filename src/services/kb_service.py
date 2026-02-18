@@ -313,7 +313,7 @@ class KBService:
 
                     # 2) dopiero potem próg score (fallback)
                     st_top1 = float(getattr(st[0], "score", 0.0) or 0.0)
-                    self._get_env_float("KB_SMALLTALK_MIN_SCORE", KB_SMALLTALK_MIN_SCORE)
+                    st_min = self._get_env_float("KB_SMALLTALK_MIN_SCORE", KB_SMALLTALK_MIN_SCORE)
                     if st_top1 >= st_min:
                         ans = self._vector._extract_answer_from_text(txt0)
                         if ans:
