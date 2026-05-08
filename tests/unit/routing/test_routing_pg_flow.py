@@ -27,7 +27,6 @@ def _build_router(monkeypatch) -> tuple[RoutingService, InMemoryConversations]:
         tenants=tenants,
         tpl=tpl,
         crm=crm,
-        members_index=members_index,
         language=language,
     )
 

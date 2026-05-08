@@ -16,8 +16,6 @@ metrics = MetricsService()
 IDEMPOTENCY = IdempotencyRepo()
 tenant_cfg = default_tenant_config_service()
 tenant_limiter = InMemoryRateLimiter()
-tenant_cfg = default_tenant_config_service()
-tenant_limiter = InMemoryRateLimiter()
 
 def _queue_delay_ms(record: dict) -> int | None:
     try:
@@ -28,15 +26,6 @@ def _queue_delay_ms(record: dict) -> int | None:
     except Exception:
         return None
 
-def _normalize_whatsapp_channel_user_id(to: str | None) -> str | None:
-    """Converts Twilio 'to' into channel_user_id format used by ConversationsRepo."""
-    if not to:
-        return None
-    t = str(to).strip()
-    if not t:
-        return None
-    return t if t.startswith("whatsapp:") else f"whatsapp:{t}"
-        
 def lambda_handler(event, context):
     try:
         tenant_limiter.reset()
@@ -120,7 +109,6 @@ def lambda_handler(event, context):
                         MessageBody=json.dumps(web_msg),
                     )
                     metrics.incr("TenantOutboundQueued", tenant_id=tenant_id, component="outbound_sender", channel="web")
-                    metrics.incr("TenantOutboundQueued", tenant_id=tenant_id, component="outbound_sender", channel="web")
                     metrics.incr("message_sent", tenant_id=tenant_id, component="outbound_sender", channel="web", status="QUEUED")
                     logger.info(
                         {
@@ -154,8 +142,6 @@ def lambda_handler(event, context):
             res = clients.whatsapp(tenant_id).send_text(to=to, body=text)
             res_status = res.get("status", "UNKNOWN")
 
-            metrics.incr("TenantOutboundSent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
-            metrics.incr("TenantOutboundSent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
             metrics.incr("TenantOutboundSent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
             metrics.incr("message_sent", tenant_id=tenant_id, component="outbound_sender", channel="whatsapp", status=res_status)
 

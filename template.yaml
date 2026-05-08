@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Botman AI – Etap 1 (prod-ready)
+Description: Dialo – Etap 1 (prod-ready)
 
 Parameters:
   WhatsappVerifyToken:
@@ -29,16 +29,19 @@ Parameters:
     Default: ".json"
   PhoneHashPepperParam:
     Type: String
-    Default: /botman/prod/phone_hash_pepper
+    Default: /dialo/prod/phone_hash_pepper
   UserHashPepperParam:
     Type: String
-    Default: /botman/prod/user_hash_pepper
+    Default: /dialo/prod/user_hash_pepper
   OtpHashPepperParam:
     Type: String
-    Default: /botman/prod/otp_hash_pepper
+    Default: /dialo/prod/otp_hash_pepper
   TenantSecretsPrefix:
     Type: String
-    Default: /botman/prod/
+    Default: /dialo/prod/
+  PhoneEncKeyParam:
+    Type: String
+    Default: /dialo/prod/phone_enc_key
 
   SesFromEmail:
     Type: String
@@ -92,13 +95,13 @@ Globals:
         USER_HASH_PEPPER: !Ref UserHashPepperParam
         OTP_HASH_PEPPER: !Ref OtpHashPepperParam
         SES_FROM_EMAIL: !Ref SesFromEmail
+        PHONE_ENC_KEY: !Ref PhoneEncKeyParam
         
         DDB_TABLE_TENANTS: !Sub 'Tenants-${AWS::StackName}'
         DDB_TABLE_CONVERSATIONS: !Sub 'Conversations-${AWS::StackName}'
         DDB_TABLE_MESSAGES:      !Sub 'Messages-${AWS::StackName}'
         DDB_TABLE_TEMPLATES:     !Sub 'Templates-${AWS::StackName}'
         DDB_TABLE_CAMPAIGNS:     !Sub 'Campaigns-${AWS::StackName}'
-        DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN: tenant_next_run_at
         DDB_TABLE_INTENTS_STATS: !Sub 'IntentsStats-${AWS::StackName}'
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
         DDB_TABLE_LEADS:         !Sub 'Leads-${AWS::StackName}'
@@ -122,7 +125,7 @@ Globals:
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
         
         TENANT_CONFIG_CACHE_TTL: "300"
-        METRICS_NAMESPACE: "BotmanAI"
+        METRICS_NAMESPACE: "Dialo"
         DASHBOARD_PREFIX: !Sub 'tenant-${AWS::StackName}-'
         OPENAI_TIMEOUT_S: 12
         OPENAI_MAX_ATTEMPTS: 3
@@ -147,14 +150,14 @@ Resources:
     Type: AWS::WAFv2::WebACL
     Condition: DoWaf
     Properties:
-      Name: !Sub 'botman-api-waf-${AWS::StackName}'
+      Name: !Sub 'dialo-api-waf-${AWS::StackName}'
       Scope: REGIONAL
       DefaultAction:
         Allow: {}
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
-        MetricName: !Sub 'botman-api-waf-${AWS::StackName}'
+        MetricName: !Sub 'dialo-api-waf-${AWS::StackName}'
       Rules:
         - Name: RateLimitPerIP
           Priority: 0
@@ -321,17 +324,17 @@ Resources:
           AttributeType: S
         - AttributeName: tenant_id
           AttributeType: S
-        - AttributeName: next_run_at
-          AttributeType: N
+        - AttributeName: next_run_time
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: tenant_next_run_at
+        - IndexName: tenant_next_run_time
           KeySchema:
             - AttributeName: tenant_id
               KeyType: HASH
-            - AttributeName: next_run_at
+            - AttributeName: next_run_time
               KeyType: RANGE
           Projection:
             ProjectionType: INCLUDE
@@ -340,7 +343,7 @@ Resources:
               - campaign_id
               - active
               - tenant_id
-              - next_run_at
+              - next_run_time
               - send_from
               - send_to
               - recipients
@@ -713,6 +716,8 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneEncKeyParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
             - Effect: Allow
               Action: kms:Decrypt
               Resource: "*"
@@ -725,12 +730,21 @@ Resources:
               Resource:
                 - !GetAtt Tenants.Arn
                 - !GetAtt Templates.Arn
+                - !GetAtt Conversations.Arn
             - Effect: Allow
               Action:
                 - dynamodb:Query
               Resource:
                 - !Sub '${Tenants.Arn}/index/*'
                 - !Sub '${Templates.Arn}/index/*'
+                - !Sub '${Conversations.Arn}/index/*'
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt Tenants.Arn
+                - !GetAtt Templates.Arn
+                - !GetAtt Conversations.Arn
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue

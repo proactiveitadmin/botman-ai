@@ -1,0 +1,54 @@
+{
+  "include_tags": {
+    "L": [
+      {
+        "S": "Member"
+      },
+      {
+        "S": "VIP"
+      }
+    ]
+  },
+  "active": {
+    "BOOL": true
+  },
+  "payment_product_id": {
+    "S": "product_demo"
+  },
+  "pk": {
+    "S": "TENANT#clubProactiveIT#CAMPAIGN#campaign_001"
+  },
+  "tenant_id": {
+    "S": "clubProactiveIT"
+  },
+  "recipients": {
+    "L": [
+      {
+        "M": {
+          "token": {
+            "S": "gAAAAABp-kTQQdPrEOu5rdCya61aOewRtHajLzFr7m67MGFP0mLTwUFklEXNt7ATp4IW0MRiHK2buO1KWXqPNS14mf-1Ow39jsuKlrKcqnoXpiyXVaLG0tg="
+          }
+        }
+      },
+      {
+        "M": {
+          "token": {
+            "S": "gAAAAABp-kTQdM48hydJCqpSMfhx2DiVWIL8i1t9GlLYvPXPBH18EXLA8qUQKFr4ZUe2Sfjcwi67070OHc3IiUHBaFyf05Nlwy2n9iaZOjwD3oWMr7zv5yg="
+          }
+        }
+      }
+    ]
+  },
+  "next_run_time": {
+    "S": "2026-05-05T21:28:16"
+  },
+  "created_at": {
+    "S": "2026-05-05T21:28:16"
+  },
+  "campaign_id": {
+    "S": "campaign_001"
+  },
+  "body": {
+    "S": "Hello {first_name}, your order is ready. {payment_link}"
+  }
+}

@@ -213,7 +213,6 @@ def routing_service(monkeypatch):
         conv=conv,
         tenants=FakeTenantsRepo(),
         messages=FakeMessagesRepo(),
-        members_index=FakeMembersIndexRepo(),
     )
     wire_subservices(routing)
     monkeypatch.setattr(routing.language, "_detect_language", lambda text: "pl")

@@ -27,7 +27,7 @@ def test_get_words_set_splits_and_caches(monkeypatch):
     # Avoid instantiating real ClientsFactory (would pull AWS deps in unit tests).
     monkeypatch.setattr(cfs, "ClientsFactory", lambda *a, **k: object())
     tpl = FakeTpl({("t1", "yes_words", "pl"): "TAK,  yes ; ok"})
-    svc = cfs.CRMFlowService(crm=FakeCRM(), tpl=tpl, conv=FakeConv(), members_index=FakeMembersIndex())
+    svc = cfs.CRMFlowService(crm=FakeCRM(), tpl=tpl, conv=FakeConv())
 
     words1 = svc._get_words_set("t1", "yes_words", "pl")
     assert words1 == {"tak", "yes", "ok"}
@@ -37,12 +37,3 @@ def test_get_words_set_splits_and_caches(monkeypatch):
     # Second call should hit cache.
     assert tpl.calls.count(("t1", "yes_words", "pl")) == 1
 
-
-def test_generate_verification_code_length(monkeypatch):
-    monkeypatch.setattr(cfs, "ClientsFactory", lambda *a, **k: object())
-    svc = cfs.CRMFlowService(crm=FakeCRM(), tpl=FakeTpl({}), conv=FakeConv(), members_index=FakeMembersIndex())
-
-    # Make generation deterministic.
-    import secrets
-    monkeypatch.setattr(secrets, "choice", lambda _alphabet: "A")
-    assert svc._generate_verification_code(8) == "A" * 8

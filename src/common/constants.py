@@ -1,5 +1,13 @@
 import os
 
+CAMPAIGNS_TENANT_NEXT_RUN_INDEX = "tenant_next_run_time"
+CAMPAIGNS_TIME_ZONE = "Europe/Berlin"
+CAMPAIGNS_1ST_NAME_PLACEHOLDER = "first_name"
+CAMPAIGNS_PAYMENT_URL_PLACEHOLDER = "payment_link"
+CAMPAIGNS_PRODUCT_ID_PLACEHOLDER = "payment_product_id"
+CAMPAIGNS_EXCLUDE_TAGS_PLACEHOLDER = "exclude_tags"
+CAMPAIGNS_INCLUDE_TAGS_PLACEHOLDER = "include_tags"
+
 STATE_AWAITING_CONFIRMATION = "awaiting_confirmation"
 STATE_AWAITING_VERIFICATION = "awaiting_verification"
 STATE_AWAITING_CLASS_SELECTION = "awaiting_class_selection"

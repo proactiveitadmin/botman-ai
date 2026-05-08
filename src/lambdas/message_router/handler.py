@@ -36,11 +36,6 @@ metrics = MetricsService()
 tenant_cfg = default_tenant_config_service()
 tenant_limiter = InMemoryRateLimiter()
 
-metrics = MetricsService()
-tenant_cfg = default_tenant_config_service()
-tenant_limiter = InMemoryRateLimiter()
-
-
 def _parse_record(record: dict) -> dict | None:
     raw_body = record.get("body", "")
     try:
@@ -299,7 +294,6 @@ def lambda_handler(event, context):
             # Let SQS retry later
             batch_failures.append({"itemIdentifier": r.get("messageId")})
             continue
-
         metrics.incr("TenantRoutedInbound", tenant_id=tenant_id, component="message_router")
 
         t_msg = time.perf_counter()

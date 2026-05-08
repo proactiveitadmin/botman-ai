@@ -9,29 +9,11 @@ import logging
 from ..common.logging_utils import mask_phone
 from ..common.config import settings
 from ..common.timing import timed
-
-logger = logging.getLogger("botman-ai")
-
-
-BASE_MEMBER_FIELDS = [
-    "Id",
-    "FirstName",
-    "LastName",
-    "Email",
-    "MobilePhone",
-    "Status",
-]
-
-BASE_CLASS_FIELDS = [
-    "Id",
-    "Name",
-    "StartDate",
-    "EndDate",
-    "Capacity",
-    "ReservedSpots",
-    "ClubId",
-]
-
+from ..common.constants import (
+    CRM_MARKETING_AGREEMENT_ID,
+)
+    
+logger = logging.getLogger("Dialo")
 
 class PerfectGymClient:
     def __init__(
@@ -161,6 +143,22 @@ class PerfectGymClient:
             return (str(mt).strip() if mt is not None else None)
         except Exception:
             return None
+            
+    def get_member_1st_name_by_phone(self, phone: str) -> Optional[str]:
+        """Zwraca firstName dla numeru telefonu (PerfectGym-specific).
+
+        W PG pobieramy memberów z endpointu /Members filtrowanego po phoneNumber,
+        a następnie odczytujemy pole firstName (czasem zwracane jako firstName).
+        """
+        try:
+            resp = self.get_member_by_phone(phone=phone)
+            items = (resp or {}).get("value") or []
+            if not items:
+                return None
+            mt = items[0].get("firstName") or items[0].get("firstname")
+            return (str(mt).strip() if mt is not None else None)
+        except Exception:
+            return None
 
     def get_member_by_phone(self, phone: str) -> Dict[str, Any]:
         """
@@ -271,7 +269,7 @@ class PerfectGymClient:
             "memberId": int(member_id),
             "classId": int(class_id),
             "bookDespiteOtherBookingsAtTheSameTime": bool(allow_overlap),
-            "comments": comments or "booked by Botman WhatsApp",
+            "comments": comments or "booked by Dialo WhatsApp",
         }
 
         headers = self._headers()
@@ -567,6 +565,44 @@ class PerfectGymClient:
                 "negativeBalanceSince": None,
                 "raw": {},
             }
+    
+    def get_marketing_consent_for_member(self, tenant_id: str, *, member_id: int) -> bool:
+        """
+        Sprawdza w PerfectGym czy member ma zgodę marketingową (agreed = true).
+        memberAgreementId traktujemy jako stałą (1).
+        """
+        odata_filter = (
+            f"memberId eq {int(member_id)} "
+            f"and memberAgreementId eq {CRM_MARKETING_AGREEMENT_ID} "
+            f"and agreed eq true"
+        )
+
+        url = (
+            f"{self.base_url}/MemberAgreementAnswers"
+            f"?$filter={quote(odata_filter, safe=' =$andtruefalse')}"
+        )
+
+        try:
+            resp = self._request_with_retry(
+                "GET",
+                url,
+                headers=self._headers(),
+                timeout=10,
+            )
+            resp.raise_for_status()
+            data = resp.json() or {}
+            return bool(data.get("value"))
+        except Exception as e:
+            logger.error(
+                {
+                    "crm": "pg_marketing_consent_check_failed",
+                    "tenant_id": tenant_id,
+                    "member_id": member_id,
+                    "error": str(e),
+                }
+            )
+            # fail-safe: jak nie wiemy, to NIE wysyłamy
+            return False
 
     # ------------------------------------------------------------------ #
     # Classes – pojedyncza klasa po ID

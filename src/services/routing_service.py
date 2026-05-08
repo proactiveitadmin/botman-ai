@@ -35,7 +35,6 @@ from ..services.language_service import LanguageService
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..repos.messages_repo import MessagesRepo
-from ..repos.members_index_repo import MembersIndexRepo
 
 from ..common.constants import (
     #STATES
@@ -83,7 +82,6 @@ class RoutingService:
         conv: ConversationsRepo | None = None,
         tenants: TenantsRepo | None = None,
         messages: MessagesRepo | None = None,
-        members_index: MembersIndexRepo | None = None,
         _clients_factory: ClientsFactory | None = None,
         crm: CRMService | None = None,
         ticketing: TicketingService | None = None,
@@ -97,7 +95,6 @@ class RoutingService:
         self.conv = conv or ConversationsRepo()
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
-        self.members_index = members_index or MembersIndexRepo()
         self._clients_factory = _clients_factory or ClientsFactory()
         self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.ticketing = ticketing or TicketingService(clients_factory=self._clients_factory)
@@ -105,7 +102,6 @@ class RoutingService:
             crm=self.crm,
             tpl=self.tpl,
             conv=self.conv,
-            members_index=self.members_index,
         )
         self.language = language or LanguageService(conv=self.conv)
         # cache na słowa typu TAK / NIE z templatek

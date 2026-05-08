@@ -1,27 +1,50 @@
 from __future__ import annotations
 
+import json
 import os
-import time
 from typing import Any, Dict, Optional
 
-from ..common.logging import logger
+from aws_embedded_metrics import metric_scope
+
+
+@metric_scope
+def emit_metric(
+    metrics,
+    *,
+    namespace: str,
+    tenant_id: str,
+    metric_name: str,
+    value: float = 1.0,
+    unit: str = "Count",
+    log_fields: Optional[Dict[str, Any]] = None,
+) -> None:
+    metrics.set_namespace(namespace)
+
+    # TYLKO tenant_id jako dimension
+    metrics.set_dimensions({
+        "tenant_id": tenant_id or "unknown",
+    })
+
+    metrics.put_metric(metric_name, value, unit)
+
+    # dodatkowe pola tylko do logów
+    if log_fields:
+        for k, v in log_fields.items():
+            metrics.set_property(k, v)
 
 
 class MetricsService:
-    """Emits CloudWatch metrics using Embedded Metric Format (EMF).
-
-    Why EMF:
-      - No extra AWS API calls per invocation (metrics are extracted from logs).
-      - Easy to dimension metrics by tenant_id / function / component.
-
-    Naming:
-      - Namespace is configurable via METRICS_NAMESPACE (default: BotmanAI).
-      - Dimensions always include tenant_id and function.
-    """
-
     def __init__(self, *, namespace: Optional[str] = None) -> None:
-        self.namespace = (namespace or os.getenv("METRICS_NAMESPACE") or "BotmanAI").strip() or "BotmanAI"
-        self.function = (os.getenv("AWS_LAMBDA_FUNCTION_NAME") or "").strip() or "unknown"
+        self.namespace = (
+            namespace
+            or os.getenv("METRICS_NAMESPACE")
+            or "Dialo"
+        ).strip() or "Dialo"
+
+        self.function = (
+            os.getenv("AWS_LAMBDA_FUNCTION_NAME")
+            or "unknown"
+        ).strip()
 
     def incr(
         self,
@@ -34,41 +57,28 @@ class MetricsService:
         extra_dims: Optional[Dict[str, str]] = None,
         **fields: Any,
     ) -> None:
-        """Emit a single metric datapoint (EMF).
 
-        - `fields` are additional structured log fields (not dimensions unless in extra_dims).
-        """
-        dims: Dict[str, str] = {
-            "tenant_id": (tenant_id or "unknown"),
+        log_fields: Dict[str, Any] = {
             "function": self.function,
         }
+
         if component:
-            dims["component"] = str(component)
+            log_fields["component"] = component
+
         if extra_dims:
-            for k, v in extra_dims.items():
-                if v is None:
-                    continue
-                dims[str(k)] = str(v)
+            log_fields.update(extra_dims)
 
-        # Dimensions list must match the keys we attach in the log.
-        dim_keys = list(dims.keys())
+        if fields:
+            log_fields.update(fields)
 
-        payload: Dict[str, Any] = {
-            **dims,
-            name: value,
-            **fields,
-            "_aws": {
-                "Timestamp": int(time.time() * 1000),
-                "CloudWatchMetrics": [
-                    {
-                        "Namespace": self.namespace,
-                        "Dimensions": [dim_keys],
-                        "Metrics": [{"Name": name, "Unit": unit}],
-                    }
-                ],
-            },
-        }
-        logger.info(payload)
+        emit_metric(
+            namespace=self.namespace,
+            tenant_id=tenant_id or "unknown",
+            metric_name=name,
+            value=float(value),
+            unit=unit,
+            log_fields=log_fields,
+        )
 
     def timing_ms(
         self,
@@ -77,7 +87,6 @@ class MetricsService:
         *,
         tenant_id: Optional[str] = None,
         component: Optional[str] = None,
-        extra_dims: Optional[Dict[str, str]] = None,
         **fields: Any,
     ) -> None:
         self.incr(
@@ -86,6 +95,5 @@ class MetricsService:
             unit="Milliseconds",
             tenant_id=tenant_id,
             component=component,
-            extra_dims=extra_dims,
             **fields,
         )

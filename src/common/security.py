@@ -2,6 +2,7 @@ import os, hmac, hashlib, base64, time
 from typing import Dict
 from .config import settings
 from .logging import logger
+from cryptography.fernet import Fernet, InvalidToken
 
 def verify_twilio_signature(
     url: str,
@@ -44,7 +45,7 @@ def _load_secure_parameter(param_name: str) -> str | None:
         logger.error({"security": "ssm_get_parameter_failed", "param": param_name, "error": str(e)})
         return None
 
-def _get_pepper(env_value_name: str, env_param_name: str) -> str:
+def _get_param_from_store(env_value_name: str, env_param_name: str) -> str:
     # Priority: explicit env secret -> SSM param -> empty (will break comparisons safely)
     cache_key = f"{env_value_name}|{env_param_name}"
     if cache_key in _cached_peppers:
@@ -80,18 +81,18 @@ def _hmac_b64url(key: str, msg: str) -> str:
     return base64.urlsafe_b64encode(mac).decode("utf-8").rstrip("=")
 
 def phone_hmac(tenant_id: str, phone: str) -> str:
-    pepper = _get_pepper("PHONE_HASH_PEPPER", "PHONE_HASH_PEPPER_PARAM")
+    pepper = _get_param_from_store("PHONE_HASH_PEPPER", "PHONE_HASH_PEPPER_PARAM")
     msg = f"{tenant_id}|{normalize_phone(phone)}"
     return _hmac_b64url(pepper, msg)
 
 def user_hmac(tenant_id: str, channel: str, channel_user_id: str) -> str:
-    pepper = _get_pepper("USER_HASH_PEPPER", "USER_HASH_PEPPER_PARAM")
+    pepper = _get_param_from_store("USER_HASH_PEPPER", "USER_HASH_PEPPER_PARAM")
     msg = f"{tenant_id}|{channel}|{channel_user_id}"
     return _hmac_b64url(pepper, msg)
 
 def otp_hash(tenant_id: str, purpose: str, otp_code: str) -> str:
     """Hashes OTP for storage/compare (never store raw OTP)."""
-    pepper = _get_pepper("OTP_HASH_PEPPER", "OTP_HASH_PEPPER_PARAM") or _get_pepper("PHONE_HASH_PEPPER","PHONE_HASH_PEPPER_PARAM")
+    pepper = _get_param_from_store("OTP_HASH_PEPPER", "OTP_HASH_PEPPER_PARAM") or _get_param_from_store("PHONE_HASH_PEPPER","PHONE_HASH_PEPPER_PARAM")
     msg = f"{tenant_id}|{purpose}|{(otp_code or '').strip()}"
     return _hmac_b64url(pepper, msg)
 
@@ -110,7 +111,7 @@ def sign_optout_token(tenant_id: str, channel: str, user_id: str, action: str, t
     Token is derived from USER_HASH_PEPPER (same secret family as user_hmac).
     It does NOT reveal PII and can be safely used as a query param.
     """
-    pepper = _get_pepper("USER_HASH_PEPPER", "USER_HASH_PEPPER_PARAM")
+    pepper = _get_param_from_store("USER_HASH_PEPPER", "USER_HASH_PEPPER_PARAM")
     payload = f"{tenant_id}|{channel}|{user_id}|{action}|{int(ts)}"
     return _hmac_b64url_raw(pepper, payload)
 
@@ -165,3 +166,72 @@ def conversation_key(
     cuid = channel_user_id or ""
     uid = user_hmac(tenant_id, channel or "whatsapp", cuid)
     return f"conv#{channel or 'whatsapp'}#{uid}"
+
+
+# ---------------------------------------------------------------------------
+#  Reversible PII encryption (for runtime-only access)
+# ---------------------------------------------------------------------------
+
+_cached_enc_key: str | None = None
+
+
+def _derive_fernet_key_from_seed(seed: str) -> str:
+    """Derive a stable Fernet key from an arbitrary seed string.
+
+    Fernet expects base64url-encoded 32 bytes. We derive it from SHA-256(seed).
+    This is a fallback for demo/dev only.
+    """
+    raw = hashlib.sha256((seed or "").encode("utf-8")).digest()  # 32 bytes
+    return base64.urlsafe_b64encode(raw).decode("utf-8")
+
+
+def _get_phone_enc_key() -> str:
+    """Loads the encryption key used for reversible phone storage."""
+
+    # demo fallback
+    key = _get_param_from_store("PHONE_ENC_KEY", "PHONE_ENC_KEY_PARAM")
+    if not key:
+        logger.warning({"security": "phone_enc_key_missing"})
+        key = "demo"
+    return key
+
+
+def encrypt_phone(tenant_id: str, phone: str) -> str:
+    """Encrypt phone for storage.
+
+    The ciphertext is safe to store (base64). Tenant id is included in the
+    plaintext to reduce cross-tenant key/record mixups.
+    """
+    if not phone:
+        return ""
+    f = Fernet(_get_phone_enc_key())
+    payload = f"{tenant_id}|{normalize_phone(phone)}".encode("utf-8")
+    return f.encrypt(payload).decode("utf-8")
+
+
+def decrypt_phone(tenant_id: str, phone_enc: str) -> str:
+    """Decrypt phone from storage.
+
+    Returns normalized phone (without whatsapp: prefix).
+    """
+    if not phone_enc:
+        return ""
+    f = Fernet(_get_phone_enc_key())
+    try:
+        raw = f.decrypt(phone_enc.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        logger.error({"security": "phone_decrypt_invalid_token", "tenant_id": tenant_id})
+        return ""
+    except Exception as e:
+        logger.error({"security": "phone_decrypt_failed", "tenant_id": tenant_id, "error": str(e)})
+        return ""
+
+    # raw format: "{tenant}|{phone}"
+    try:
+        t, p = raw.split("|", 1)
+    except Exception:
+        return ""
+    if t != tenant_id:
+        logger.warning({"security": "phone_decrypt_tenant_mismatch", "tenant_id": tenant_id})
+        return ""
+    return p

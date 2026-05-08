@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 from datetime import datetime
 from urllib.parse import quote
+from string import Template
 
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..common.logging import logger
@@ -13,7 +15,6 @@ from ..common.constants import (
     ENUM_CRM_RETURN_OK,
     ENUM_CRM_RETURN_ALREADY_BOOKED,
     ENUM_CRM_RETURN_FAIL,
-    CRM_MARKETING_AGREEMENT_ID,
 )
 
 class CRMService:
@@ -155,6 +156,21 @@ class CRMService:
         # Inne CRM-y powinny dostarczyć analogiczną metodę w swoim kliencie.
         return None
         
+    def get_member_1st_name_by_phone(self, tenant_id: str, phone: str) -> Optional[str]:
+        """Zwraca imie użytkownika w CRM (dla PerfectGym: firstName).
+
+        Logika specyficzna dla danego CRM powinna być zaimplementowana po stronie klienta,
+        np. PerfectGymClient.get_member_type_by_phone().
+        """
+        norm_phone = self._normalize_phone(phone)
+        self._crm_gate(tenant_id)
+        client = self._client_for(tenant_id)
+        getter = getattr(client, "get_member_1st_name_by_phone", None)
+        if callable(getter):
+            return getter(phone=norm_phone)
+        # Inne CRM-y powinny dostarczyć analogiczną metodę w swoim kliencie.
+        return None
+        
     def get_class_by_id(
         self,
         tenant_id: str,
@@ -206,40 +222,48 @@ class CRMService:
         memberAgreementId traktujemy jako stałą (1).
         """
         self._crm_gate(tenant_id)
-        pg = self._client_for(tenant_id)
-
-        odata_filter = (
-            f"memberId eq {int(member_id)} "
-            f"and memberAgreementId eq {CRM_MARKETING_AGREEMENT_ID} "
-            f"and agreed eq true"
+        return self._client_for(tenant_id).get_marketing_consent_for_member(
+            tenant_id=tenant_id,
+            member_id=member_id,
         )
 
-        url = (
-            f"{pg.base_url}/MemberAgreementAnswers"
-            f"?$filter={quote(odata_filter, safe=' =$andtruefalse')}"
-        )
+    # ------------------------------------------------------------------ #
+    # Payments / product links
+    # ------------------------------------------------------------------ #
 
-        try:
-            resp = pg._request_with_retry(
-                "GET",
-                url,
-                headers=pg._headers(),
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json() or {}
-            return bool(data.get("value"))
-        except Exception as e:
-            logger.error(
-                {
-                    "crm": "pg_marketing_consent_check_failed",
-                    "tenant_id": tenant_id,
-                    "member_id": member_id,
-                    "error": str(e),
-                }
-            )
-            # fail-safe: jak nie wiemy, to NIE wysyłamy
-            return False
+    def get_product_payment_link(self, tenant_id: str, *, member_id: int, product_id: str) -> str:
+        """Returns a payment link for a given product.
+
+        For demo we keep this CRM-agnostic:
+          - if the CRM client provides a method, we call it,
+          - otherwise we build the URL from a configurable template.
+
+        Configuration (priority):
+          1) env PAYMENT_LINK_TEMPLATE
+          2) env PAYMENT_LINK_TEMPLATE_PARAM (SSM parameter name)
+
+        Template supports variables: ${tenant_id}, ${member_id}, ${product_id}.
+        """
+        client = self._client_for(tenant_id)
+        getter = getattr(client, "get_product_payment_link", None)
+        if callable(getter):
+            try:
+                self._crm_gate(tenant_id)
+                return str(getter(member_id=int(member_id), product_id=str(product_id)) or "").strip()
+            except Exception as e:
+                logger.error(
+                    {
+                        "crm": "payment_link_client_failed",
+                        "tenant_id": tenant_id,
+                        "member_id": member_id,
+                        "product_id": product_id,
+                        "error": str(e),
+                    }
+                )
+                return ""
+
+        logger.warning({"crm": "pg client get_product_payment_link not defined"})
+        return ""
     
     #stub cofniecia zgody, TODO: zaimplementowac cofniecie zgody
     def revoke_marketing_consent_for_member(
@@ -259,26 +283,6 @@ class CRMService:
         )
         raise NotImplementedError(
             "PerfectGym revoke consent endpoint not implemented yet"
-        ) 
-    
-    #stub dodania zgody, TODO: zaimplementowac cofniecie zgody
-    def grant_marketing_consent_for_member(
-        self,
-        tenant_id: str,
-        *,
-        member_id: int,
-        reason: str | None = None,
-    ):
-        logger.warning(
-            {
-                "crm": "pg_grant_marketing_consent_not_implemented",
-                "tenant_id": tenant_id,
-                "member_id": member_id,
-                "reason": reason,
-            }
-        )
-        raise NotImplementedError(
-            "PerfectGym grant consent endpoint not implemented yet"
         )  
         
     def reserve_class(

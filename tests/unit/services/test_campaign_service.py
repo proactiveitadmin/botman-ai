@@ -17,6 +17,9 @@ def test_build_message_from_template():
     class FakeTemplates:
         def render_named(self, tenant, template_name, lang, ctx):
             return f"TEMPLATE:{template_name}:{lang}:{ctx}"
+            
+        def render(self, template, ctx):
+            return f"TEMPLATE:{template}{ctx}"
 
     # Fake ConversationsRepo – brak języka z rozmowy
     class FakeConversations:
