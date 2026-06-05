@@ -403,40 +403,55 @@ class RoutingService:
                 member_id=member_id,
             )
 
-        # 6.3 Handover do człowieka
+        # 6.3a Handover do człowieka
        # if intent == INTENT_HANDOVER - tymczasowo pod ticketing
+       
+        #6.3b OPT-IN
+        if intent == INTENT_MARKETING_OPTIN:
+            self._upsert_conv(
+                msg,
+                lang,
+                INTENT_MARKETING_OPTIN,
+                STATE_AWAITING_TICKET_COMMENT,
+            )
 
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "ticket_more_info",
+                lang,
+                {},
+            )
+            return [self._reply(msg, lang, body)]
+            
         # 6.4 Ticket do systemu ticketowego
         # handover, optin/optout - tymczasowo pod ticketing
         if intent in (
             INTENT_TICKET,
             INTENT_HANDOVER,
             INTENT_MARKETING_OPTOUT,
-            INTENT_MARKETING_OPTIN,
         ):
-            if intent != INTENT_MARKETING_OPTIN:
-                verify_resp = self.crm_flow.ensure_crm_verification(
-                    msg,
-                    conv,
-                    lang,
-                    post_intent=INTENT_CRM_MEMBER_BALANCE,
-                    post_slots=slots,
-                )
-                if verify_resp:
-                    return verify_resp
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
+                lang,
+                post_intent=INTENT_CRM_MEMBER_BALANCE,
+                post_slots=slots,
+            )
+            if verify_resp:
+                return verify_resp
 
-                member_id = conv.get("crm_member_id")
-                if member_id:
-                    self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
-                    body = self.tpl.render_named(
-                        msg.tenant_id,
-                        "ticket_more_info",
-                        lang,
-                        {},
-                    )
-                    return [self._reply(msg, lang, body)]
-                body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            member_id = conv.get("crm_member_id")
+            if member_id:
+                self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "ticket_more_info",
+                    lang,
+                    {},
+                )
                 return [self._reply(msg, lang, body)]
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
    
         # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
         if intent == INTENT_AVAILABLE_CLASSES:
