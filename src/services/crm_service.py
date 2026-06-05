@@ -216,14 +216,17 @@ class CRMService:
         self._crm_gate(tenant_id)
         return self._client_for(tenant_id).get_member_balance(member_id=member_id)
 
-    def get_marketing_consent_for_member(self, tenant_id: str, *, member_id: int) -> bool:
+    def get_marketing_consent_for_member(
+        self, 
+        tenant_id: str, 
+        member_id: int
+    ) -> bool:
         """
         Sprawdza w PerfectGym czy member ma zgodę marketingową (agreed = true).
         memberAgreementId traktujemy jako stałą (1).
         """
         self._crm_gate(tenant_id)
         return self._client_for(tenant_id).get_marketing_consent_for_member(
-            tenant_id=tenant_id,
             member_id=member_id,
         )
 
@@ -231,7 +234,12 @@ class CRMService:
     # Payments / product links
     # ------------------------------------------------------------------ #
 
-    def get_product_payment_link(self, tenant_id: str, *, member_id: int, product_id: str) -> str:
+    def get_product_payment_link(
+        self, 
+        tenant_id: str, 
+        member_id: int, 
+        product_id: str
+    ) -> str:
         """Returns a payment link for a given product.
 
         For demo we keep this CRM-agnostic:
@@ -269,7 +277,6 @@ class CRMService:
     def revoke_marketing_consent_for_member(
         self,
         tenant_id: str,
-        *,
         member_id: int,
         reason: str | None = None,
     ):

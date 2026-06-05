@@ -23,6 +23,7 @@ from ...common.utils import normalize_whatsapp_channel_user_id
 from ...services.clients_factory import ClientsFactory
 from ...repos.tenants_repo import TenantsRepo
 from ...common.security import decrypt_phone, conversation_key
+from ...services.metrics_service import MetricsService
 from ...common.constants import (
     CAMPAIGNS_TENANT_NEXT_RUN_INDEX, 
     CAMPAIGNS_TIME_ZONE, 
@@ -38,6 +39,7 @@ svc = CampaignService()
 conv_repo = ConversationsRepo()
 clients = ClientsFactory()
 tenants_repo = TenantsRepo()
+metrics = MetricsService()
 
 def build_campaign_context(tenant_id: str, member_id: int, phone_number: str, product_id: str | None = None) -> dict:
     ctx: dict = {}
@@ -46,7 +48,6 @@ def build_campaign_context(tenant_id: str, member_id: int, phone_number: str, pr
     
     if product_id:
         pay_url = clients.perfectgym(tenant_id).get_product_payment_link(
-            tenant_id,
             member_id=member_id,
             product_id=str(product_id),
         )
@@ -99,7 +100,8 @@ def lambda_handler(event, context):
     def iter_due_campaigns(tenant_id: str):
         """
         Query po GSI (tenant_id + next_run_time), z paginacją.
-        Pobiera kampanie, których next_run_time <= teraz.
+        Pobiera kampanie, których next_run_time <= teraz i ustawia 
+        pole active na false
         """
         # ISO 8601 UTC (lexicographically sortable)        
         now_dt = datetime.now(ZoneInfo(CAMPAIGNS_TIME_ZONE))
@@ -137,6 +139,15 @@ def lambda_handler(event, context):
                     }
                 )
                 continue
+            table.update_item(
+                Key={
+                    "pk": item["pk"],
+                },
+                UpdateExpression="SET active = :active",
+                ExpressionAttributeValues={
+                    ":active": False,
+                },
+            )
 
             tenant_id_item = item.get("tenant_id") or tid
             for recipient in svc.select_recipients(item):
@@ -176,13 +187,14 @@ def lambda_handler(event, context):
                     continue
 
                 raw_id = items[0].get("Id") or items[0].get("id")
+                member_id = None
 
                 try:
                     member_id = int(raw_id)
-                except Exception:
+                except (TypeError, ValueError):
                     logger.warning(
                         {
-                            "campaign": "get member_id failed",
+                            "campaign": "get_member_id_failed",
                             "campaign_id": item.get("campaign_id"),
                             "tenant_id": item.get("tenant_id", tid),
                             "raw_id": raw_id,
@@ -191,7 +203,6 @@ def lambda_handler(event, context):
                     continue
 
                 if not clients.perfectgym(tenant_id_item).get_marketing_consent_for_member(
-                    tenant_id_item,
                     member_id=member_id,
                     ):
                     logger.warning(
@@ -208,7 +219,7 @@ def lambda_handler(event, context):
                 if include_tags:
                     is_included = any(
                         check_member_type(
-                            tenant_id,
+                            tenant_id_item,
                             tag,
                             phone,
                             exclude=False,
@@ -233,7 +244,7 @@ def lambda_handler(event, context):
                 if exclude_tags:
                     is_excluded = any(
                         check_member_type(
-                            tenant_id,
+                            tenant_id_item,
                             tag,
                             phone,
                             exclude=False,
@@ -302,7 +313,7 @@ def lambda_handler(event, context):
                     pass
                     
                 
-                metrics.incr("TenantCampaignSendOk", tenant_id=tenant_id, component="campaign_runner")
+                metrics.incr("TenantCampaignSendOk", tenant_id=tenant_id_item, component="campaign_runner")
                 
             logger.info(
                 {

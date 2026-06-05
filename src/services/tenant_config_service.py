@@ -125,7 +125,6 @@ class TenantConfigService:
             })
             self._expand_section(cfg, "whatsapp_cloud", {
                 "access_token": "access_token_param",
-                "app_secret": "app_secret_param",
             })
             self._expand_section(cfg, "pg", {
                 "client_id": "client_id_param",

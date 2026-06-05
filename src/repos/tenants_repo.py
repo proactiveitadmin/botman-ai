@@ -67,7 +67,7 @@ class TenantsRepo:
         try:
             resp = self.table.query(
                 IndexName="WhatsAppPhoneNumberIdIndex",
-                KeyConditionExpression=Key("whatsapp_phone_number_id").eq(phone_number_id),
+                KeyConditionExpression=Key("wa_phone_number_id").eq(phone_number_id),
                 Limit=1,
             )
             items = resp.get("Items") or []

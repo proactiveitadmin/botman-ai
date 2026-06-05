@@ -45,7 +45,7 @@ class WhatsAppCloudConfig:
     access_token: str
     phone_number_id: str
     # optional metadata
-    api_version: str = "v20.0"
+    api_version: str = "v25.0"
 
 class WhatsAppCloudClient:
     """Minimal client for WhatsApp Business Platform (Cloud API).
@@ -61,7 +61,7 @@ class WhatsAppCloudClient:
     ):
         self.access_token = (access_token or "").strip()
         self.phone_number_id = (phone_number_id or "").strip()
-        self.api_version = (api_version or "v20.0").strip()  # keep as string
+        self.api_version = (api_version or "v25.0").strip()  # keep as string
 
         self.enabled = bool(self.access_token and self.phone_number_id)
 
@@ -70,10 +70,16 @@ class WhatsAppCloudClient:
         wa = (tenant_cfg or {}).get("whatsapp_cloud") or (tenant_cfg or {}).get("whatsapp") or {}
         if not isinstance(wa, dict):
             wa = {}
+        local_access_token=(wa.get("access_token") or "").strip() or None
+        logger.warning(
+            {
+                "temp!!! access_token": local_access_token,
+            }
+        )
         return cls(
-            access_token=wa.get("access_token"),
-            phone_number_id=wa.get("phone_number_id"),
-            api_version=wa.get("api_version") or wa.get("version") or "v20.0",
+            access_token=(wa.get("access_token") or "").strip() or None,
+            phone_number_id=(tenant_cfg or {}).get("wa_phone_number_id"),
+            api_version=wa.get("api_version") or wa.get("version") or "v25.0",
         )
 		
     def send_text(self, to: str, body: str) -> dict:
@@ -122,7 +128,12 @@ class WhatsAppCloudClient:
             # test expects invalid json -> error['raw'] == 'bad'
             err = {"raw": raw_text}
             logger.error(
-                {"msg": "WhatsApp Cloud send failed", "to": mask_phone(to), "status": getattr(resp, "status_code", None), "error": raw_text}
+                {
+                    "msg": "WhatsApp Cloud send failed", 
+                    "to": mask_phone(to), 
+                    "status": getattr(resp, "status_code", None), 
+                    "error": raw_text
+                }
             )
             return {"status": "ERROR", "http_status": getattr(resp, "status_code", None), "error": err}
 

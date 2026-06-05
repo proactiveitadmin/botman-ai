@@ -13,7 +13,7 @@ param(
 
     [string]$PhonesFile,
 
-    [string]$ProductId = "product_demo",
+    [string]$ProductId = "7",
 
     [ValidateSet("epoch","iso")]
     [string]$NextRunFormat = "epoch",
