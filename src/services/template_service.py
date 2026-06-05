@@ -18,7 +18,7 @@ class TemplateService:
     def render(self, template: str, context: dict):
         """
         Backward compatible – literal string (np. stare miejsca typu CONFIRM_TEMPLATE).
-        Docelowo NIE używamy tego w nowych flow – wszystko przez render_named.
+        Obecnie w uzyciu tylko dla kampanii. Odpowiedzi bota przechodza TYLKO przez render_named
         """
         return render_template(template, context or {})
 

@@ -382,6 +382,41 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
 
     dummy_ticketing = DummyTicketing()
     router_handler.ROUTER.ticketing = dummy_ticketing
+    # Ticket w produkcyjnym flow wymaga weryfikacji CRM.
+    # W tym teście izolujemy sam ticketing, więc zakładamy, że weryfikacja już przeszła.
+    monkeypatch.setattr(
+        router_handler.ROUTER.crm_flow,
+        "ensure_crm_verification",
+        lambda *args, **kwargs: None,
+    )
+
+    # Stan rozmowy trzymamy lokalnie, żeby 1. krok mógł ustawić
+    # STATE_AWAITING_TICKET_COMMENT, a 2. krok mógł go odczytać.
+    current_conv = {
+        "crm_member_id": "105",
+        "state_machine_status": None,
+        "last_intent": None,
+        "updated_at": 0,
+        "language_code": "pl",
+    }
+
+    def fake_get_conversation(*args, **kwargs):
+        return current_conv
+
+    def fake_upsert_conversation(*args, **kwargs):
+        current_conv.update(kwargs)
+        return current_conv
+
+    monkeypatch.setattr(
+        router_handler.ROUTER.conv,
+        "get_conversation",
+        fake_get_conversation,
+    )
+    monkeypatch.setattr(
+        router_handler.ROUTER.conv,
+        "upsert_conversation",
+        fake_upsert_conversation,
+    )
 
     # --- KROK 1: start -> prosba o komentarz, bez tworzenia ticketa ---
     event1 = {
@@ -395,7 +430,7 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
                         "body": "Chcę zgłosić problem z karnetem",
                         "tenant_id": "default",
                         # ustawiamy intent 'ticket', żeby pominąć NLU i weryfikacje
-                        "intent": "marketing_optin",
+                        "intent": "ticket",
                         "slots": {"summary": "Problem z karnetem"},
                     }
                 )

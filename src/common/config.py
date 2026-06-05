@@ -29,7 +29,57 @@ class Settings:
 
     Pola są zgrupowane logicznie (Twilio, OpenAI, PerfectGym, Jira, KB, kolejki).
     """
-    
+
+    def get_env_int(
+        name: str,
+        default: str | None = None,
+        *,
+        min_value: int | None = None,
+        max_value: int | None = None,
+    ) -> int:
+        value = os.getenv(name, default)
+
+        if value is None:
+            raise ValueError(f"{name} is required and not set")
+
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be an integer, got: {value!r}")
+
+        if min_value is not None and parsed < min_value:
+            raise ValueError(f"{name} must be >= {min_value}")
+
+        if max_value is not None and parsed > max_value:
+            raise ValueError(f"{name} must be <= {max_value}")
+
+        return parsed
+
+    def get_env_float(
+        name: str,
+        default: str | None = None,
+        *,
+        min_value: float | None = None,
+        max_value: float | None = None,
+    ) -> float:
+        value = os.getenv(name, default)
+
+        if value is None:
+            raise ValueError(f"{name} is required and not set")
+
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{name} must be a float, got: {value!r}")
+
+        if min_value is not None and parsed < min_value:
+            raise ValueError(f"{name} must be >= {min_value}")
+
+        if max_value is not None and parsed > max_value:
+            raise ValueError(f"{name} must be <= {max_value}")
+
+        return parsed
+
     # tryb deweloperski
     dev_mode: bool = os.getenv("DEV_MODE", "false").lower() == "true"
     tenant_default_lang: str = os.getenv("TENANT_DEFAULT_LANG", "pl")
@@ -42,7 +92,7 @@ class Settings:
     user_hash_pepper: str = os.getenv("USER_HASH_PEPPER", "")
     otp_hash_pepper: str = os.getenv("OTP_HASH_PEPPER", "")
 
-    openai_timeout_s: float = float(os.getenv("OPENAI_TIMEOUT_S", "6"))
+    openai_timeout_s: float = get_env_float("OPENAI_TIMEOUT_S", "6")
 
     #code sender email
     ses_from_email = os.getenv("SES_FROM_EMAIL")
@@ -60,15 +110,15 @@ class Settings:
     # Vector DB (Pinecone)
     pinecone_api_key: str = os.getenv("PINECONE_API_KEY", "")
     pinecone_namespace_prefix: str = os.getenv("PINECONE_NAMESPACE_PREFIX", "kb")
-    pinecone_top_k: int = int(os.getenv("PINECONE_TOP_K", "6"))
+    pinecone_top_k: int = get_env_int("PINECONE_TOP_K", "6")
     # Optional: force-disable vector retrieval (use legacy keyword retrieval)
     kb_vector_enabled: bool = os.getenv("KB_VECTOR_ENABLED", "1").lower() not in ("0", "false", "no")
  
-    pg_rate_limit_rps: float = float(os.getenv("PG_RATE_LIMIT_RPS", "30"))
-    pg_rate_limit_burst: float = float(os.getenv("PG_RATE_LIMIT_BURST", "30"))
-    pg_retry_max_attempts: int = int(os.getenv("PG_RETRY_MAX_ATTEMPTS", "3"))
-    pg_retry_base_delay_s: float = float(os.getenv("PG_RETRY_BASE_DELAY_S", "0.2"))
-    pg_retry_max_delay_s: float = float(os.getenv("PG_RETRY_MAX_DELAY_S", "2.0"))
+    pg_rate_limit_rps: float = get_env_float("PG_RATE_LIMIT_RPS", "30")
+    pg_rate_limit_burst: float = get_env_float("PG_RATE_LIMIT_BURST", "30")
+    pg_retry_max_attempts: int = get_env_int("PG_RETRY_MAX_ATTEMPTS", "3")
+    pg_retry_base_delay_s: float = get_env_float("PG_RETRY_BASE_DELAY_S", "0.2")
+    pg_retry_max_delay_s: float = get_env_float("PG_RETRY_MAX_DELAY_S", "2.0")
 
     jira_default_issue_type: str = "Task"
 
@@ -82,7 +132,7 @@ class Settings:
     nlu_min_confidence: float = os.getenv("NLU_MIN_CONFIDENCE", "0.3")
     history_fetch_limit: int = os.getenv("HISTORY_FETCH_LIMIT", "10")
     faq_ai_history_limit: int = os.getenv("FAQ_AI_HISTORY_LIMIT", "6")
-    ack_fallback_text: string = os.getenv("ACK_FALLBACK_TEXT", "OK")
+    ack_fallback_text: str = os.getenv("ACK_FALLBACK_TEXT", "OK")
     
     # np. w common/config.py
     def get_default_language(self) -> str:

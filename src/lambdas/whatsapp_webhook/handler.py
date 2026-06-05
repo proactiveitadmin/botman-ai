@@ -18,6 +18,7 @@ import os
 import re
 import hmac
 import hashlib
+import time
 
 from ...services.spam_service import SpamService
 from ...services.tenant_config_service import default_tenant_config_service
@@ -27,8 +28,9 @@ from ...common.utils import new_id
 from ...common.logging import logger
 from ...common.logging_utils import mask_phone, shorten_body
 from ...common.security import user_hmac
+from ...services.metrics_service import MetricsService
 
-
+metrics = MetricsService()
 spam_service = SpamService()
 tenant_cfg = default_tenant_config_service()
 tenants_repo = TenantsRepo()
@@ -93,17 +95,23 @@ def _handle_get(event: dict, tenant_id: str | None) -> dict:
     mode = qs.get("hub.mode") or qs.get("hub_mode") or qs.get("mode")
     token = qs.get("hub.verify_token") or qs.get("hub_verify_token") or qs.get("verify_token")
     challenge = qs.get("hub.challenge") or qs.get("hub_challenge") or qs.get("challenge")
-
+   
+    logger.info({
+        "webhook": "whatsapp_verify",
+        "tenant_id": tenant_id,
+        "mode": mode,
+        "has_token": bool(token),
+        "has_challenge": bool(challenge),
+    })
+    
     if mode != "subscribe" or not challenge:
         return {"statusCode": 400, "body": "Bad Request"}
 
-    if tenant_id:
-        cfg = tenant_cfg.get(tenant_id)
-        wa = (cfg.get("whatsapp_cloud") or cfg.get("whatsapp") or {})
     verify_token = (os.getenv("WHATSAPP_VERIFY_TOKEN") or "").strip()
 
-    if verify_token and token == verify_token:
+    if verify_token and hmac.compare_digest(token or "", verify_token):
         return {"statusCode": 200, "body": str(challenge)}
+    logger.warning({"webhook": "whatsapp_verify_failed", "tenant_id": tenant_id})
     return {"statusCode": 403, "body": "Forbidden"}
 
 
@@ -114,13 +122,16 @@ def _extract_messages(payload: dict) -> list[dict]:
         for entry in (payload.get("entry") or []):
             for change in (entry.get("changes") or []):
                 value = (change or {}).get("value") or {}
-                msgs = value.get("messages") or []
-                for m in msgs:
+                metadata = value.get("metadata") or {}
+                for m in value.get("messages") or []:
                     if isinstance(m, dict):
-                        out.append(m)
+                        out.append({
+                            "message": m,
+                            "metadata": metadata,
+                        })        
+        return out
     except Exception:
         return []
-    return out
 
 def _extract_phone_number_id(payload: dict) -> str | None:
     """Extract metadata.phone_number_id from standard Cloud API webhook payload."""
@@ -138,7 +149,17 @@ def _extract_phone_number_id(payload: dict) -> str | None:
 
 
 def lambda_handler(event, context):
+    t0 = time.perf_counter()
+    tenant_id = None
     try:
+        logger.info({
+            "webhook": "whatsapp_cloud_received",
+            "method": event.get("httpMethod") or (event.get("requestContext", {}).get("http", {}) or {}).get("method"),
+            "path": event.get("path") or (event.get("requestContext", {}) or {}).get("path"),
+            "has_body": bool(event.get("body")),
+            "isBase64Encoded": event.get("isBase64Encoded"),
+            "headers": list((event.get("headers") or {}).keys()),
+        })
         tenant_id = _tenant_from_path(event)
 
         method = (event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method") or "").upper()
@@ -160,7 +181,13 @@ def lambda_handler(event, context):
             payload = json.loads(raw_body) if raw_body else {}
         except Exception:
             return {"statusCode": 400, "body": "Invalid JSON"}
-
+        
+        logger.info({
+            "webhook": "whatsapp_payload_parsed",
+            "object": payload.get("object"),
+            "entries": len(payload.get("entry") or []),
+            "phone_number_id": _extract_phone_number_id(payload),
+        })
         # Resolve tenant when webhook URL is shared (no {tenant} in path)
         if not tenant_id:
             phone_number_id = _extract_phone_number_id(payload)
@@ -183,15 +210,25 @@ def lambda_handler(event, context):
 
 
         messages = _extract_messages(payload)
+        logger.info({
+            "webhook": "whatsapp_messages_extracted",
+            "tenant_id": tenant_id,
+            "count": len(messages),
+        })
         if not messages:
             # Might be statuses/read receipts, etc.
             return {"statusCode": 200, "body": "OK"}
 
         queue_url = resolve_queue_url("InboundEventsQueueUrl")
 
-        for m in messages:
+        for item in messages:
+            m = item["message"]
+            metadata = item.get("metadata") or {}
+
             wa_id = ((m.get("from") or "").strip())  # digits
             from_phone = _to_internal_from(wa_id)
+            to_phone_number_id = metadata.get("phone_number_id")
+            to_display = metadata.get("display_phone_number")
             if not from_phone:
                 continue
 
@@ -220,15 +257,17 @@ def lambda_handler(event, context):
             internal = {
                 "event_id": new_id("evt-"),
                 "from": from_phone,
-                "to": None,
+                "to": to_display,
                 "body": msg_text,
                 "tenant_id": tenant_id,
-                "ts": (event.get("requestContext") or {}).get("timeEpoch"),
-                "message_sid": m.get("id"),  # keep field name for compatibility
+                "ts": int(m.get("timestamp", "0")) * 1000 if m.get("timestamp") else None,
+                "message_sid": m.get("id"),
                 "channel": "whatsapp",
                 "channel_user_id": channel_user_id,
                 "conversation_id": conv_id,
                 "provider": "whatsapp_cloud",
+                "provider_phone_number_id": to_phone_number_id,
+                "provider_message_type": m.get("type"),
             }
 
             dedup_id = (m.get("id") or "").strip() or internal["event_id"]
@@ -239,7 +278,12 @@ def lambda_handler(event, context):
                 MessageGroupId=conv_id,
                 MessageDeduplicationId=dedup_id,
             )
-
+            
+            metrics.incr(
+                "TenantInboundAccepted",
+                tenant_id=tenant_id,
+                component="whatsapp_webhook",
+            )
             logger.info(
                 {
                     "webhook": "ok",
@@ -249,7 +293,12 @@ def lambda_handler(event, context):
                     "tenant_id": tenant_id,
                 }
             )
-
+            metrics.timing_ms(
+                "TenantInboundLatencyMs",
+                (time.perf_counter() - t0) * 1000,
+                tenant_id=tenant_id,
+                component="whatsapp_webhook",
+            )
         return {"statusCode": 200, "body": "OK"}
 
     except Exception as e:

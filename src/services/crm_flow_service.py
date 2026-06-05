@@ -46,7 +46,7 @@ from ..common.constants import (
     ENUM_CRM_RETURN_FAIL,
 )
 from ..common.logging import logger
-from ..common.utils import new_id, build_reply_action
+from ..common.utils import new_id, build_reply_action, generate_verification_code
 from ..domain.models import Message, Action
 from ..services.crm_service import CRMService
 from .clients_factory import ClientsFactory
@@ -54,7 +54,6 @@ from ..services.template_service import TemplateService
 from ..adapters.email_client import EmailClient
 from ..common.security import otp_hash
 from ..repos.conversations_repo import ConversationsRepo
-from ..repos.members_index_repo import MembersIndexRepo
 
 
 
@@ -75,13 +74,11 @@ class CRMFlowService:
         _clients_factory: ClientsFactory | None = None,
         tpl: TemplateService | None = None,
         conv: ConversationsRepo | None = None,
-        members_index: MembersIndexRepo | None = None,
     ) -> None:
         self._clients_factory = ClientsFactory()
         self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.tpl = tpl or TemplateService()
         self.conv = conv or ConversationsRepo()
-        self.members_index = members_index or MembersIndexRepo()
 
         # cache słów typu TAK/NIE z templatek
         self._words_cache: dict[tuple[str, str, str], set[str]] = {}
@@ -221,20 +218,6 @@ class CRMFlowService:
         self._words_cache[key] = words
         return words
 
-    # ------------------------------------------------------------------ #
-    #  Weryfikacja 
-    # ------------------------------------------------------------------ #
-
-    def _generate_verification_code(self, length: int = 6) -> str:
-        """
-        Generuje prosty kod weryfikacyjny używany w flow WWW -> WhatsApp.
-        """
-        import secrets
-        import string
-
-        alphabet = string.ascii_uppercase + string.digits
-        return "".join(secrets.choice(alphabet) for _ in range(length))
-    
     def get_contract_status_context(self, msg: Message, member_id: str,  lang: str) -> str:
     
         contracts_resp = self.crm.get_contracts_by_member_id(
@@ -430,7 +413,7 @@ class CRMFlowService:
             return [self._reply_ctx(msg, lang, body)]
 
         # 3.3) wygeneruj OTP i wyślij na email
-        verification_code = self._generate_verification_code(length=OTP_LENGTH)
+        verification_code = generate_verification_code(length=OTP_LENGTH)
         expires_at = now_ts + CRM_VERIFICATION_CODE_SECONDS
         otp_h = otp_hash(msg.tenant_id, "crm_email_otp", verification_code)
 
@@ -628,13 +611,15 @@ class CRMFlowService:
 
         member_id = self.crm.get_member_id_by_msg(tenant_id, msg)
 
-        if not member_id and self.members_index:
-            try:
-                member = self.members_index.get_member(tenant_id, msg.from_phone)
-                if member:
-                    member_id = str(member.get("id") or member.get("member_id"))
-            except Exception:
-                member_id = None
+        # warning jeśli PG nic nie zwróci
+        if not member_id:
+            logger.warning(
+                {
+                    "crm flow service": "finalize_crm_verification_success",
+                    "event": "no member id",
+                }
+            )
+            member_id = None
 
         self.conv.upsert_conversation(
             tenant_id=tenant_id,
@@ -698,14 +683,15 @@ class CRMFlowService:
         # 1) spróbuj pobrać membera z PerfectGym po numerze telefonu
         member_id = self.crm.get_member_id_by_msg(tenant_id, msg)
 
-        # 2) fallback na MembersIndex, jeśli PG nic nie zwróci
-        if not member_id and self.members_index:
-            try:
-                member = self.members_index.get_member(tenant_id, msg.from_phone)
-                if member:
-                    member_id = str(member.get("id") or member.get("member_id"))
-            except Exception:
-                member_id = None
+        # 2) warning jeśli PG nic nie zwróci
+        if not member_id:
+            logger.warning(
+                {
+                    "crm flow service": "finalize_crm_verification_success",
+                    "event": "no member id",
+                }
+            )
+            member_id = None
 
         # aktualizacja rozmowy – wychodzimy ze stanu challenge
         self.conv.upsert_conversation(
@@ -769,45 +755,6 @@ class CRMFlowService:
 
         return actions
 
-    def verify_challenge_answer(
-        self,
-        tenant_id: str,
-        phone: str,
-        challenge_type: str,
-        answer: str,
-    ) -> bool:
-        """
-        Weryfikacja odpowiedzi na challenge PG.
-
-        Docelowo logika powinna siedzieć w CRMService (odpytywanie PerfectGym
-        / wewnętrznego indeksu członków). Tutaj delegujemy do metody
-        crm.verify_member_challenge.
-
-        Zwraca True/False.
-        """
-        answer = (answer or "").strip()
-        if not answer:
-            return False
-
-        try:
-            return bool(
-                self.crm.verify_member_challenge(
-                    tenant_id=tenant_id,
-                    phone=phone,
-                    challenge_type=challenge_type,
-                    answer=answer,
-                )
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error(
-                {
-                    "sender": "routing",
-                    "event": "crm_challenge_verify_failed",
-                    "details": str(e),
-                }
-            )
-            return False
-
     def clear_crm_challenge_state(
         self, tenant_id: str, channel: str, channel_user_id: str
     ) -> None:
@@ -828,17 +775,25 @@ class CRMFlowService:
     ) -> List[Action]:
         """
         """
+        if not member_id:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_member_not_linked",
+                lang,
+                {},
+            )
+            return [self._reply(msg, lang, body)]
         balance_resp = self.crm.get_member_balance(
             tenant_id=msg.tenant_id,
             member_id=member_id,
         )
-        balance = balance_resp.get("balance", 0)
+        current_balance = balance_resp.get("currentBalance", 0)
 
         body = self.tpl.render_named(
             msg.tenant_id,
             INTENT_CRM_MEMBER_BALANCE,
             lang,
-            {"balance": balance},
+            {"current_balance": current_balance},
         )
         return [self._reply(msg, lang, body)]
 

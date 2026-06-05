@@ -84,3 +84,11 @@ def ses_client(region_name: str | None = None):
     if ep:
         kwargs["endpoint_url"] = ep
     return boto3.client("ses", **kwargs)
+
+
+def cloudwatch_client():
+    ep = _endpoint_for("cloudwatch")
+    kwargs = {"region_name": _region(), "config": _cfg()}
+    if ep:
+        kwargs["endpoint_url"] = ep
+    return boto3.client("cloudwatch", **kwargs)

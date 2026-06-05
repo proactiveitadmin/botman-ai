@@ -23,3 +23,15 @@ def test_render_template_ignores_missing_context_and_extra_fields():
     # brak kontekstu -> powinno działać bez wyjątku
     res2 = templates.render_template("Hi!", None)
     assert res2 == "Hi!"
+
+
+def test_render_template_typed_placeholders_link_and_text():
+    s = "Pay here: {payment_link} / Club: {club}"
+    res = templates.render_template(
+        s,
+        {
+            "payment_link": {"type": "link", "url": "https://example.com/pay", "text": "Pay"},
+            "club": {"type": "text", "value": "Botman Gym"},
+        },
+    )
+    assert res == "Pay here: Pay https://example.com/pay / Club: Botman Gym"

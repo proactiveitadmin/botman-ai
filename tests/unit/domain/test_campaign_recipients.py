@@ -9,43 +9,31 @@ def test_select_recipients_dicts_without_filters():
     svc = CampaignService()
     campaign = {
         "recipients": [
-            {"phone": "a", "tags": ["vip"]},
-            {"phone": "b", "tags": []},
+            {"token": "a", "tags": ["vip"]},
+            {"token": "b", "tags": []},
         ]
     }
-    assert svc.select_recipients(campaign) == ["a", "b"]
+    assert svc.select_recipients(campaign) == [{"token": "a"}, {"token": "b"}]
 
-def test_select_recipients_with_include_tags():
+def test_select_include_tags():
     svc = CampaignService()
     campaign = {
         "include_tags": ["vip"],
         "recipients": [
-            {"phone": "a", "tags": ["vip"]},
-            {"phone": "b", "tags": ["regular"]},
+            {"token": "a", "tags": ["vip"]},
+            {"token": "b", "tags": ["regular"]},
         ],
     }
-    assert svc.select_recipients(campaign) == ["a"]
-
-def test_select_recipients_with_exclude_tags():
+    assert svc.select_recipients(campaign) == [{"token": "a"},{"token": "b"}]
+    assert svc.select_include_tags(campaign) == ["vip"]
+def test_select_exclude_tags():
     svc = CampaignService()
     campaign = {
         "exclude_tags": ["blocked"],
         "recipients": [
-            {"phone": "a", "tags": ["vip"]},
-            {"phone": "b", "tags": ["blocked"]},
+            {"token": "a"},
+            {"token": "b"},
         ],
     }
-    assert svc.select_recipients(campaign) == ["a"]
-
-def test_select_recipients_include_and_exclude():
-    svc = CampaignService()
-    campaign = {
-        "include_tags": ["vip"],
-        "exclude_tags": ["blocked"],
-        "recipients": [
-            {"phone": "a", "tags": ["vip"]},
-            {"phone": "b", "tags": ["vip", "blocked"]},
-            {"phone": "c", "tags": ["regular"]},
-        ],
-    }
-    assert svc.select_recipients(campaign) == ["a"]
+    assert svc.select_recipients(campaign) == [{"token": "a"},{"token": "b"}]
+    assert svc.select_exclude_tags(campaign) == ["blocked"]

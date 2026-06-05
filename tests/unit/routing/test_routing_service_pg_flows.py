@@ -122,7 +122,6 @@ def test_pg_member_balance_core_happy_path():
         crm=crm,
         tpl=tpl,
         conv=FakeConv(),
-        members_index=None,
     )
 
     msg = _make_msg("Saldo?")
@@ -143,7 +142,6 @@ def test_pg_contract_status_core_member_not_linked():
         crm=crm,
         tpl=tpl,
         conv=FakeConv(),
-        members_index=None,
     )
 
     msg = _make_msg("status kontraktu?")
@@ -179,7 +177,6 @@ def test_pg_contract_status_core_happy_path():
         crm=crm,
         tpl=tpl,
         conv=FakeConv(),
-        members_index=None,
     )
 
 
@@ -211,7 +208,6 @@ def test_build_available_classes_response_empty_list():
         crm=crm,
         tpl=tpl,
         conv=FakeConv(),
-        members_index=None,
     )
 
     msg = _make_msg("jakie są zajęcia?")
@@ -252,7 +248,6 @@ def test_build_available_classes_response_with_items():
         crm=crm,
         tpl=tpl,
         conv=FakeConv(),
-        members_index=None,
     )
 
     msg = _make_msg("jakie są zajęcia?")
@@ -301,7 +296,6 @@ def test_build_available_classes_response_single_item_skips_list_and_asks_confir
         crm=crm,
         tpl=tpl,
         conv=conv,
-        members_index=None,
     )
 
     msg = _make_msg("czy mogę zarezerwować pilates?")

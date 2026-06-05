@@ -32,6 +32,7 @@ class MessagesRepo:
         channel: str = "whatsapp",
         channel_user_id: str | None = None,
         language_code: str | None = None,
+        tag: str | None = None,
     ):
         ts = int(time.time())
         # NOTE: after introducing PII encryption/pseudonymization we must NOT
@@ -83,6 +84,8 @@ class MessagesRepo:
             item["delivery_status"] = delivery_status
         if language_code:
             item["language_code"] = language_code
+        if tag:
+            item["tag"] = tag
 
         self.table.put_item(Item=item)
 

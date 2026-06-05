@@ -110,6 +110,7 @@ def _tenant_dashboard_body(*, tenant_id: str, namespace: str, region: str) -> Di
                 "metrics": [
                     m("TenantInboundError"),
                     m("TenantRoutedError"),
+                    m("TenantRoutedThrottled"),
                     m("TenantOutboundThrottled"),
                 ],
             },
@@ -126,11 +127,14 @@ def _tenant_dashboard_body(*, tenant_id: str, namespace: str, region: str) -> Di
                 "region": region,
                 "title": "Traffic",
                 "metrics": [
-                    m("TenantInboundAccepted"),
+                    m("TenantRoutedOk"),
                     m("TenantRoutedInbound"),
+                    m("TenantCampaignSendOk"),
+                    m("TenantInboundBlocked"),
+                    m("TenantInboundAccepted"),
+                    m("TenantOutboundDuplicate"),
                     m("TenantOutboundQueued"),
                     m("TenantOutboundSent"),
-                    m("TenantOutboundDuplicate"),
                 ],
             },
         },
@@ -163,8 +167,8 @@ def _tenant_dashboard_body(*, tenant_id: str, namespace: str, region: str) -> Di
                 "region": region,
                 "title": "Cost proxy (Lambda usage)",
                 "metrics": [
-                    # If you later add a real EstimatedCostUSD metric, it will show here.
-                    m("TenantEstimatedCostUSD", stat="Sum"),
+                    # If WE later add a real EstimatedCostEURO/USD metric, it will show here.
+                    m("TenantEstimatedCostEURO", stat="Sum"),
                     # Proxies: route traffic & latency to correlate with costs.
                     m("TenantRoutedInbound", stat="Sum"),
                     m("TenantRoutingLatencyMs", stat="Average"),
@@ -182,9 +186,9 @@ def lambda_handler(event: Dict[str, Any], context):
         _send_cfn_response(event, context=context, status="FAILED", reason="Missing DDB_TABLE_TENANTS")
         return
 
-    namespace = _env("METRICS_NAMESPACE", "BotmanAI")
+    namespace = _env("METRICS_NAMESPACE", "Dialo")
     prefix = _env("DASHBOARD_PREFIX", "tenant-")
-    region = _env("AWS_REGION", "us-east-1")
+    region = _env("AWS_REGION", "eu-central-1")
 
     cw = boto3.client("cloudwatch", region_name=region)
 

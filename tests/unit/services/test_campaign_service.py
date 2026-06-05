@@ -1,49 +1,152 @@
-import json
 import pytest
+
 from src.services.campaign_service import CampaignService
 
-from pathlib import Path
-import json
 
-def load_local_campaigns():
-    repo_root = Path(__file__).resolve().parents[3]  # tests/unit/services -> repo root
-    path = repo_root / "scripts" / "campaigns.local.json"
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
+class FakeTemplates:
+    def render(self, template, ctx):
+        return f"TEMPLATE:{template}:{ctx}"
 
 
-def test_build_message_from_template():
-    # Fake TemplateService – bez DDB
-    class FakeTemplates:
-        def render_named(self, tenant, template_name, lang, ctx):
-            return f"TEMPLATE:{template_name}:{lang}:{ctx}"
+class FakeConversations:
+    def __init__(self, conv=None):
+        self.conv = conv
 
-    # Fake ConversationsRepo – brak języka z rozmowy
-    class FakeConversations:
-        def get_conversation(self, tenant_id, channel, channel_user_id):
-            return None
+    def get_conversation(self, tenant_id, channel, channel_user_id):
+        return self.conv
 
-    # Fake TenantsRepo – ustalony język tenanta
-    class FakeTenants:
-        def get(self, tenant_id: str):
-            return {"tenant_id": tenant_id, "language_code": "pl"}
 
-    svc = CampaignService(
+class FakeTenants:
+    def __init__(self, tenant=None):
+        self.tenant = tenant or {}
+
+    def get(self, tenant_id):
+        return self.tenant
+
+
+def make_service(conv=None, tenant=None):
+    return CampaignService(
         template_service=FakeTemplates(),
-        tenants_repo=FakeTenants(),
-        conversations_repo=FakeConversations(),
+        conversations_repo=FakeConversations(conv),
+        tenants_repo=FakeTenants(tenant),
     )
 
-    campaigns = load_local_campaigns()
-    camp = next(c for c in campaigns if c["campaign_id"] == "camp-birthday-template")
+
+def test_build_message_renders_body_with_context():
+    svc = make_service(tenant={"language_code": "pl"})
 
     msg = svc.build_message(
-        campaign=camp,
+        campaign={
+            "campaign_id": "camp-birthday-template",
+            "body": "campaign_birthday",
+        },
         tenant_id="tenant-a",
         recipient_phone="whatsapp:+48111111111",
         context={"first_name": "Jan"},
     )
 
-    assert msg["body"].startswith("TEMPLATE:campaign_birthday")
-    # język z FakeTenants
+    assert msg["body"] == "TEMPLATE:campaign_birthday:{'first_name': 'Jan'}"
     assert msg["language_code"] == "pl"
+
+
+def test_build_message_uses_literal_body_without_context():
+    svc = make_service(tenant={"language_code": "pl"})
+
+    msg = svc.build_message(
+        campaign={
+            "campaign_id": "camp-plain",
+            "body": "Cześć! Mamy promocję.",
+        },
+        tenant_id="tenant-a",
+        recipient_phone="whatsapp:+48111111111",
+    )
+
+    assert msg["body"] == "Cześć! Mamy promocję."
+    assert msg["language_code"] == "pl"
+
+
+def test_build_message_language_from_campaign_has_priority():
+    svc = make_service(
+        conv={"language_code": "pl"},
+        tenant={"language_code": "de"},
+    )
+
+    msg = svc.build_message(
+        campaign={
+            "body": "Hello",
+            "language_code": "en",
+        },
+        tenant_id="tenant-a",
+        recipient_phone="whatsapp:+48111111111",
+    )
+
+    assert msg["language_code"] == "en"
+
+
+def test_build_message_language_from_conversation_when_no_campaign_lang():
+    svc = make_service(
+        conv={"language_code": "uk"},
+        tenant={"language_code": "pl"},
+    )
+
+    msg = svc.build_message(
+        campaign={"body": "Hej"},
+        tenant_id="tenant-a",
+        recipient_phone="whatsapp:+48111111111",
+    )
+
+    assert msg["language_code"] == "uk"
+
+
+def test_build_message_language_from_tenant_when_no_campaign_or_conversation_lang():
+    svc = make_service(
+        conv=None,
+        tenant={"language_code": "pl"},
+    )
+
+    msg = svc.build_message(
+        campaign={"body": "Hej"},
+        tenant_id="tenant-a",
+        recipient_phone="whatsapp:+48111111111",
+    )
+
+    assert msg["language_code"] == "pl"
+
+
+def test_select_recipients_accepts_strings_and_tokens_only():
+    svc = make_service()
+
+    result = svc.select_recipients({
+        "recipients": [
+            "token-1",
+            {"token": "token-2", "phone": "should-not-leak"},
+            {"phone": "whatsapp:+48123"},
+            {},
+            None,
+        ]
+    })
+
+    assert result == [
+        "token-1",
+        {"token": "token-2"},
+    ]
+
+
+def test_select_include_tags_filters_only_strings():
+    svc = make_service()
+
+    result = svc.select_include_tags({
+        "include_tags": ["vip", {"bad": "tag"}, None, "active"]
+    })
+
+    assert result == ["vip", "active"]
+
+
+def test_select_exclude_tags_filters_only_strings():
+    svc = make_service()
+
+    result = svc.select_exclude_tags({
+        "exclude_tags": ["blocked", {"bad": "tag"}, None, "inactive"]
+    })
+
+    assert result == ["blocked", "inactive"]

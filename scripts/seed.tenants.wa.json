@@ -5,7 +5,8 @@
         "Item": {
 			"tenant_id": { "S": "clubProactiveIT" },
 			"language_code": { "S": "pl" },
-			"twilio_to": { "S": "whatsapp:+48694017163" },
+			"twilio_to": { "S": "whatsapp:+48694017163" },			
+			"wa_phone_number_id": { "S": "965611866635232" },
 
 			"email": {
 			  "M": {
@@ -50,7 +51,7 @@
 			"whatsapp_cloud": {
 			  "M": {
 				"access_token_param": { "S": "/botman/prod/clubProactiveIT/wa_access_token" },
-				"app_secret_param": { "S": "/botman/prod/clubProactiveIT/wa_app_secret" }
+				"api_version": { "S": "v25.0" }
 			  }
 			}
 		}
@@ -62,6 +63,7 @@
 			"tenant_id": { "S": "default" },
 			"language_code": { "S": "pl" },
 			"twilio_to": { "S": "whatsapp:+1400000000" },
+			"wa_phone_number_id": { "S": "000000000000000" },
 
 			"email": {
 			  "M": {
@@ -106,7 +108,7 @@
 			"whatsapp_cloud": {
 			  "M": {
 				"access_token_param": { "S": "/botman/prod/clubProactiveIT/wa_access_token" },
-				"app_secret_param": { "S": "/botman/prod/clubProactiveIT/wa_app_secret" }
+				"api_version": { "S": "v25.0" }			  
 			  }
 			}
 		}

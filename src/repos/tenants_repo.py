@@ -12,6 +12,21 @@ class TenantsRepo:
     def get(self, tenant_id: str) -> dict | None:
         return self.table.get_item(Key={"tenant_id": tenant_id}).get("Item")
 
+    def list_all(self) -> list[dict]:
+        """Lists all tenants.
+
+        Used by scheduled jobs (e.g. campaign runner) when no explicit tenant_id
+        is provided. This is a scan by design (tenants table is expected to be
+        small in demo/starter deployments).
+        """
+        out: list[dict] = []
+        resp = self.table.scan()
+        out.extend(resp.get("Items") or [])
+        while "LastEvaluatedKey" in resp:
+            resp = self.table.scan(ExclusiveStartKey=resp["LastEvaluatedKey"])
+            out.extend(resp.get("Items") or [])
+        return out
+
     def find_by_twilio_to(self, to_number: str) -> dict | None:
         """
         Resolve tenant by Twilio destination number (To) using GSI TwilioToIndex.
@@ -52,7 +67,7 @@ class TenantsRepo:
         try:
             resp = self.table.query(
                 IndexName="WhatsAppPhoneNumberIdIndex",
-                KeyConditionExpression=Key("whatsapp_phone_number_id").eq(phone_number_id),
+                KeyConditionExpression=Key("wa_phone_number_id").eq(phone_number_id),
                 Limit=1,
             )
             items = resp.get("Items") or []

@@ -258,37 +258,7 @@ class KBService:
 
         # fallback na domyślne (na razie bez wariantów językowych)
         return DEFAULT_FAQ.get(topic)
-        
-    def answer_by_key(
-        self,
-        *,
-        tenant_id: str,
-        language_code: str,
-        faq_key: str,
-    ) -> str | None:
-        """
-        Deterministic FAQ answer from Pinecone by metadata faq_key.
-        No KB LLM.
-        """
-        try:
-            return self._vector.get_faq_by_key(
-                tenant_id=tenant_id,
-                language_code=language_code,
-                faq_key=faq_key,
-            )
-        except Exception as e:
-            logger.error(
-                {
-                    "component": "kb_service",
-                    "event": "answer_by_key_failed",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                    "faq_key": faq_key,
-                    "err": str(e),
-                }
-            )
-            return None
-
+ 
     def answer_ai(
         self,
         *,
@@ -343,7 +313,7 @@ class KBService:
 
                     # 2) dopiero potem próg score (fallback)
                     st_top1 = float(getattr(st[0], "score", 0.0) or 0.0)
-                    self._get_env_float("KB_SMALLTALK_MIN_SCORE", KB_SMALLTALK_MIN_SCORE)
+                    st_min = self._get_env_float("KB_SMALLTALK_MIN_SCORE", KB_SMALLTALK_MIN_SCORE)
                     if st_top1 >= st_min:
                         ans = self._vector._extract_answer_from_text(txt0)
                         if ans:

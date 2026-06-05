@@ -35,7 +35,6 @@ from ..services.language_service import LanguageService
 from ..repos.conversations_repo import ConversationsRepo
 from ..repos.tenants_repo import TenantsRepo
 from ..repos.messages_repo import MessagesRepo
-from ..repos.members_index_repo import MembersIndexRepo
 
 from ..common.constants import (
     #STATES
@@ -83,7 +82,6 @@ class RoutingService:
         conv: ConversationsRepo | None = None,
         tenants: TenantsRepo | None = None,
         messages: MessagesRepo | None = None,
-        members_index: MembersIndexRepo | None = None,
         _clients_factory: ClientsFactory | None = None,
         crm: CRMService | None = None,
         ticketing: TicketingService | None = None,
@@ -97,7 +95,6 @@ class RoutingService:
         self.conv = conv or ConversationsRepo()
         self.tenants = tenants or TenantsRepo()
         self.messages = messages or MessagesRepo()
-        self.members_index = members_index or MembersIndexRepo()
         self._clients_factory = _clients_factory or ClientsFactory()
         self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.ticketing = ticketing or TicketingService(clients_factory=self._clients_factory)
@@ -105,7 +102,6 @@ class RoutingService:
             crm=self.crm,
             tpl=self.tpl,
             conv=self.conv,
-            members_index=self.members_index,
         )
         self.language = language or LanguageService(conv=self.conv)
         # cache na słowa typu TAK / NIE z templatek
@@ -174,13 +170,6 @@ class RoutingService:
             sm_state = STATE_AWAITING_CLASS_SELECTION
 
         self._upsert_conv(msg, lang, intent, sm_state)
-
-    def _require_member_id(self, msg: Message, conv: dict, lang: str) -> str | None:
-        member_id = conv.get("crm_member_id")
-        if member_id:
-            return member_id
-        body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
-        return None, [self._reply(msg, lang, body)]
 
     def _conv_key(self, msg: Message) -> str:
         return conversation_key(
@@ -406,7 +395,7 @@ class RoutingService:
             if verify_resp:
                 return verify_resp
 
-            self._require_member_id(msg, conv, lang)
+            member_id = self._require_member_id(msg, conv, lang)
             return self.crm_flow.reserve_class_with_id_core(
                 msg,
                 lang,
@@ -414,30 +403,17 @@ class RoutingService:
                 member_id=member_id,
             )
 
-        # 6.3 Handover do człowieka
+        # 6.3a Handover do człowieka
        # if intent == INTENT_HANDOVER - tymczasowo pod ticketing
-
-        # 6.4 Ticket do systemu ticketowego
-        # handover, optin/optout - tymczasowo pod ticketing
-        if intent in (
-            INTENT_TICKET,
-            INTENT_HANDOVER,
-            INTENT_MARKETING_OPTOUT,
-            INTENT_MARKETING_OPTIN,
-        ):
-            if intent != INTENT_MARKETING_OPTIN:
-                verify_resp = self.crm_flow.ensure_crm_verification(
-                    msg,
-                    conv,
-                    lang,
-                    post_intent=INTENT_CRM_MEMBER_BALANCE,
-                    post_slots=slots,
-                )
-                if verify_resp:
-                    return verify_resp
-
-                self._require_member_id(msg, conv, lang)
-            self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
+       
+        #6.3b OPT-IN
+        if intent == INTENT_MARKETING_OPTIN:
+            self._upsert_conv(
+                msg,
+                lang,
+                INTENT_MARKETING_OPTIN,
+                STATE_AWAITING_TICKET_COMMENT,
+            )
 
             body = self.tpl.render_named(
                 msg.tenant_id,
@@ -446,7 +422,37 @@ class RoutingService:
                 {},
             )
             return [self._reply(msg, lang, body)]
-       
+            
+        # 6.4 Ticket do systemu ticketowego
+        # handover, optin/optout - tymczasowo pod ticketing
+        if intent in (
+            INTENT_TICKET,
+            INTENT_HANDOVER,
+            INTENT_MARKETING_OPTOUT,
+        ):
+            verify_resp = self.crm_flow.ensure_crm_verification(
+                msg,
+                conv,
+                lang,
+                post_intent=INTENT_CRM_MEMBER_BALANCE,
+                post_slots=slots,
+            )
+            if verify_resp:
+                return verify_resp
+
+            member_id = conv.get("crm_member_id")
+            if member_id:
+                self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "ticket_more_info",
+                    lang,
+                    {},
+                )
+                return [self._reply(msg, lang, body)]
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
+   
         # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
         if intent == INTENT_AVAILABLE_CLASSES:
             return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=False)
@@ -462,8 +468,11 @@ class RoutingService:
             )
             if verify_resp:
                 return verify_resp
-            self._require_member_id(msg, conv, lang)
-            return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
+            member_id = conv.get("crm_member_id")
+            if member_id:
+                return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
 
         # 6.7 Saldo członkowskie
         if intent == INTENT_CRM_MEMBER_BALANCE:
@@ -477,8 +486,11 @@ class RoutingService:
             if verify_resp:
                 return verify_resp
 
-            self._require_member_id(msg, conv, lang)
-            return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
+            member_id = conv.get("crm_member_id")
+            if member_id:
+                return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
         
         # 6.8 Prośba o weryfikację
         if intent == INTENT_VERIFICATION:
@@ -492,8 +504,10 @@ class RoutingService:
             if verify_resp:
                 return verify_resp
             member_id = conv.get("crm_member_id")
-            self._require_member_id(msg, conv, lang)
-            return self.crm_flow.verification_active(msg, lang, member_id)
+            if member_id:
+                return self.crm_flow.verification_active(msg, lang, member_id)
+            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
+            return [self._reply(msg, lang, body)]
      
         # 6.10 Domyślny clarify
         body = self.tpl.render_named(

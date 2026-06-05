@@ -731,12 +731,12 @@ aws --endpoint-url http://localhost:4566 dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Twoje aktualne saldo wynosi: *{balance}*.\n\nJeśli masz pytania o rozliczenia, mogę też podpowiedzieć, skąd wynika ta kwota."
+        "S": "Twoje aktualne saldo wynosi: *{current_balance}*.\n\nJeśli masz pytania o rozliczenia, mogę też podpowiedzieć, skąd wynika ta kwota."
     },
     "placeholders": {
         "L": [
             {
-                "S": "balance"
+                "S": "current_balance"
             }
         ]
     }

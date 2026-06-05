@@ -24,7 +24,16 @@ def whatsapp_wa_me_link(code: str) -> str:
     raw = settings.twilio_whatsapp_number  # np. "whatsapp:+48000000000"
     phone = raw.replace("whatsapp:", "")
     return f"https://wa.me/{phone}?text=KOD:{code}"
-    
+
+def normalize_whatsapp_channel_user_id(to: str | None) -> str | None:
+    """Converts Twilio 'to' into channel_user_id format used by ConversationsRepo."""
+    if not to:
+        return None
+    t = str(to).strip()
+    if not t:
+        return None
+    return t if t.startswith("whatsapp:") else f"whatsapp:{t}"
+            
 def build_reply_action(
     msg: Message,
     lang: str,

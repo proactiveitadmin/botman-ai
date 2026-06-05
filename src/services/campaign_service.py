@@ -9,8 +9,8 @@ from ..repos.conversations_repo import ConversationsRepo
 from ..common.config import settings
 
 # Domyślne okno wysyłki – zgodnie z dokumentacją (9:00–20:00)
-DEFAULT_SEND_FROM = os.getenv("CAMPAIGN_SEND_FROM", "09:00")
-DEFAULT_SEND_TO = os.getenv("CAMPAIGN_SEND_TO", "20:00")
+DEFAULT_SEND_FROM = os.getenv("CAMPAIGN_SEND_FROM", "08:00")
+DEFAULT_SEND_TO = os.getenv("CAMPAIGN_SEND_TO", "24:00")
 
 
 class CampaignService:
@@ -33,57 +33,27 @@ class CampaignService:
         """Zwraca listę odbiorców dla kampanii (bez jawnych telefonów w storage).
 
         Obsługiwane formaty danych w Campaigns (legacy + nowy):
-          1) Legacy: ["whatsapp:+48...", ...]
-          2) Legacy z tagami: [{"phone": "whatsapp:+48...", "tags": [...]}, ...]
-          3) Nowy (bez PII): [{"phone_hmac": "<hmac>", "phone_last4": "6789", "tags": [...]}, ...]
+          3) legacy: [{"token": "<token>", ...]
 
-        Ta funkcja **nie** rozwiązuje phone_hmac → raw phone. To robimy dopiero w runtime
-        (np. w campaign_runner) przez MembersIndex.
+        Ta funkcja **nie** rozwiązuje token → raw phone. To robimy dopiero w runtime
+        (np. w campaign_runner).
         """
         recipients = campaign.get("recipients") or []
-        include_tags = set(campaign.get("include_tags") or [])
-        exclude_tags = set(campaign.get("exclude_tags") or [])
-
         result: List[Any] = []
-
-        def tags_ok(rec_tags: set[str]) -> bool:
-            if include_tags and rec_tags.isdisjoint(include_tags):
-                return False
-            if exclude_tags and not rec_tags.isdisjoint(exclude_tags):
-                return False
-            return True
-
+        
         for r in recipients:
             if isinstance(r, str):
-                # legacy: raw phone
-                rec_tags = set()
-                if not tags_ok(rec_tags):
-                    continue
                 result.append(r)
                 continue
 
             if isinstance(r, dict):
-                rec_tags = set(r.get("tags") or [])
-                if not tags_ok(rec_tags):
-                    continue
-
-                if r.get("phone_hmac"):
-                    # new format (hashed)
+                if r.get("token"):
                     result.append(
                         {
-                            "phone_hmac": r.get("phone_hmac"),
-                            "phone_last4": r.get("phone_last4"),
-                            "tags": list(rec_tags) if rec_tags else [],
+                            "token": r.get("token"),
                         }
                     )
                     continue
-
-                phone = r.get("phone")
-                if phone:
-                    # legacy dict
-                    result.append(phone)
-                    continue
-
             # unknown / empty recipient entry -> skip
             continue
 
@@ -92,52 +62,55 @@ class CampaignService:
                 "campaign": "recipients",
                 "mode": "filtered",
                 "count": len(result),
-                "include_tags": list(include_tags),
-                "exclude_tags": list(exclude_tags),
+            }
+        )
+        return result
+    
+    def select_include_tags(self, campaign: Dict) -> List[Any]:
+        """Zwraca listę include tags.
+        """
+        tags = campaign.get("include_tags") or []
+        result: List[Any] = []
+        
+        for t in tags:
+            if isinstance(t, str):
+                result.append(t)
+                continue
+            # unknown / empty recipient entry -> skip
+            continue
+
+        logger.info(
+            {
+                "campaign": "tags",
+                "mode": "filtered",
+                "count": len(result),
+            }
+        )
+        return result
+        
+    def select_exclude_tags(self, campaign: Dict) -> List[Any]:
+        """Zwraca listę include tags.
+        """
+        tags = campaign.get("exclude_tags") or []
+        result: List[Any] = []
+        
+        for t in tags:
+            if isinstance(t, str):
+                result.append(t)
+                continue
+            # unknown / empty recipient entry -> skip
+            continue
+
+        logger.info(
+            {
+                "campaign": "tags",
+                "mode": "filtered",
+                "count": len(result),
             }
         )
         return result
 
-    @staticmethod
-    def _parse_hhmm(value: str) -> time:
-        """
-        Parsuje 'HH:MM' do obiektu time.
-        Jeżeli format jest niepoprawny – użyjemy bezpiecznego defaultu.
-        """
-        try:
-            hh, mm = value.split(":")
-            return time(hour=int(hh), minute=int(mm))
-        except Exception:
-            # Fallback: 9:00 lub 20:00 w razie błędu
-            if value == DEFAULT_SEND_FROM:
-                return time(9, 0)
-            if value == DEFAULT_SEND_TO:
-                return time(20, 0)
-            return time(9, 0)
-
-    def _resolve_window(self, campaign: Dict) -> tuple[time, time]:
-        """
-        Używamy wartości z kampanii, a jeśli ich nie ma – globalnych envów.
-        """
-        send_from_str = campaign.get("send_from") or DEFAULT_SEND_FROM
-        send_to_str = campaign.get("send_to") or DEFAULT_SEND_TO
-        return self._parse_hhmm(send_from_str), self._parse_hhmm(send_to_str)
-
-    def is_within_send_window(self, campaign: Dict) -> bool:
-        """
-        Sprawdza, czy aktualny czas (UTC) mieści się w oknie wysyłki.
-        Wspiera także okna „przez północ” (np. 22:00–06:00).
-        """
-        now = self._now_fn().time()
-        start, end = self._resolve_window(campaign)
-
-        # Zwykłe okno, np. 09:00–20:00
-        if start <= end:
-            return start <= now <= end
-
-        # Okno przez północ, np. 22:00–06:00
-        return now >= start or now <= end
-
+   
     # ---------- I18N DLA KAMPANII ----------
 
     def _resolve_language_for_recipient(
@@ -178,7 +151,7 @@ class CampaignService:
         Buduje finalną wiadomość kampanii dla konkretnego odbiorcy.
 
         Jeśli kampania ma:
-          - campaign["template_name"] -> użyj TemplateService (i18n, parametry),
+          - campaign["context"] -> użyj TemplateService (i18n, parametry),
           - tylko campaign["body"]    -> użyj literalnego body (już przetłumaczonego).
         """
         context = context or {}
@@ -189,13 +162,9 @@ class CampaignService:
             campaign_lang=campaign.get("language_code"),
         )
 
-        template_name = campaign.get("template_name")
-
-        if template_name:
-            body = self.tpl.render_named(
-                tenant_id,
-                template_name,
-                lang,
+        if context:
+            body = self.tpl.render(
+                campaign.get("body"),
                 context,
             )
         else:

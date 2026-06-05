@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 from typing import Optional
 from datetime import datetime
 from urllib.parse import quote
+from string import Template
 
 from ..adapters.perfectgym_client import PerfectGymClient
 from ..common.logging import logger
@@ -13,7 +15,6 @@ from ..common.constants import (
     ENUM_CRM_RETURN_OK,
     ENUM_CRM_RETURN_ALREADY_BOOKED,
     ENUM_CRM_RETURN_FAIL,
-    CRM_MARKETING_AGREEMENT_ID,
 )
 
 class CRMService:
@@ -90,7 +91,7 @@ class CRMService:
             if items:
                 return (items[0].get("email") or "").strip()
         except Exception:
-            self.logger.warning(
+            logger.warning(
                 {
                     "crm": "get_email_by_msg failed",
                     "tenant_id": tenant_id,
@@ -106,7 +107,7 @@ class CRMService:
             if items:
                 return str(items[0].get("id") or items[0].get("Id"))
         except Exception:
-            self.logger.warning(
+            logger.warning(
                 {
                     "crm": "get_member_id_by_msg failed",
                     "tenant_id": tenant_id,
@@ -150,6 +151,21 @@ class CRMService:
         self._crm_gate(tenant_id)
         client = self._client_for(tenant_id)
         getter = getattr(client, "get_member_type_by_phone", None)
+        if callable(getter):
+            return getter(phone=norm_phone)
+        # Inne CRM-y powinny dostarczyć analogiczną metodę w swoim kliencie.
+        return None
+        
+    def get_member_1st_name_by_phone(self, tenant_id: str, phone: str) -> Optional[str]:
+        """Zwraca imie użytkownika w CRM (dla PerfectGym: firstName).
+
+        Logika specyficzna dla danego CRM powinna być zaimplementowana po stronie klienta,
+        np. PerfectGymClient.get_member_type_by_phone().
+        """
+        norm_phone = self._normalize_phone(phone)
+        self._crm_gate(tenant_id)
+        client = self._client_for(tenant_id)
+        getter = getattr(client, "get_member_1st_name_by_phone", None)
         if callable(getter):
             return getter(phone=norm_phone)
         # Inne CRM-y powinny dostarczyć analogiczną metodę w swoim kliencie.
@@ -200,56 +216,71 @@ class CRMService:
         self._crm_gate(tenant_id)
         return self._client_for(tenant_id).get_member_balance(member_id=member_id)
 
-    def get_marketing_consent_for_member(self, tenant_id: str, *, member_id: int) -> bool:
+    def get_marketing_consent_for_member(
+        self, 
+        tenant_id: str, 
+        member_id: int
+    ) -> bool:
         """
         Sprawdza w PerfectGym czy member ma zgodę marketingową (agreed = true).
         memberAgreementId traktujemy jako stałą (1).
         """
         self._crm_gate(tenant_id)
-        pg = self._client_for(tenant_id)
-
-        odata_filter = (
-            f"memberId eq {int(member_id)} "
-            f"and memberAgreementId eq {CRM_MARKETING_AGREEMENT_ID} "
-            f"and agreed eq true"
+        return self._client_for(tenant_id).get_marketing_consent_for_member(
+            member_id=member_id,
         )
 
-        url = (
-            f"{pg.base_url}/MemberAgreementAnswers"
-            f"?$filter={quote(odata_filter, safe=' =$andtruefalse')}"
-        )
+    # ------------------------------------------------------------------ #
+    # Payments / product links
+    # ------------------------------------------------------------------ #
 
-        try:
-            resp = pg._request_with_retry(
-                "GET",
-                url,
-                headers=pg._headers(),
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json() or {}
-            return bool(data.get("value"))
-        except Exception as e:
-            self.logger.error(
-                {
-                    "crm": "pg_marketing_consent_check_failed",
-                    "tenant_id": tenant_id,
-                    "member_id": member_id,
-                    "error": str(e),
-                }
-            )
-            # fail-safe: jak nie wiemy, to NIE wysyłamy
-            return False
+    def get_product_payment_link(
+        self, 
+        tenant_id: str, 
+        member_id: int, 
+        product_id: str
+    ) -> str:
+        """Returns a payment link for a given product.
+
+        For demo we keep this CRM-agnostic:
+          - if the CRM client provides a method, we call it,
+          - otherwise we build the URL from a configurable template.
+
+        Configuration (priority):
+          1) env PAYMENT_LINK_TEMPLATE
+          2) env PAYMENT_LINK_TEMPLATE_PARAM (SSM parameter name)
+
+        Template supports variables: ${tenant_id}, ${member_id}, ${product_id}.
+        """
+        client = self._client_for(tenant_id)
+        getter = getattr(client, "get_product_payment_link", None)
+        if callable(getter):
+            try:
+                self._crm_gate(tenant_id)
+                return str(getter(member_id=int(member_id), product_id=str(product_id)) or "").strip()
+            except Exception as e:
+                logger.error(
+                    {
+                        "crm": "payment_link_client_failed",
+                        "tenant_id": tenant_id,
+                        "member_id": member_id,
+                        "product_id": product_id,
+                        "error": str(e),
+                    }
+                )
+                return ""
+
+        logger.warning({"crm": "pg client get_product_payment_link not defined"})
+        return ""
     
     #stub cofniecia zgody, TODO: zaimplementowac cofniecie zgody
     def revoke_marketing_consent_for_member(
         self,
         tenant_id: str,
-        *,
         member_id: int,
         reason: str | None = None,
     ):
-        self.logger.warning(
+        logger.warning(
             {
                 "crm": "pg_revoke_marketing_consent_not_implemented",
                 "tenant_id": tenant_id,
@@ -259,26 +290,6 @@ class CRMService:
         )
         raise NotImplementedError(
             "PerfectGym revoke consent endpoint not implemented yet"
-        ) 
-    
-    #stub dodania zgody, TODO: zaimplementowac cofniecie zgody
-    def grant_marketing_consent_for_member(
-        self,
-        tenant_id: str,
-        *,
-        member_id: int,
-        reason: str | None = None,
-    ):
-        self.logger.warning(
-            {
-                "crm": "pg_grant_marketing_consent_not_implemented",
-                "tenant_id": tenant_id,
-                "member_id": member_id,
-                "reason": reason,
-            }
-        )
-        raise NotImplementedError(
-            "PerfectGym grant consent endpoint not implemented yet"
         )  
         
     def reserve_class(
@@ -311,83 +322,3 @@ class CRMService:
             if mapped_error == "classes_already_booked" or crm_code == "ClassesAlreadyBooked":
                 return ENUM_CRM_RETURN_ALREADY_BOOKED
         return ENUM_CRM_RETURN_FAIL
-
-    # ------------------------------------------------------------------ #
-    # verify_member_challenge – prawdziwa logika
-    # ------------------------------------------------------------------ #
-
-
-    def verify_member_challenge(
-        self,
-        tenant_id: str,
-        phone: str,
-        challenge_type: str,
-        answer: str,
-    ) -> bool:
-        """
-        Sprawdza odpowiedź użytkownika na challenge na bazie danych PerfectGym.
-
-        challenge_type:
-        - "dob"   → sprawdź dzień i miesiąc urodzenia (DD-MM),
-        - "email" → sprawdź email case-insensitive.
-
-        Zwraca True/False.
-        """
-        answer = (answer or "").strip()
-        if not answer:
-            return False
-
-        # 1) pobierz membera z PG po numerze telefonu
-        try:
-            members_resp = self.get_member_by_phone(tenant_id, phone)
-        except Exception as e:
-            logger.error(
-                {
-                    "crm": "verify_member_challenge_members_index_error",
-                    "tenant_id": tenant_id,
-                    "phone": mask_phone(phone),
-                    "error": str(e),
-                }
-            )
-            return False
-
-        items = (members_resp or {}).get("value") or []
-        if not items:
-            return False
-
-        # zazwyczaj 1 member, jak będzie więcej – bierzemy pierwszego
-        member = items[0]
-
-        if challenge_type == "dob":
-            # PerfectGym zwraca zwykle birthDate w formacie ISO 'YYYY-MM-DD...'
-            dob_raw = member.get("birthDate") or member.get("birthdate")
-            if not dob_raw:
-                return False
-
-            try:
-                dob = datetime.fromisoformat(dob_raw[:10])
-            except Exception:
-                return False
-
-            # normalizacja odpowiedzi: obsługujemy "01-05", "1.5", "01/05/1990" itd.
-            norm = (
-                answer.replace(" ", "")
-                .replace(".", "-")
-                .replace("/", "-")
-            )
-            parts = norm.split("-")
-            try:
-                day = int(parts[0])
-                month = int(parts[1])
-            except (ValueError, IndexError):
-                return False
-
-            return day == dob.day and month == dob.month
-
-        if challenge_type == "email":
-            expected = (member.get("email") or "").strip().lower()
-            given = answer.strip().lower()
-            return bool(expected) and expected == given
-
-        # inne typy challenge na razie nieobsługiwane
-        return False

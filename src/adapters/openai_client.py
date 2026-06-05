@@ -98,6 +98,12 @@ class OpenAIClient:
         """
         if not self.enabled or not self.client:
             # tryb „bez AI” — bezpieczny fallback
+            logger.warning(
+                {
+                    "component": "openai_client",
+                    "event": "fallback, no AI",
+                }
+            )
             user_msg = next(
                 (m["content"] for m in reversed(messages) if m.get("role") == "user"),
                 "",

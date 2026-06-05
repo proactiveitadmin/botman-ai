@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Botman AI – Etap 1 (prod-ready)
+Description: Dialo – Etap 1 (prod-ready)
 
 Parameters:
   WhatsappVerifyToken:
@@ -29,16 +29,19 @@ Parameters:
     Default: ".json"
   PhoneHashPepperParam:
     Type: String
-    Default: /botman/prod/phone_hash_pepper
+    Default: /dialo/prod/phone_hash_pepper
   UserHashPepperParam:
     Type: String
-    Default: /botman/prod/user_hash_pepper
+    Default: /dialo/prod/user_hash_pepper
   OtpHashPepperParam:
     Type: String
-    Default: /botman/prod/otp_hash_pepper
+    Default: /dialo/prod/otp_hash_pepper
   TenantSecretsPrefix:
     Type: String
-    Default: /botman/prod/
+    Default: /dialo/prod/
+  PhoneEncKeyParam:
+    Type: String
+    Default: /dialo/prod/phone_enc_key
 
   SesFromEmail:
     Type: String
@@ -92,13 +95,13 @@ Globals:
         USER_HASH_PEPPER: !Ref UserHashPepperParam
         OTP_HASH_PEPPER: !Ref OtpHashPepperParam
         SES_FROM_EMAIL: !Ref SesFromEmail
+        PHONE_ENC_KEY: !Ref PhoneEncKeyParam
         
         DDB_TABLE_TENANTS: !Sub 'Tenants-${AWS::StackName}'
         DDB_TABLE_CONVERSATIONS: !Sub 'Conversations-${AWS::StackName}'
         DDB_TABLE_MESSAGES:      !Sub 'Messages-${AWS::StackName}'
         DDB_TABLE_TEMPLATES:     !Sub 'Templates-${AWS::StackName}'
         DDB_TABLE_CAMPAIGNS:     !Sub 'Campaigns-${AWS::StackName}'
-        DDB_INDEX_CAMPAIGNS_TENANT_NEXT_RUN: tenant_next_run_at
         DDB_TABLE_INTENTS_STATS: !Sub 'IntentsStats-${AWS::StackName}'
         DDB_TABLE_MEMBERS_INDEX: !Sub 'MembersIndex-${AWS::StackName}'
         DDB_TABLE_LEADS:         !Sub 'Leads-${AWS::StackName}'
@@ -122,7 +125,7 @@ Globals:
         SPAM_STATS_MAX_AGE_SECONDS: "86400"
         
         TENANT_CONFIG_CACHE_TTL: "300"
-        METRICS_NAMESPACE: "BotmanAI"
+        METRICS_NAMESPACE: "Dialo"
         DASHBOARD_PREFIX: !Sub 'tenant-${AWS::StackName}-'
         OPENAI_TIMEOUT_S: 12
         OPENAI_MAX_ATTEMPTS: 3
@@ -136,6 +139,12 @@ Resources:
     Properties:
       StageName: Prod
       EndpointConfiguration: REGIONAL
+      Auth:
+        Authorizers:
+          TenantCognitoAuthorizer:
+            UserPoolArn: !GetAtt TenantUserPool.Arn
+            Identity:
+              Header: Authorization
       MethodSettings:
         - ResourcePath: "/*"
           HttpMethod: "*"
@@ -147,14 +156,14 @@ Resources:
     Type: AWS::WAFv2::WebACL
     Condition: DoWaf
     Properties:
-      Name: !Sub 'botman-api-waf-${AWS::StackName}'
+      Name: !Sub 'dialo-api-waf-${AWS::StackName}'
       Scope: REGIONAL
       DefaultAction:
         Allow: {}
       VisibilityConfig:
         SampledRequestsEnabled: true
         CloudWatchMetricsEnabled: true
-        MetricName: !Sub 'botman-api-waf-${AWS::StackName}'
+        MetricName: !Sub 'dialo-api-waf-${AWS::StackName}'
       Rules:
         - Name: RateLimitPerIP
           Priority: 0
@@ -321,17 +330,17 @@ Resources:
           AttributeType: S
         - AttributeName: tenant_id
           AttributeType: S
-        - AttributeName: next_run_at
-          AttributeType: N
+        - AttributeName: next_run_time
+          AttributeType: S
       KeySchema:
         - AttributeName: pk
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: tenant_next_run_at
+        - IndexName: tenant_next_run_time
           KeySchema:
             - AttributeName: tenant_id
               KeyType: HASH
-            - AttributeName: next_run_at
+            - AttributeName: next_run_time
               KeyType: RANGE
           Projection:
             ProjectionType: INCLUDE
@@ -340,7 +349,7 @@ Resources:
               - campaign_id
               - active
               - tenant_id
-              - next_run_at
+              - next_run_time
               - send_from
               - send_to
               - recipients
@@ -349,6 +358,9 @@ Resources:
               - template_name
               - body
               - language_code
+              - placeholders
+              - payment_product_id
+              - context
 
   IntentsStats:
     Type: AWS::DynamoDB::Table
@@ -420,6 +432,55 @@ Resources:
           Projection:
             ProjectionType: ALL
           
+  # --- Cognito tenant frontend auth ---
+  TenantUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'tenant-users-${AWS::StackName}'
+      UsernameAttributes:
+        - email
+      AutoVerifiedAttributes:
+        - email
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: true
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 10
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+          TemporaryPasswordValidityDays: 7
+      Schema:
+        - Name: tenant_id
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+
+  TenantUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'tenant-panel-${AWS::StackName}'
+      UserPoolId: !Ref TenantUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_ADMIN_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      AccessTokenValidity: 8
+      IdTokenValidity: 8
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
   # --- S3 ---
   KnowledgeBaseBucket:
     Type: AWS::S3::Bucket
@@ -702,7 +763,7 @@ Resources:
       CodeUri: .
       Handler: src/lambdas/campaign_runner/handler.lambda_handler
       Policies:
-        - DynamoDBReadPolicy:
+        - DynamoDBCrudPolicy:
             TableName: !Ref Campaigns
         - SQSSendMessagePolicy:
             QueueName: !GetAtt OutboundQueue.QueueName 
@@ -713,6 +774,8 @@ Resources:
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
                 - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${OtpHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneEncKeyParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
             - Effect: Allow
               Action: kms:Decrypt
               Resource: "*"
@@ -725,12 +788,21 @@ Resources:
               Resource:
                 - !GetAtt Tenants.Arn
                 - !GetAtt Templates.Arn
+                - !GetAtt Conversations.Arn
             - Effect: Allow
               Action:
                 - dynamodb:Query
               Resource:
                 - !Sub '${Tenants.Arn}/index/*'
                 - !Sub '${Templates.Arn}/index/*'
+                - !Sub '${Conversations.Arn}/index/*'
+            - Effect: Allow
+              Action:
+                - dynamodb:Scan
+              Resource:
+                - !GetAtt Tenants.Arn
+                - !GetAtt Templates.Arn
+                - !GetAtt Conversations.Arn
       Environment:
         Variables:
           OutboundQueueUrl: !Ref OutboundQueue
@@ -855,6 +927,79 @@ Resources:
             Path: /web/widget
             Method: post
             
+  TenantFrontendFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'tenant-frontend-${AWS::StackName}'
+      CodeUri: .
+      Handler: src/lambdas/tenant_frontend/handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref Campaigns
+        - Statement:
+            - Effect: Allow
+              Action:
+                - cloudwatch:GetMetricData
+              Resource: "*"
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${PhoneEncKeyParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${UserHashPepperParam}'
+                - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TenantSecretsPrefix}*'
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+      Environment:
+        Variables:
+          COGNITO_REQUIRE_TENANT_CLAIM: "1"
+      Events:
+        MeApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /frontend/tenants/{tenant_id}/auth/me
+            Method: get
+            Auth:
+              Authorizer: TenantCognitoAuthorizer
+        MeOptionsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /frontend/tenants/{tenant_id}/auth/me
+            Method: options
+        MonthlyMetricsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /frontend/tenants/{tenant_id}/metrics/monthly
+            Method: get
+            Auth:
+              Authorizer: TenantCognitoAuthorizer
+        MonthlyMetricsOptionsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /frontend/tenants/{tenant_id}/metrics/monthly
+            Method: options
+        CampaignsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /frontend/tenants/{tenant_id}/campaigns
+            Method: post
+            Auth:
+              Authorizer: TenantCognitoAuthorizer
+        CampaignsOptionsApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref MyApi
+            Path: /frontend/tenants/{tenant_id}/campaigns
+            Method: options
+
   HealthFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -921,7 +1066,13 @@ Resources:
     Properties:
       LogGroupName: !Sub '/aws/lambda/inbound-webhook-${AWS::StackName}'
       RetentionInDays: 30
-
+      
+  WhatsAppWebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/whatsapp-webhook-${AWS::StackName}'
+      RetentionInDays: 30
+        
   MessageRouterLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -1008,3 +1159,9 @@ Outputs:
   KBReindexerFunctionArn:
     Description: KB reindexer lambda ARN
     Value: !GetAtt KBReindexerFunction.Arn
+  TenantUserPoolId:
+    Description: Cognito User Pool ID for tenant frontend users
+    Value: !Ref TenantUserPool
+  TenantUserPoolClientId:
+    Description: Cognito App Client ID for tenant frontend
+    Value: !Ref TenantUserPoolClient

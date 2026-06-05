@@ -690,12 +690,12 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "Your current balance is: *{balance}*.\n\nIf you have questions about charges, I can also help explain what this amount comes from."
+        "S": "Your current balance is: *{current_balance}*.\n\nIf you have questions about charges, I can also help explain what this amount comes from."
     },
     "placeholders": {
         "L": [
             {
-                "S": "balance"
+                "S": "current_balance"
             }
         ]
     }
