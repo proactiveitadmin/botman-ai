@@ -599,6 +599,26 @@
       ],
       "answer": "I am the club’s virtual assistant. I help you quickly find information about hours, memberships, classes, and rules.",
       "category": "smalltalk"
-    }
+    },
+	{
+	  "key": "reception",
+	  "questions": [
+		"How can I contact reception?",
+		"What are the available contact methods for reception?",
+		"Can I contact reception by phone or email?"
+	  ],
+	  "answer": "You can contact reception by phone at +48111111111 or by email at info@proactiveit.pl.",
+	  "category": "kb"
+	},
+	{
+	  "key": "app_download",
+	  "questions": [
+		"How can I download the app?",
+		"Where can I install the application?",
+		"How do I install the mobile app?"
+	  ],
+	  "answer": "You can download the application using the provided app link. Open the link on your mobile device, tap Install or Download, and once the installation is complete, open the app and follow the on-screen setup instructions. App link: https://example.com/app",
+	  "category": "kb"
+	}
   ]
 }

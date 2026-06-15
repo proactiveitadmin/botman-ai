@@ -264,49 +264,7 @@ def test_get_available_classes_error(monkeypatch):
     assert resp == {"value": []}
 
 
-def test_get_contracts_by_email_and_phone_success(monkeypatch):
-    
-    client = PerfectGymClient()
-    
-    monkeypatch.setattr(client, "base_url", "https://pg.example/api/v2.2/odata", raising=False)
-    monkeypatch.setattr(client, "client_id", "id", raising=False)
-    monkeypatch.setattr(client, "client_secret", "secret", raising=False)
-
-    captured = {}
-
-    def fake_request(method, url, headers=None, params=None, timeout=None, **kwargs):
-        assert method == "GET"
-        captured["url"] = url
-        captured["params"] = params
-        return DummyResp(payload={"value": [{"id": "c1"}]})
-
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
-
-    resp = client.get_contracts_by_email_and_phone("u@example.com", "+48123")
-    assert resp["value"][0]["id"] == "c1"
-    assert "Contracts" in captured["url"]
-    assert "Member/email" in captured["params"]["$filter"]
-
-
-def test_get_contracts_by_email_and_phone_error(monkeypatch):
-    
-    client = PerfectGymClient()
-    
-    monkeypatch.setattr(client, "base_url", "https://pg.example/api/v2.2/odata", raising=False)
-    monkeypatch.setattr(client, "client_id", "id", raising=False)
-    monkeypatch.setattr(client, "client_secret", "secret", raising=False)
-
-    def fake_request(method, url, headers=None, params=None, timeout=None, **kwargs):
-        assert method == "GET"
-        raise pg_mod.requests.RequestException("err")
-
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
-
-    resp = client.get_contracts_by_email_and_phone("u@example.com", "+48123")
-    assert resp == {"value": []}
-
-
-def test_get_contracts_by_member_id_success(monkeypatch):
+def test_get_contract_by_member_id_success(monkeypatch):
     
     client = PerfectGymClient()
     
@@ -316,15 +274,20 @@ def test_get_contracts_by_member_id_success(monkeypatch):
 
     def fake_request(method, url, headers=None, timeout=None, **kwargs):
         assert method == "GET"
-        return DummyResp(payload={"Contracts": [{"id": "c1"}]})
+        return DummyResp(payload={
+            "Contracts": [
+                {"id": "1", "Status": "Current"}
+            ]
+        })
+
 
     monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
-    resp = client.get_contracts_by_member_id("123")
-    assert resp["value"][0]["id"] == "c1"
+    resp = client.get_contract_by_member_id("123")
+    assert resp["id"] == "1"
 
 
-def test_get_contracts_by_member_id_error(monkeypatch):
+def test_get_contract_by_member_id_error(monkeypatch):
     
     client = PerfectGymClient()
     
@@ -338,8 +301,8 @@ def test_get_contracts_by_member_id_error(monkeypatch):
 
     monkeypatch.setattr(pg_mod.requests, "request", fake_request)
 
-    resp = client.get_contracts_by_member_id("123")
-    assert resp == {"value": []}
+    resp = client.get_contract_by_member_id("123")
+    assert resp == {}
 
 
 def test_get_member_balance_dev_mode(monkeypatch):
@@ -370,7 +333,7 @@ def test_get_member_balance_success(monkeypatch):
                 "memberBalance": {
                     "prepaidBalance": 10,
                     "prepaidBonusBalance": 5,
-                    "currentBalance": -3,
+                    "currentBalance": 3,
                     "negativeBalanceSince": "2024-11-01T00:00:00",
                 }
             }
@@ -381,7 +344,7 @@ def test_get_member_balance_success(monkeypatch):
     resp = client.get_member_balance(123)
     assert resp["prepaidBalance"] == 10
     assert resp["prepaidBonusBalance"] == 5
-    assert resp["currentBalance"] == -3
+    assert resp["currentBalance"] == 3
     assert resp["negativeBalanceSince"].startswith("2024-11-01")
 
 

@@ -7,7 +7,9 @@ import re
 from src.lambdas.outbound_sender import handler as outbound_handler
 from src.lambdas.message_router import handler as router_handler
 import src.services.template_service as template_service
-
+from tests.helpers.fakes_routing import (
+    FakeTemplateServicePG,
+)
 # --- TABLICA SZABLONÓW W STYLU DDB (klucz = (template_code, language_code)) ---
 DUMMY_TEMPLATES = {
     ("handover_to_staff", "pl"): {

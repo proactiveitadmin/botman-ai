@@ -28,7 +28,8 @@ class FakeCRM:
     def __init__(self):
         self.calls: Dict[str, Any] = {}
         self.member_balance_resp: Dict[str, Any] = {}
-        self.contracts_resp: Dict[str, Any] = {}
+        self.contract_resp: Dict[str, Any] = {}
+        self.paymentplan_resp: Dict[str, Any] = {}
         self.available_classes_resp: Dict[str, Any] = {}
         self.member_by_phone_resp: Dict[str, Any] = {}
 
@@ -36,9 +37,13 @@ class FakeCRM:
         self.calls["get_member_balance"] = {"tenant_id": tenant_id, "member_id": member_id}
         return self.member_balance_resp
 
-    def get_contracts_by_member_id(self, tenant_id: str, member_id: Any):
-        self.calls["get_contracts_by_member_id"] = {"tenant_id": tenant_id, "member_id": member_id}
-        return self.contracts_resp
+    def get_paymentplan_by_member_id(self, tenant_id: str, member_id: Any):
+        self.calls["get_contract_by_member_id"] = {"tenant_id": tenant_id, "member_id": member_id}
+        return self.paymentplan_resp
+
+    def get_contract_by_member_id(self, tenant_id: str, member_id: Any):
+        self.calls["get_contract_by_member_id"] = {"tenant_id": tenant_id, "member_id": member_id}
+        return self.contract_resp
 
     def get_available_classes(
         self,
@@ -157,15 +162,15 @@ def test_pg_contract_status_core_happy_path():
     crm = FakeCRM()
     conv = FakeConv()
 
-    crm.contracts_resp = {
-        "value": [
-            {
-                "status": "Current",
-                "startDate": "2024-01-01T00:00:00",
-                "endDate": "2024-12-31T00:00:00",
-                "paymentPlan": {"name": "Monthly"},
-            }
-        ]
+    crm.contract_resp = {
+        "status": "Current",
+        "startDate": "2024-01-01T00:00:00",
+        "endDate": "2024-12-31T00:00:00",
+    }
+    
+    crm.paymentplan_resp = {
+        "isActive": True,
+        "name": "Monthly"
     }
     crm.member_balance_resp = {
         "currentBalance": -10,
@@ -187,7 +192,7 @@ def test_pg_contract_status_core_happy_path():
     assert a.type == "reply"
 
     last_call = tpl.calls[-1]
-    assert last_call["name"] == "crm_contract_details"
+    assert last_call["name"] == "crm_contract_negative_balance"
     ctx = last_call["context"]
     assert ctx["plan_name"] == "Monthly"
     assert ctx["status"] == "Current"

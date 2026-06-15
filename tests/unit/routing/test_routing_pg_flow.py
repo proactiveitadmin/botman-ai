@@ -43,6 +43,7 @@ def test_crm_available_classes_sets_state_and_pending(mock_ai, monkeypatch):
     - ustawia state_machine_status=awaiting_class_selection.
     """
     router, conv = _build_router(monkeypatch)
+    monkeypatch.setattr(router.crm_flow,"is_crm_member",lambda tenant_id, phone: True,)
 
     msg = Message(
         tenant_id="tenantA",
@@ -158,6 +159,7 @@ def test_pending_reservation_confirmation_yes_triggers_crm_and_clears_pending(mo
     conv.pending[pk] = {
         "pk": pk,
         "sk": "pending",
+        "kind": "reserve_class",
         "class_id": "CLASS-1",
         "member_id": "111",
         "idempotency_key": "idem-123",
@@ -206,6 +208,7 @@ def test_pending_reservation_confirmation_yes_when_already_booked_returns_dedica
     conv.pending[pk] = {
         "pk": pk,
         "sk": "pending",
+        "kind": "reserve_class",
         "class_id": "CLASS-1",
         "member_id": "111",
         "idempotency_key": "idem-123",

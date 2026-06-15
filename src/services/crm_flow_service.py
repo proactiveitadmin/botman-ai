@@ -54,6 +54,7 @@ from ..services.template_service import TemplateService
 from ..adapters.email_client import EmailClient
 from ..common.security import otp_hash
 from ..repos.conversations_repo import ConversationsRepo
+from ..repos.tenants_repo import TenantsRepo
 
 
 
@@ -74,11 +75,13 @@ class CRMFlowService:
         _clients_factory: ClientsFactory | None = None,
         tpl: TemplateService | None = None,
         conv: ConversationsRepo | None = None,
+        tenants: TenantsRepo | None = None,
     ) -> None:
         self._clients_factory = ClientsFactory()
         self.crm = crm or CRMService(clients_factory=self._clients_factory)
         self.tpl = tpl or TemplateService()
         self.conv = conv or ConversationsRepo()
+        self.tenants = tenants or TenantsRepo()
 
         # cache słów typu TAK/NIE z templatek
         self._words_cache: dict[tuple[str, str, str], set[str]] = {}
@@ -155,6 +158,7 @@ class CRMFlowService:
         item = {
             "pk": self._pending_key(msg.from_phone),
             "sk": "pending",
+            "kind": INTENT_RESERVE_CLASS,
             "class_id": class_id,
             "member_id": member_id,
             "idempotency_key": idem,
@@ -218,43 +222,64 @@ class CRMFlowService:
         self._words_cache[key] = words
         return words
 
-    def get_contract_status_context(self, msg: Message, member_id: str,  lang: str) -> str:
-    
-        contracts_resp = self.crm.get_contracts_by_member_id(
+    def _get_payment_url(
+        self,
+        tenant_id: str,                
+        member_id: str,
+        club_id: str,
+        lang: str,
+    ) -> str:
+        
+        tenant = self.tenants.get(tenant_id) or {}
+        return_url =  tenant.get("return_url") or None
+        
+        balance = self.crm.get_debt_payment_link(
+            tenant_id = tenant_id,
+            member_id = member_id,
+            club_id = club_id,
+            return_url = return_url,
+        )
+        status_ok = balance.get("ok") 
+        url = balance.get("url") or "err_no_url"
+        if status_ok is True:
+            return self.tpl.render_named(
+                tenant_id,
+                "payment_link_generated",
+                lang,
+                {
+                    "url": url,
+                },
+            )
+        else:
+            return self.tpl.render_named(
+                tenant_id,
+                "payment_link_generation_failed",
+                lang,
+                {},
+            )
+            
+    def get_contract_status_context(self, msg: Message, member_id: str,  lang: str) -> dict[str, Any]:
+        contract = self.crm.get_contract_by_member_id(
             tenant_id=msg.tenant_id,
             member_id=member_id,
         )
         
-        contracts = contracts_resp.get("value", []) or []
+        status = contract.get("status") or "Unknown"
+        start_date = (contract.get("startDate") or "")[DATE_SLICE_START:DATE_SLICE_END]
+        end_date = (contract.get("endDate") or "")[DATE_SLICE_START:DATE_SLICE_END]
 
-        if not contracts:
-            email = self.crm.get_email_by_msg(msg.tenant_id, msg)
-            return self.tpl.render_named(
-                msg.tenant_id,
-                "crm_contract_not_found",
-                lang,
-                {
-                    "email": email,
-                    "phone": msg.from_phone,
-                },
-            )
-            
-        current = next(
-            (c for c in contracts if c.get("status") == "Current"),
-            contracts[0],
+        payment_plan = self.crm.get_paymentplan_by_member_id(
+            tenant_id=msg.tenant_id,
+            member_id=member_id,
         )
-
-        status = current.get("status") or "Unknown"
-        start_date = (current.get("startDate") or "")[DATE_SLICE_START:DATE_SLICE_END]
-        end_date_raw = current.get("endDate")
-        end_date = (end_date_raw or "")[DATE_SLICE_START:DATE_SLICE_END] if end_date_raw else ""
-
-        payment_plan = current.get("paymentPlan") or {}
+        
         plan_name = payment_plan.get("name") or ""
+        
         balance_resp = self.crm.get_member_balance(
             tenant_id=msg.tenant_id,
             member_id=int(member_id) if str(member_id).isdigit() else member_id,
         )
+        club_id = balance_resp.get("club_id")
         current_balance = balance_resp.get("currentBalance")
         negative_raw = balance_resp.get("negativeBalanceSince")
         negative_since = negative_raw[DATE_SLICE_START:DATE_SLICE_END] if negative_raw else ""
@@ -262,19 +287,26 @@ class CRMFlowService:
 
         context = {
             "plan_name": plan_name,
+            "club_id": club_id,
             "status": status,
             "start_date": start_date,
             "end_date": end_date or "",
             "current_balance": current_balance,
             "negative_balance_since": negative_since
         }
-
-        return self.tpl.render_named(
-            msg.tenant_id,
-            "crm_contract_details",
-            lang,
-            context,
+        logger.info(
+            {
+                "plan_name": plan_name,
+                "club_id": club_id,
+                "status": status,
+                "start_date": start_date,
+                "end_date": end_date,
+                "current_balance": current_balance,
+                "negative_balance_since": negative_since,
+            }
         )
+        return context
+        
         
     def _render_first(
         self,
@@ -783,18 +815,53 @@ class CRMFlowService:
                 {},
             )
             return [self._reply(msg, lang, body)]
+            
         balance_resp = self.crm.get_member_balance(
             tenant_id=msg.tenant_id,
             member_id=member_id,
         )
+        club_id = balance_resp.get("club_id", 0)
         current_balance = balance_resp.get("currentBalance", 0)
+        
+        if current_balance is not None and float(current_balance) < 0:         
+            idem = new_id("idem-")
 
-        body = self.tpl.render_named(
-            msg.tenant_id,
-            INTENT_CRM_MEMBER_BALANCE,
-            lang,
-            {"current_balance": current_balance},
-        )
+            # 2) Zapis pending do DDB
+            item = {
+                "pk": self._pending_key(msg.from_phone),
+                "sk": "pending",
+                "kind": INTENT_CRM_MEMBER_BALANCE,  # INTENT_CRM_MEMBER_BALANCE
+                "created_at": int(time.time()),
+                "member_id": member_id,
+                "club_id": club_id,
+            }
+
+            self.conv.put(item)
+
+            # 3) Ustaw stan na oczekiwanie potwierdzenia
+            self.conv.upsert_conversation(
+                tenant_id=msg.tenant_id,
+                channel=msg.channel or DEFAULT_CHANNEL,
+                channel_user_id=msg.channel_user_id or msg.from_phone,
+                last_intent=INTENT_CRM_MEMBER_BALANCE,
+                state_machine_status=STATE_AWAITING_CONFIRMATION,
+                language_code=lang,
+            )
+
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_member_balance_negative",
+                lang,
+                {"current_balance": current_balance},
+            )
+        else:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_member_balance",
+                lang,
+                {"current_balance": current_balance},
+            )
+        
         return [self._reply(msg, lang, body)]
 
     def crm_contract_status_core(
@@ -814,8 +881,48 @@ class CRMFlowService:
             )
             return [self._reply(msg, lang, body)]
 
-        body = self.get_contract_status_context(msg, member_id,  lang)
+        context = self.get_contract_status_context(msg, member_id,  lang)
         
+        current_balance = context.get("current_balance")
+        club_id =  context.get("club_id")
+        if current_balance is not None and float(current_balance) < 0:         
+            idem = new_id("idem-")
+
+            # 2) Zapis pending do DDB
+            item = {
+                "pk": self._pending_key(msg.from_phone),
+                "sk": "pending",
+                "kind": INTENT_CONTRACT_STATUS,
+                "created_at": int(time.time()),
+                "member_id": member_id,
+                "club_id": club_id,
+            }
+
+            self.conv.put(item)
+
+            # 3) Ustaw stan na oczekiwanie potwierdzenia
+            self.conv.upsert_conversation(
+                tenant_id=msg.tenant_id,
+                channel=msg.channel or DEFAULT_CHANNEL,
+                channel_user_id=msg.channel_user_id or msg.from_phone,
+                last_intent=INTENT_CONTRACT_STATUS,
+                state_machine_status=STATE_AWAITING_CONFIRMATION,
+                language_code=lang,
+            )
+
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_contract_negative_balance",
+                lang,
+                context,
+            )
+        else:
+            body = self.tpl.render_named(
+                msg.tenant_id,
+                "crm_contract_details",
+                lang,
+                context,
+            )
         return [self._reply(msg, lang, body)]
 
     def is_crm_member(self, tenant_id: str, phone: str) -> bool:
@@ -824,13 +931,13 @@ class CRMFlowService:
         
     def set_pending_marketing_consent_change(self, msg: Message, kind: str, member_id: str):
         self.conv.put(
-            self._pending_key(msg.from_phone),
-            "pending",
             {
+                "pk": self._pending_key(msg.from_phone),
+                "sk": "pending",
                 "kind": kind,  # INTENT_MARKETING_OPTOUT | INTENT_MARKETING_OPTIN
                 "created_at": int(time.time()),
                 "member_id": member_id,
-            },
+            }
         )
 
 
@@ -1101,13 +1208,17 @@ class CRMFlowService:
                 lang,
                 {"classes": "\n".join(lines)},
             )
-            extra = self.tpl.render_named(
-                msg.tenant_id,
-                "crm_available_classes_select_by_number",
-                lang,
-                {},
-            )
-            full_body = f"{body}\n\n{extra}"
+            try:
+                extra = self.tpl.render_named(
+                    msg.tenant_id,
+                    "crm_available_classes_select_by_number",
+                    lang,
+                    {},
+                )
+            except Exception:
+                extra = ""
+            
+            full_body = f"{body}\n\n{extra}" if extra else body
 
             return [self._reply(msg, lang, full_body)]
 
@@ -1121,9 +1232,8 @@ class CRMFlowService:
     ) -> List[Action]:
 
         """
-        Sprawdza, czy istnieje pending rezerwacja i obsługuje odpowiedź TAK/NIE.
+        Sprawdza, czy istnieje pending rezerwacja, marketing opt-in/opt-out, oplata i obsługuje odpowiedź TAK/NIE.
         Zasada: tylko TAK -> wykonaj; wszystko inne -> anuluj (brak zgody)
-        (Rozszerzone: obsługuje też pending marketing opt-in/opt-out)
         """
         text_raw = (msg.body or "").strip()
         text_lower = text_raw.lower()
@@ -1147,27 +1257,29 @@ class CRMFlowService:
         if pending_kind in (INTENT_MARKETING_OPTOUT, INTENT_MARKETING_OPTIN):
         
             if text_lower in confirm_words:
-                # Pobierz conv (potrzebne do ensure_crm_verification oraz crm_member_id)
-                channel, channel_user_id = self._channel_ctx(msg)
-                conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
+                
+                # Wymuszenie weryfikacji konta (email code) - tylko opt-out 
+                if pending_kind == INTENT_MARKETING_OPTOUT:
+                    # Pobierz conv (potrzebne do ensure_crm_verification oraz crm_member_id)
+                    channel, channel_user_id = self._channel_ctx(msg)
+                    conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
 
-                # Wymuszenie weryfikacji konta (email code) – reuse istniejącego flow
-                verify_resp = self.ensure_crm_verification(
-                    msg,
-                    conv,
-                    lang,
-                    post_intent=pending_kind,
-                    post_slots={},
-                )
-                if verify_resp:
-                    return verify_resp
+                    verify_resp = self.ensure_crm_verification(
+                        msg,
+                        conv,
+                        lang,
+                        post_intent=pending_kind,
+                        post_slots={},
+                    )
+                    if verify_resp:
+                        return verify_resp
 
-                member_id = conv.get("crm_member_id") or pending.get("member_id")
-                if not member_id:
-                    # fail-safe: czyścimy pending i zwracamy błąd
-                    self.conv.delete(self._pending_key(msg.from_phone), "pending")
-                    body = self.tpl.render_named(msg.tenant_id, "system_marketing_change_failed", lang, {})
-                    return [self._reply(msg, lang, body)]
+                    member_id = conv.get("crm_member_id") or pending.get("member_id")
+                    if not member_id:
+                        # fail-safe: czyścimy pending i zwracamy błąd
+                        self.conv.delete(self._pending_key(msg.from_phone), "pending")
+                        body = self.tpl.render_named(msg.tenant_id, "system_marketing_change_failed", lang, {})
+                        return [self._reply(msg, lang, body)]
 
                 try:
                     if pending_kind == INTENT_MARKETING_OPTOUT:
@@ -1178,9 +1290,8 @@ class CRMFlowService:
                         )
                         tpl_name = "system_marketing_optout_done"
                     else:
-                        self.crm.grant_marketing_consent_for_member(
+                        self.crm.grant_marketing_consent(
                             tenant_id=msg.tenant_id,
-                            member_id=member_id,
                             reason="text_command_confirmed",
                         )
                         tpl_name = "system_marketing_optin_done"
@@ -1194,7 +1305,7 @@ class CRMFlowService:
                         {
                             "component": "crm_flow_Service",
                             "tenant_id": msg.tenant_id,
-                            "warn": "revoke_marketing_consent_for_member not implemented",
+                            "warn": "grant/revoke_marketing_consent_for_member not implemented",
                         }
                     )
                     self.conv.delete(self._pending_key(msg.from_phone), "pending")
@@ -1205,8 +1316,8 @@ class CRMFlowService:
                     logger.warning(
                         {
                             "component": "crm_flow_Service",
-                            "tenant_id": tenant_id,
-                            "warn": "revoke_marketing_consent_for_member failed",
+                            "tenant_id": msg.tenant_id,
+                            "warn": "grant/revoke_marketing_consent_for_member failed",
                         }
                     )
                     self.conv.delete(self._pending_key(msg.from_phone), "pending")
@@ -1218,102 +1329,122 @@ class CRMFlowService:
             body = self.tpl.render_named(msg.tenant_id, "system_confirm_cancelled", lang, {})
             return [self._reply(msg, lang, body)]
 
-        if text_lower in confirm_words:
-            class_id = pending.get("class_id")
-            member_id = pending.get("member_id")
-            idem = pending.get("idempotency_key")
-            class_name = pending.get("class_name") or class_id
-            class_date = pending.get("class_date")
-            class_time = pending.get("class_time")
+        if pending_kind in (INTENT_CONTRACT_STATUS, INTENT_CRM_MEMBER_BALANCE):
+            if text_lower in confirm_words:            
+                member_id = pending.get("member_id")
+                club_id = pending.get("club_id")
 
-            # Fallback: jeśli nadal nie mamy sensownych metadanych, spróbuj dociągnąć z CRM
-            if (not class_date or not class_time) or (class_name == class_id):
-                try:
-                    details = self.crm.get_class_by_id(
-                        tenant_id=msg.tenant_id,
-                        class_id=class_id,
-                    ) or {}
-                except Exception:
-                    details = {}
-                    logger.warning(
+                self.conv.delete(self._pending_key(msg.from_phone), "pending")
+
+                body = self._get_payment_url(
+                    tenant_id=msg.tenant_id,                
+                    member_id=member_id,
+                    club_id=club_id,
+                    lang=lang
+                )
+                return [self._reply(msg, lang, body)]
+            self.conv.delete(self._pending_key(msg.from_phone), "pending")       
+            body = self.tpl.render_named(msg.tenant_id, "system_confirm_cancelled", lang, {})
+            return [self._reply(msg, lang, body)]
+        
+        if pending_kind == INTENT_RESERVE_CLASS:       
+            if text_lower in confirm_words:
+                class_id = pending.get("class_id")
+                member_id = pending.get("member_id")
+                idem = pending.get("idempotency_key")
+                class_name = pending.get("class_name") or class_id
+                class_date = pending.get("class_date")
+                class_time = pending.get("class_time")
+
+                # Fallback: jeśli nadal nie mamy sensownych metadanych, spróbuj dociągnąć z CRM
+                if (not class_date or not class_time) or (class_name == class_id):
+                    try:
+                        details = self.crm.get_class_by_id(
+                            tenant_id=msg.tenant_id,
+                            class_id=class_id,
+                        ) or {}
+                    except Exception:
+                        details = {}
+                        logger.warning(
+                            {
+                                "component": "crm_flow_Service",
+                                "tenant_id": msg.tenant_id,
+                                "warn": "get_class_by_id failed",
+                            }
+                        )
+
+                    if details:
+                        start = str(
+                            details.get("startDate") or details.get("startdate") or ""
+                        )
+                        if (not class_date) and len(start) >= DATE_SLICE_END:
+                            class_date = start[DATE_SLICE_START:DATE_SLICE_END]
+                        if (not class_time) and len(start) >= TIME_SLICE_END:
+                            class_time = start[TIME_SLICE_START:TIME_SLICE_END]
+
+                        if class_name == class_id:
+                            ct_raw = details.get("classType") or {}
+                            if isinstance(ct_raw, dict):
+                                ct_name = ct_raw.get("name")
+                                if ct_name:
+                                    class_name = ct_name
+
+                res = self.crm.reserve_class(
+                    tenant_id=msg.tenant_id,
+                    member_id=member_id,
+                    class_id=class_id,
+                    idempotency_key=idem,
+                    comments="booked on whatsapp",
+                )
+
+
+                self.conv.delete(self._pending_key(msg.from_phone), "pending")
+
+                if res == ENUM_CRM_RETURN_OK:
+                    body = self.tpl.render_named(
+                        msg.tenant_id,
+                        "reserve_class_confirmed",
+                        lang,
                         {
-                            "component": "crm_flow_Service",
-                            "tenant_id": msg.tenant_id,
-                            "warn": "get_class_by_id failed",
-                        }
+                            "class_id": class_id,
+                            "class_name": class_name,
+                            "class_date": class_date,
+                            "class_time": class_time,
+                        },
                     )
-
-                if details:
-                    start = str(
-                        details.get("startDate") or details.get("startdate") or ""
+                    return [self._reply(msg, lang, body)]
+                    
+                if res == ENUM_CRM_RETURN_ALREADY_BOOKED:
+                    body = self.tpl.render_named(
+                        msg.tenant_id,
+                        "reserve_class_already_booked",
+                        lang,
+                        {
+                            "class_id": class_id,
+                            "class_name": class_name,
+                            "class_date": class_date,
+                            "class_time": class_time,
+                        },
                     )
-                    if (not class_date) and len(start) >= DATE_SLICE_END:
-                        class_date = start[DATE_SLICE_START:DATE_SLICE_END]
-                    if (not class_time) and len(start) >= TIME_SLICE_END:
-                        class_time = start[TIME_SLICE_START:TIME_SLICE_END]
+                    return [self._reply(msg, lang, body)]
 
-                    if class_name == class_id:
-                        ct_raw = details.get("classType") or {}
-                        if isinstance(ct_raw, dict):
-                            ct_name = ct_raw.get("name")
-                            if ct_name:
-                                class_name = ct_name
-
-            res = self.crm.reserve_class(
-                tenant_id=msg.tenant_id,
-                member_id=member_id,
-                class_id=class_id,
-                idempotency_key=idem,
-                comments="booked on whatsapp",
-            )
-
+                body = self.tpl.render_named(
+                    msg.tenant_id,
+                    "reserve_class_failed",
+                    lang,
+                    {},
+                )
+                return [self._reply(msg, lang, body)]
 
             self.conv.delete(self._pending_key(msg.from_phone), "pending")
-
-            if res == ENUM_CRM_RETURN_OK:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "reserve_class_confirmed",
-                    lang,
-                    {
-                        "class_id": class_id,
-                        "class_name": class_name,
-                        "class_date": class_date,
-                        "class_time": class_time,
-                    },
-                )
-                return [self._reply(msg, lang, body)]
-                
-            if res == ENUM_CRM_RETURN_ALREADY_BOOKED:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "reserve_class_already_booked",
-                    lang,
-                    {
-                        "class_id": class_id,
-                        "class_name": class_name,
-                        "class_date": class_date,
-                        "class_time": class_time,
-                    },
-                )
-                return [self._reply(msg, lang, body)]
-
             body = self.tpl.render_named(
                 msg.tenant_id,
-                "reserve_class_failed",
+                "reserve_class_declined",
                 lang,
                 {},
             )
             return [self._reply(msg, lang, body)]
-
-        self.conv.delete(self._pending_key(msg.from_phone), "pending")
-        body = self.tpl.render_named(
-            msg.tenant_id,
-            "reserve_class_declined",
-            lang,
-            {},
-        )
-        return [self._reply(msg, lang, body)]
+        return []
 
     #def handle_whatsapp_verification_code_linking(
     #no www verification, only faq!
