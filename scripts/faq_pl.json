@@ -599,6 +599,26 @@
       ],
       "answer": "Jestem wirtualnym asystentem klubu. Pomagam szybko znaleźć informacje, np. o godzinach, karnetach, zajęciach i zasadach.",
       "category": "smalltalk"
-    }
+    },
+	{
+	  "key": "reception",
+	  "questions": [
+		"Jak mogę skontaktować się z recepcją?",
+		"Jakie są dostępne sposoby kontaktu z recepcją?",
+		"Czy mogę skontaktować się z recepcją telefonicznie lub mailowo?"
+	  ],
+	  "answer": "Z recepcją można skontaktować się telefonicznie pod numerem +48111111111 lub mailowo pod adresem info@proactiveit.pl.",
+	  "category": "kb"
+	},
+	{
+	  "key": "app_download",
+	  "questions": [
+		"Jak pobrać aplikację?",
+		"Gdzie mogę zainstalować aplikację?",
+		"Jak zainstalować aplikację mobilną?"
+	  ],
+	  "answer": "Aby pobrać aplikację, otwórz podany link na swoim urządzeniu mobilnym. Następnie wybierz opcję Zainstaluj lub Pobierz. Po zakończeniu instalacji uruchom aplikację i postępuj zgodnie z instrukcjami wyświetlanymi na ekranie. Link do aplikacji: https://example.com/app",
+	  "category": "kb"
+	}
   ]
 }

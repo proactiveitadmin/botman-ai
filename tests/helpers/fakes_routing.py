@@ -130,8 +130,6 @@ class FakeCRM:
     def get_member_balance(self, tenant_id: str, member_id: int):
         return {"balance": 123.45}
 
-    def get_contracts_by_email_and_phone(self, tenant_id: str, email: str, phone_number: str):
-        return {"value": []}
 
     def verify_member_challenge(self, tenant_id: str, phone: str, challenge_type: str, answer: str) -> bool:
         self.verify_calls.append(
@@ -154,6 +152,8 @@ class FakeCRM:
     def get_member_id_by_msg(self, tenant_id: str, msg: str) -> str | None:
         return "123"
         
+    def get_contract_by_member_id(self, member_id: str) -> dict:
+        return {[]}
 
 
 class FakeTemplateServicePG:
@@ -232,3 +232,18 @@ class FakeTemplateBasic:
         if template_name == "clarify_generic":
             return "Czy możesz doprecyzować, w czym pomóc?"
         return f"{template_name}|{ctx}"
+
+
+class FakeTicketing:
+    def __init__(self):
+        self.calls = []
+
+    def create_data_and_ticket(self, msg,  *args, **kwargs):
+        self.calls.append(
+            {
+                "tenant_id": getattr(msg, "tenant_id", None),
+                "body": getattr(msg, "body", None),
+            }
+        )
+        # RoutingService oczekuje dict-a z kluczem 'ticket' lub 'key'
+        return {"ticket": "ABC-123"}

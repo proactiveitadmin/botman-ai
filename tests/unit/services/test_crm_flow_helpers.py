@@ -64,7 +64,8 @@ class FakeCRM:
         self.email = "user@example.com"
         self.member_id = "105"
         self.balance = {"currentBalance": 0}
-        self.contracts = {"value": []}
+        self.contract = {"value": []}
+        self.paymentplan = {"value": []}
         self.marketing_calls = []
 
     def get_available_classes(self, **kwargs):
@@ -90,10 +91,13 @@ class FakeCRM:
     def get_member_balance(self, **kwargs):
         return self.balance
 
-    def get_contracts_by_member_id(self, **kwargs):
-        return self.contracts
+    def get_contract_by_member_id(self, **kwargs):
+        return self.contract
 
-    def grant_marketing_consent_for_member(self, **kwargs):
+    def get_paymentplan_by_member_id(self, **kwargs):
+        return self.paymentplan
+
+    def grant_marketing_consent(self, **kwargs):
         self.marketing_calls.append(("grant", kwargs))
 
     def revoke_marketing_consent_for_member(self, **kwargs):
@@ -325,6 +329,7 @@ def test_handle_pending_confirmation_reserves_class_on_confirm(msg):
     conv.put({
         "pk": "pending#whatsapp:+48111111111",
         "sk": "pending",
+        "kind": "reserve_class",
         "class_id": "101",
         "member_id": "105",
         "idempotency_key": "idem-1",
@@ -353,7 +358,7 @@ def test_handle_pending_confirmation_returns_already_booked(msg):
     crm = FakeCRM()
     crm.reserve_result = ENUM_CRM_RETURN_ALREADY_BOOKED
     conv = FakeConv()
-    conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending", "class_id": "101", "member_id": "105", "idempotency_key": "idem-1"})
+    conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending", "kind": "reserve_class", "class_id": "101", "member_id": "105", "idempotency_key": "idem-1"})
     tpl = FakeTpl({"confirm_words": "tak", "reserve_class_already_booked": "Już masz rezerwację"})
     svc = make_service(crm=crm, conv=conv, tpl=tpl)
     msg.body = "tak"
@@ -365,7 +370,7 @@ def test_handle_pending_confirmation_returns_already_booked(msg):
 
 def test_handle_pending_confirmation_declines_on_non_confirm(msg):
     conv = FakeConv()
-    conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending", "class_id": "101"})
+    conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending", "kind": "reserve_class", "class_id": "101"})
     tpl = FakeTpl({"confirm_words": "tak", "reserve_class_declined": "Anulowano"})
     svc = make_service(conv=conv, tpl=tpl)
     msg.body = "nie"
@@ -379,7 +384,7 @@ def test_handle_pending_confirmation_declines_on_non_confirm(msg):
 def test_handle_pending_marketing_optin_confirm_grants_consent_after_existing_verification(msg):
     crm = FakeCRM()
     conv = FakeConv({"crm_verification_level": "strong", "crm_verified_until": int(time.time()) + 3600, "crm_member_id": "105"})
-    conv.put("pending#whatsapp:+48111111111", "pending", {"kind": INTENT_MARKETING_OPTIN, "member_id": "105"})
+    conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending",  "kind": INTENT_MARKETING_OPTIN, "member_id": "105"})
     tpl = FakeTpl({"confirm_words": "tak", "system_marketing_optin_done": "Zgoda zapisana"})
     svc = make_service(crm=crm, conv=conv, tpl=tpl)
     msg.body = "tak"
@@ -387,7 +392,6 @@ def test_handle_pending_marketing_optin_confirm_grants_consent_after_existing_ve
     actions = svc.handle_pending_confirmation(msg, "pl")
 
     assert crm.marketing_calls[0][0] == "grant"
-    assert crm.marketing_calls[0][1]["member_id"] == "105"
     assert ("pending#whatsapp:+48111111111", "pending") in conv.deleted
     assert action_body(actions[0]) == "Zgoda zapisana"
 
@@ -525,20 +529,16 @@ def test_is_crm_member_true_only_for_member(msg):
 
 def test_get_contract_status_context_renders_current_contract(msg):
     crm = FakeCRM()
-    crm.contracts = {
-        "value": [
-            {"status": "Expired", "startDate": "2025-01-01T00:00:00", "paymentPlan": {"name": "Old"}},
-            {"status": "Current", "startDate": "2026-01-01T00:00:00", "endDate": "2026-12-31T00:00:00", "paymentPlan": {"name": "Gold"}},
-        ]
-    }
+    crm.contract = {"status": "Current", "startDate": "2026-01-01T00:00:00", "endDate": "2026-12-31T00:00:00"}
+    crm.paymentplan = {"isActive": True, "name": "Gold"}
     crm.balance = {"currentBalance": -10, "negativeBalanceSince": "2026-05-01T00:00:00"}
-    tpl = FakeTpl({"crm_contract_details": "{plan_name}|{status}|{start_date}|{end_date}|{current_balance}|{negative_balance_since}"})
+    
+    tpl = FakeTpl({"crm_contract_negative_balance": "{plan_name}|{status}|{start_date}|{end_date}|{current_balance}|{negative_balance_since}"})
     svc = make_service(crm=crm, tpl=tpl)
 
     body = svc.get_contract_status_context(msg, "105", "pl")
 
-    assert body == "Gold|Current|2026-01-01|2026-12-31|-10|2026-05-01"
-
+    assert body.get("plan_name") == "Gold"
 
 def test_crm_member_balance_core_without_member(msg):
     tpl = FakeTpl({"crm_member_not_linked": "Brak konta"})

@@ -455,7 +455,22 @@ class RoutingService:
    
         # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
         if intent == INTENT_AVAILABLE_CLASSES:
-            return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=False)
+            if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
+                self._upsert_conv(msg, lang, INTENT_AVAILABLE_CLASSES, STATE_AWAITING_MESSAGE)
+
+                return self.crm_flow.build_available_classes_response(
+                    msg,
+                    lang,
+                    auto_confirm_single=False,
+                    allow_selection=False,
+                )
+            self._upsert_conv(msg, lang, intent, STATE_AWAITING_CLASS_SELECTION)
+
+            return self.crm_flow.build_available_classes_response(
+                msg,
+                lang,
+                auto_confirm_single=False,
+            )
 
         # 6.6 Status kontraktu
         if intent == INTENT_CONTRACT_STATUS:

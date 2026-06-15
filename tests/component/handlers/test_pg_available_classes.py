@@ -48,6 +48,7 @@ def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
 
     # stub detekcji języka (unikamy AWS Comprehend)
     monkeypatch.setattr(router.language, "_detect_language", lambda text: "pl")
+    monkeypatch.setattr(router.crm_flow,"is_crm_member",lambda tenant_id, phone: True,)
 
     msg = Message(
         tenant_id="tenantA",

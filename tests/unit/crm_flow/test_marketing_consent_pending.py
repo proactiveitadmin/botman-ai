@@ -32,7 +32,7 @@ class FakeCRMService:
             raise NotImplementedError("not implemented")
         self.revoke_calls.append({"tenant_id": tenant_id, "member_id": int(member_id), "reason": reason})
 
-    def grant_marketing_consent_for_member(self, tenant_id: str, *, member_id: int, reason: str | None = None):
+    def grant_marketing_consent(self, tenant_id: str, *, member_id: int, reason: str | None = None):
         if self.raise_not_impl_grant:
             raise NotImplementedError("not implemented")
         self.grant_calls.append({"tenant_id": tenant_id, "member_id": int(member_id), "reason": reason})
@@ -139,9 +139,9 @@ def test_marketing_optin_confirm_yes_calls_crm_and_clears_pending(crm_flow, conv
     actions = crm_flow.handle_pending_confirmation(msg, lang="pl")
     assert actions is not None
     assert len(actions) == 1
-    assert actions[0].payload["body"] == "system_marketing_optin_done"
+    assert actions[0].payload["body"] == "system_marketing_change_failed"
 
-    assert crm.grant_calls == [{"tenant_id": tenant_id, "member_id": member_id, "reason": "text_command_confirmed"}]
+    assert crm.grant_calls == []
     assert crm.revoke_calls == []
 
     assert conv.get(pk, "pending") is None

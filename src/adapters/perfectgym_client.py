@@ -437,57 +437,13 @@ class PerfectGymClient:
     # ------------------------------------------------------------------ #
     # Contracts / balance
     # ------------------------------------------------------------------ #
-
-    def get_contracts_by_email_and_phone(
-        self,
-        email: str,
-        phone_number: str,
-    ) -> Dict[str, Any]:
+  
+    def get_contract_by_member_id(self, member_id: str) -> Dict[str, Any]:
         """
-        GET /Contracts?
-            $expand=Member,PaymentPlan
-            &$filter=Member/email eq '<email>' and Member/phoneNumber eq '<phone>'
-        """
-        if not self._ensure_base_url():
-            return {"value": []}
-
-        url = f"{self.base_url}/Contracts"
-
-        filter_expr = (
-            f"Member/email eq '{email}' and Member/phoneNumber eq '{phone_number}'"
-        )
-
-        params = {
-            "$expand": "Member,PaymentPlan",
-            "$filter": filter_expr,
-        }
-
-        try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            self.logger.info(
-                {
-                    "pg": "get_contracts_by_email_and_phone_ok",
-                    "count": len(data.get("value", [])),
-                }
-            )
-            return data
-        except requests.RequestException as e:
-            self.logger.error(
-                {"pg": "get_contracts_by_email_and_phone_error", "error": str(e)}
-            )
-            return {"value": []}
-
-    def get_contracts_by_member_id(self, member_id: str) -> Dict[str, Any]:
-        """
-        Zwraca listę kontraktów dla członka PerfectGym.
+        Zwraca aktualny kontrakt członka PerfectGym albo pusty dict.
 
         Używa:
           GET /Members({member_id})?$expand=Contracts($filter=Status eq 'Current'),memberbalance
-
-        Zwracamy ujednolicony kształt:
-          {"value": [ ...lista kontraktów... ]}
         """
         if not self._ensure_base_url():
             return {"value": []}
@@ -504,20 +460,68 @@ class PerfectGymClient:
             data = resp.json()
 
             # PerfectGym w takim zapytaniu zwraca pojedynczego membera z polem Contracts
+            if isinstance(data, list):
+                data = data[0] if data else {}
+
             contracts = data.get("Contracts") or data.get("contracts") or []
 
-            return {"value": contracts}
+            current = next(
+                (
+                    c for c in contracts
+                    if c.get("Status") == "Current" or c.get("status") == "Current"
+                ),
+                None,
+            )
+
+            return current or {}
 
         except requests.RequestException as e:
             self.logger.error(
                 {
-                    "pg": "get_contracts_by_member_id_error",
+                    "pg": "get_contract_by_member_id_error",
                     "member_id": member_id,
                     "error": str(e),
                 }
             )
-            return {"value": []}
+            return {}  
+            
+    def get_paymentplan_by_member_id(self, member_id: str) -> Dict[str, Any]:
+        if not self._ensure_base_url():
+            return {}
 
+        url = f"{self.base_url}/contracts"
+
+        params = {
+            "$filter": f"memberId eq {member_id}",
+            "$expand": "paymentPlan($expand=allowedPaymentTypes)"
+        }
+
+        try:
+            resp = self._request_with_retry(
+                "GET",
+                url,
+                headers=self._headers(),
+                params=params,
+                timeout=10
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            contracts = data.get("value", []) if isinstance(data, dict) else data
+
+            if not contracts:
+                return {}
+
+            contract = contracts[0]
+            return contract.get("paymentPlan") or {}
+
+        except requests.RequestException as e:
+            self.logger.error({
+                "pg": "get_paymentplan_by_member_id_error",
+                "member_id": member_id,
+                "error": str(e),
+            })
+            return {}
 
     def get_member_balance(self, member_id: int) -> Dict[str, Any]:
         """
@@ -525,6 +529,7 @@ class PerfectGymClient:
         """
         if not self._ensure_base_url():
             return {
+                "club_id": None,
                 "prepaidBalance": 0,
                 "prepaidBonusBalance": 0,
                 "currentBalance": 0,
@@ -544,10 +549,12 @@ class PerfectGymClient:
                 data = items[0] if items else {}
 
             mb = data.get("memberBalance") or {}
+            club_id = data.get("homeClubId") or {}
             self.logger.info(
                 {"pg": "get_member_balance_ok", "member_id": member_id}
             )
             return {
+                "club_id": club_id,
                 "prepaidBalance": mb.get("prepaidBalance", 0),
                 "prepaidBonusBalance": mb.get("prepaidBonusBalance", 0),
                 "currentBalance": mb.get("currentBalance", 0),
@@ -559,6 +566,7 @@ class PerfectGymClient:
                 {"pg": "get_member_balance_error", "member_id": member_id, "error": str(e)}
             )
             return {
+                "club_id": None,
                 "prepaidBalance": 0,
                 "prepaidBonusBalance": 0,
                 "currentBalance": 0,
@@ -617,14 +625,9 @@ class PerfectGymClient:
             # brak konfiguracji PG → zwracamy pusty obiekt, żeby nie wywalić flow
             return {}
 
-        # dopuszczamy zarówno int, jak i str z cyframi
-        if isinstance(class_id, str) and class_id.isdigit():
-            cid = int(class_id)
-        else:
-            cid = class_id
-
+        cid = int(class_id) if isinstance(class_id, str) and class_id.isdigit() else class_id
         url = f"{self.base_url}/Classes({cid})?$expand=classType"
-
+        
         try:
             resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
             resp.raise_for_status()
@@ -652,6 +655,228 @@ class PerfectGymClient:
                 }
             )
             return {}
+
+    def get_debt_payment_link(
+        self,
+        member_id: int | str,
+        club_id: int | str,
+        return_url: str,
+        save_payment_source_after_success: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Generuje link do płatności za aktualne zadłużenie klienta.
+
+        1) Pobiera niezapłacone, nieanulowane i nieusunięte ContractCharges.
+        2) Pomija płatności z przyszłości na podstawie pola dueDate.
+        3) Dla pozostałych pozycji wywołuje CreditCards/PayWithRedirect.
+
+        Zwraca m.in. URL płatności, kwotę całkowitą oraz listę pozycji,
+        za które klient płaci.
+        """
+        if not self._ensure_base_url():
+            self.logger.error(
+                {
+                    "pg": "get_debt_payment_link_charges_error",
+                    "member_id": mid,
+                    "error": "base_url_missing",
+                }
+            )
+            return {
+                "ok": False,
+                "status_code": None,
+                "error": "base_url_missing",
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+            }
+
+        try:
+            mid = int(member_id)
+            cid = int(club_id)
+        except (TypeError, ValueError):
+            self.logger.error(
+                {
+                    "pg": "get_debt_payment_link_charges_error",
+                    "member_id": mid,
+                    "cid": club_id,
+                }
+            )
+            return {
+                "ok": False,
+                "status_code": None,
+                "error": "invalid_member_or_club_id",
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+            }
+
+        charges_url = f"{self.base_url}/ContractCharges"
+        charges_params = {
+            "$filter": (
+                f"memberid eq {mid} "
+                "and isCancelled eq false "
+                "and isDeleted eq false"
+            ),
+            "$select": "id,memberId,dueDate,leftToPay,description",
+        }
+
+        try:
+            charges_resp = self._request_with_retry(
+                "GET",
+                charges_url,
+                headers=self._headers(),
+                params=charges_params,
+                timeout=10,
+            )
+            charges_resp.raise_for_status()
+            charges_data = charges_resp.json() or {}
+        except requests.RequestException as e:
+            self.logger.error(
+                {
+                    "pg": "get_debt_payment_link_charges_error",
+                    "member_id": mid,
+                    "error": str(e),
+                }
+            )
+            return {
+                "ok": False,
+                "status_code": getattr(locals().get("charges_resp", None), "status_code", None),
+                "error": str(e),
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+            }
+
+        now = datetime.now().astimezone()
+        payment_items: List[Dict[str, Any]] = []
+        customer_items: List[Dict[str, Any]] = []
+        total_amount = 0.0
+
+        for charge in (charges_data.get("value") or []):
+            left_to_pay = float(charge.get("leftToPay") or 0)
+            if left_to_pay <= 0:
+                continue
+
+            due_date_raw = charge.get("dueDate")
+            if due_date_raw:
+                try:
+                    due_date = datetime.fromisoformat(str(due_date_raw).replace("Z", "+00:00"))
+                    if due_date.tzinfo is None:
+                        due_date = due_date.replace(tzinfo=now.tzinfo)
+                    if due_date > now:
+                        continue
+                except ValueError:
+                    # Jeśli PG zwróci nieparsowalną datę, bezpiecznie pomijamy pozycję,
+                    # żeby nie naliczyć przyszłej lub błędnej płatności.
+                    self.logger.warning(
+                        {
+                            "pg": "get_debt_payment_link_invalid_due_date",
+                            "member_id": mid,
+                            "charge_id": charge.get("id"),
+                            "dueDate": due_date_raw,
+                        }
+                    )
+                    continue
+
+            transaction_id = charge.get("id")
+            if transaction_id is None:
+                continue
+
+            amount = round(left_to_pay, 2)
+            payment_items.append(
+                {
+                    "membershipTransactionId": int(transaction_id),
+                    "amount": amount,
+                }
+            )
+            customer_items.append(
+                {
+                    "membershipTransactionId": int(transaction_id),
+                    "amount": amount,
+                    "dueDate": due_date_raw,
+                    "description": charge.get("description"),
+                }
+            )
+            total_amount += amount
+
+        total_amount = round(total_amount, 2)
+
+        if not payment_items:
+            return {
+                "ok": True,
+                "status_code": 200,
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+                "message": "no_current_debt",
+            }
+
+        api_root = self.base_url.replace("/odata", "")
+        payment_url = f"{api_root}/CreditCards/PayWithRedirect"
+        payload = {
+            "returnUrl": return_url,
+            "savePaymentSourceAfterSuccess": bool(save_payment_source_after_success),
+            "memberId": mid,
+            "clubId": cid,
+            "membershipTransactionItems": payment_items,
+            "totalAmount": total_amount,
+        }
+
+        try:
+            payment_resp = self._request_with_retry(
+                "POST",
+                payment_url,
+                json=payload,
+                headers=self._headers(),
+                timeout=10,
+            )
+
+            try:
+                payment_data = payment_resp.json()
+            except ValueError:
+                payment_data = None
+
+            if payment_resp.status_code >= 400:
+                payment_resp.raise_for_status()
+
+            payment_url_value = (payment_data or {}).get("url")
+            self.logger.info(
+                {
+                    "pg": "get_debt_payment_link_ok",
+                    "member_id": mid,
+                    "items_count": len(payment_items),
+                    "total_amount": total_amount,
+                }
+            )
+            return {
+                "ok": True,
+                "status_code": payment_resp.status_code,
+                "url": payment_url_value,
+                "processKey": (payment_data or {}).get("processKey"),
+                "paymentProviderName": (payment_data or {}).get("paymentProviderName"),
+                "items": customer_items,
+                "totalAmount": total_amount,
+                "data": payment_data,
+            }
+
+        except requests.RequestException as e:
+            self.logger.error(
+                {
+                    "pg": "get_debt_payment_link_payment_error",
+                    "member_id": mid,
+                    "error": str(e),
+                }
+            )
+            return {
+                "ok": False,
+                "status_code": getattr(locals().get("payment_resp", None), "status_code", None),
+                "error": str(e),
+                "url": None,
+                "items": customer_items,
+                "totalAmount": total_amount,
+                "data": locals().get("payment_data", None),
+            }
+
     def get_product_payment_link(self, member_id: int, product_id: int | str) -> Dict[str, Any]:
         """
         Zwraca url produktu.
@@ -663,14 +888,11 @@ class PerfectGymClient:
             return {}
 
         # dopuszczamy zarówno int, jak i str z cyframi
-        if isinstance(product_id, str) and product_id.isdigit():
-            cid = int(product_id)
-        else:
-            cid = product_id
+        pid = int(product_id) if isinstance(product_id, str) and product_id.isdigit() else product_id
 
         url = f"{self.base_url}/Products"
-        filter_expr = f" Id eq {cid} and isDeleted eq false"
-        # --- PARAMETRY IDENTYCZNE JAK W TWOIM CURLU --- #
+        filter_expr = f" Id eq {pid} and isDeleted eq false"
+        # --- PARAMETRY IDENTYCZNE JAK W CURLU --- #
         params = {
             "$filter": filter_expr,
         }
@@ -683,19 +905,18 @@ class PerfectGymClient:
             if isinstance(data, dict) and "value" in data:
                 items = data.get("value") or []
                 data = items[0] if items else {}
-
-            self.logger.info(
-                {
-                    "pg": "get_product_ok",
-                    "product_id": cid,
-                    "member_id": member_id,
-                }
-            )
+                self.logger.info(
+                    {
+                        "pg": "get_product_ok",
+                        "product_id": pid,
+                        "member_id": member_id,
+                    }
+                )
             #return data
             self.logger.warning(
                 {
                     "pg": "get_product_not_implemented",
-                    "product_id": cid,
+                    "product_id": pid,
                 }
             )
             return {}
@@ -704,7 +925,7 @@ class PerfectGymClient:
             self.logger.error(
                 {
                     "pg": "get_product_error",
-                    "product_id": cid,
+                    "product_id": pid,
                     "error": str(e),
                 }
             )

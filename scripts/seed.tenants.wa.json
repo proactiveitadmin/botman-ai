@@ -7,6 +7,7 @@
 			"language_code": { "S": "pl" },
 			"twilio_to": { "S": "whatsapp:+48694017163" },			
 			"wa_phone_number_id": { "S": "965611866635232" },
+			"return_url": { "S": "https://www.proactiveit.pl/en/home" },
 
 			"email": {
 			  "M": {
@@ -64,6 +65,7 @@
 			"language_code": { "S": "pl" },
 			"twilio_to": { "S": "whatsapp:+1400000000" },
 			"wa_phone_number_id": { "S": "000000000000000" },
+			"return_url": { "S": "https://www.proactiveit.pl/en/home" },
 
 			"email": {
 			  "M": {

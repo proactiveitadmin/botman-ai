@@ -184,29 +184,27 @@ class CRMService:
         self._crm_gate(tenant_id)
         return self._client_for(tenant_id).get_class(class_id)
 
-
-    def get_contracts_by_email_and_phone(
-        self,
-        tenant_id: str,
-        email: str,
-        phone_number: str,
-    ) -> dict:
-        self._crm_gate(tenant_id)
-        return self._client_for(tenant_id).get_contracts_by_email_and_phone(
-            email=email,
-            phone_number=phone_number,
-        )
-
-    def get_contracts_by_member_id(
+    def get_contract_by_member_id(
         self,
         tenant_id: str,
         member_id: str,
     ) -> dict:
         """
-        Zwraca raw JSON z PG (dict z 'value').
+        Zwraca aktualny kontrakt członka PerfectGym.
         """
         self._crm_gate(tenant_id)
-        return self._client_for(tenant_id).get_contracts_by_member_id(member_id=member_id)
+        return self._client_for(tenant_id).get_contract_by_member_id(member_id=member_id)
+
+    def get_paymentplan_by_member_id(
+        self,
+        tenant_id: str,
+        member_id: str,
+    ) -> dict:
+        """
+        Zwraca aktualny kontrakt członka PerfectGym.
+        """
+        self._crm_gate(tenant_id)
+        return self._client_for(tenant_id).get_paymentplan_by_member_id(member_id=member_id)
 
     def get_member_balance(
         self,
@@ -272,7 +270,22 @@ class CRMService:
 
         logger.warning({"crm": "pg client get_product_payment_link not defined"})
         return ""
-    
+        
+    def get_debt_payment_link(       
+        self,
+        tenant_id,
+        member_id: int | str,
+        club_id: int | str,
+        return_url: str,
+        save_payment_source_after_success: bool = False,
+    ):
+        self._crm_gate(tenant_id)
+        return self._client_for(tenant_id).get_debt_payment_link(
+            member_id=member_id,
+            club_id=club_id,
+            return_url=return_url,
+            save_payment_source_after_success=save_payment_source_after_success,
+        )
     #stub cofniecia zgody, TODO: zaimplementowac cofniecie zgody
     def revoke_marketing_consent_for_member(
         self,
@@ -291,7 +304,22 @@ class CRMService:
         raise NotImplementedError(
             "PerfectGym revoke consent endpoint not implemented yet"
         )  
-        
+     #stub zgody, TODO: zaimplementowac zgode marketingowa
+    def grant_marketing_consent(
+        self,
+        tenant_id: str,
+        reason: str | None = None,
+    ):
+        logger.warning(
+            {
+                "crm": "pg_grant_marketing_consent_not_implemented",
+                "tenant_id": tenant_id,
+                "reason": reason,
+            }
+        )
+        raise NotImplementedError(
+            "PerfectGym grant consent endpoint not implemented yet"
+        )        
     def reserve_class(
         self,
         tenant_id: str,

@@ -150,7 +150,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie udało się utworzyć zgłoszenia. Spróbuj proszę ponownie za chwilę — a jeśli problem się powtórzy, napisz co się dzieje, a przekażę to do recepcji."
+        "S": "Nie udało się utworzyć zgłoszenia. Spróbuj proszę ponownie za chwilę — a jeśli problem się powtórzy, skontaktuj sie z recepcją pod numerem +48111111111."
     },
     "placeholders": {
         "L": []
@@ -180,7 +180,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Jasne — doprecyzujesz proszę, czego dotyczy sprawa? (np. karnet, płatność, zajęcia, rezerwacja, aplikacja)"
+        "S": "Możesz doprecyzować, czego dotyczy Twoja sprawa? (np. karnet, płatność, zajęcia, rezerwacja, aplikacja)"
     },
     "placeholders": {
         "L": []
@@ -244,7 +244,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Na ten moment nie widzę dostępnych zajęć w grafiku. Spróbuj proszę później albo podaj preferowany dzień i godzinę — sprawdzę alternatywy."
+        "S": "Na ten moment nie widzę dostępnych zajęć w grafiku. Spróbuj proszę później albo skontaktuj się z recepcją."
     },
     "placeholders": {
         "L": []
@@ -583,7 +583,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie widzę aktywnego konta dla podanych danych.\n\nSprawdź proszę, czy e‑mail (*{email}*) lub telefon (*{phone}*) są takie same jak przy zapisie do klubu. Jeśli nadal nie działa, mogę przekazać sprawę do recepcji."
+        "S": "Nie widzę aktywnego konta dla podanych danych.\n\nSprawdź proszę, czy e‑mail (*{email}*) lub telefon (*{phone}*) są takie same jak przy zapisie do klubu."
     },
     "placeholders": {
         "L": [
@@ -650,13 +650,49 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Oto szczegóły Twojego członkostwa:\n\n• Plan: *{plan_name}*\n• Status: *{status}*\n• Od: *{start_date}*\n• Do: *{end_date}*\n• Saldo: *{current_balance}*\n• Ujemne saldo od: *{negative_balance_since}*\n\nJeśli coś się nie zgadza, daj znać — pomogę wyjaśnić to z recepcją."
+        "S": "Oto szczegóły Twojego członkostwa:\n\n• Plan: *{plan_name}*\n• Status: *{status}*\n• Od: *{start_date}*\n• Do: *{end_date}*\n• Saldo: *{current_balance}*"
     },
     "placeholders": {
         "L": [
             {
                 "S": "plan_name"
             },
+            {
+                "S": "status"
+            },
+            {
+                "S": "start_date"
+            },
+            {
+                "S": "end_date"
+            },
+            {
+                "S": "current_balance"
+            }
+        ]
+    }
+}
+'@
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_contract_negative_balance#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_contract_details"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Oto szczegóły Twojego członkostwa:\n\n• Plan: *{plan_name}*\n• Status: *{status}*\n• Od: *{start_date}*\n• Do: *{end_date}*\n• Saldo: *{current_balance}*\n• Ujemne saldo od: *{negative_balance_since}*\n\n Wpisz *TAK*, aby opłacić należność."
+    },
+    "placeholders": {
+        "L": [
             {
                 "S": "plan_name"
             },
@@ -702,7 +738,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie mogę jeszcze powiązać tego czatu z Twoim kontem w klubie. Jeśli chcesz korzystać z danych (np. karnet, płatności, rezerwacje), przejdź proszę weryfikację lub skontaktuj się z recepcją."
+        "S": "Nie mogę jeszcze powiązać tego czatu z Twoim kontem w klubie. Jeśli chcesz korzystać z danych (np. karnet, płatności, rezerwacje), skontaktuj się proszę z recepcją."
     },
     "placeholders": {
         "L": []
@@ -732,7 +768,40 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Twoje aktualne saldo wynosi: *{current_balance}*.\n\nJeśli masz pytania o rozliczenia, mogę też podpowiedzieć, skąd wynika ta kwota."
+        "S": "Twoje aktualne saldo wynosi: *{current_balance}*."
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "current_balance"
+            }
+        ]
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+# ==== 21.1 crm_member_balance ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#crm_member_balance_negative#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "crm_member_balance_negative"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Twoje aktualne saldo wynosi: *{current_balance}*. Wpisz *TAK*, aby opłacić należność."
     },
     "placeholders": {
         "L": [
@@ -766,7 +835,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Super — rezerwacja została potwierdzona ✅\n\n*{class_name}* — {class_date} o {class_time}\n\nJeśli chcesz odwołać lub zmienić termin, napisz — pomogę."
+        "S": "Super — rezerwacja została potwierdzona ✅\n\n*{class_name}* — {class_date} o {class_time}."
     },
     "placeholders": {
         "L": [
@@ -849,7 +918,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie udało się zarezerwować zajęć. Spróbuj proszę ponownie za chwilę — a jeśli błąd wróci, podaj nazwę zajęć i datę, a przekażę sprawę do recepcji."
+        "S": "Nie udało się zarezerwować zajęć. Spróbuj proszę ponownie za chwilę."
     },
     "placeholders": {
         "L": []
@@ -879,7 +948,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Okej, nie robię rezerwacji. Jeśli zmienisz zdanie, podaj numer zajęć z listy — wrócimy do tego."
+        "S": "W porządku — nie dokonam rezerwacji. Jeśli zmienisz zdanie, daj mi znać."
     },
     "placeholders": {
         "L": []
@@ -1067,7 +1136,7 @@ aws dynamodb put-item `
         "S": "en"
     },
     "body": {
-        "S": "This feature is available only for Whatsapp channel. Please use your whatsapp to continue."
+        "S": "Ta usługa jest dośtępna tylko poprzez kanał Whatsapp. Aby kontynuować przejdź na Whatsapp."
     },
     "placeholders": {
         "L": []
@@ -1098,7 +1167,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie widzę tej informacji w FAQ. Jeśli chcesz, mogę przekazać pytanie do recepcji albo podpowiedzieć, gdzie to sprawdzić (np. w aplikacji)."
+        "S": "Nie widzę tej informacji w FAQ. Czy mogę pomóc w czymś jeszcze?"
     },
     "placeholders": {
         "L": []
@@ -1128,7 +1197,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Kod nie zadziałał. Spróbuj proszę wpisać go jeszcze raz (bez spacji) albo poproś o nowy."
+        "S": "Kod nie zadziałał. Spróbuj proszę wpisać go jeszcze raz (bez spacji)."
     },
     "placeholders": {
         "L": []
@@ -1158,7 +1227,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie udało się zweryfikować konta.\n\nMożesz: spróbować ponownie, poprosić o nowy kod albo połączyć się z obsługą."
+        "S": "Nie udało się zweryfikować konta.\n\nMożesz: spróbować ponownie albo połączyć się z obsługą."
     },
     "placeholders": {
         "L": []
@@ -1252,7 +1321,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Wysłaliśmy kod weryfikacyjny na adres *{email}*. Wpisz go tutaj, aby kontynuować."
+        "S": "Zanim przejdziesz dalej, muszę potwierdzić, że to Ty. Wpisz kod wysłany na *{email}*."
     },
     "placeholders": {
         "L": [
@@ -1316,7 +1385,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "Nie mogę znaleźć Twojego adresu e‑mail w systemie. Podaj proszę e‑mail użyty przy zapisie do klubu albo skontaktuj się z recepcją, aby uzupełnić dane."
+        "S": "Nie mogę znaleźć Twojego adresu e‑mail w systemie. Proszę, skontaktuj się z recepcją, aby uzupełnić dane."
     },
     "placeholders": {
         "L": []
@@ -1627,7 +1696,7 @@ aws dynamodb put-item `
         "S": "pl"
     },
     "body": {
-        "S": "tak,tak.,potwierdzam,ok,zgadzam się,zgadzam sie,oczywiście,oczywiscie,pewnie,jasne"
+        "S": "tak,potwierdzam,ok,zgadzam,oczywiście,oczywiscie,pewnie,jasne"
     },
     "placeholders": {
         "L": []
@@ -1724,6 +1793,65 @@ $item = @'
     }
 }
 '@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#payment_link_generated#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "payment_link_generated"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Twój link do płatności:\n\n{url}"
+    },
+    "placeholders": {
+        "L": [
+            {
+                "S": "url"
+            }
+        ]
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#payment_link_generation_failed#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "payment_link_generation_failed"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Przykro mi, ale nie udało się wygenerować linka do płatności. Proszę spróbować później lub skontaktować się z recepcją."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
 aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
