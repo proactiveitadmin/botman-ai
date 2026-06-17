@@ -23,8 +23,7 @@ class TemplateService:
         return render_template(template, context or {})
 
     def _tenant_default_lang(self, tenant_id: str) -> str:
-        tenant = self.tenants.get(tenant_id) or {}
-        return tenant.get("language_code") or settings.get_default_language()
+        return self.tenants.get_language(tenant_id)
 
     def _try_get_template(self, tenant_id: str, name: str, language_code: str | None):
         if not language_code:

@@ -158,16 +158,6 @@ SYSTEM_PROMPT_FAQ_STRICT = ( "- If the snippets do not clearly answer the user's
         "- If ANY snippet explicitly answers the question, you MUST answer using that snippet.\n" )
 SYSTEM_PROMPT_FAQ_NO_STRICT = "- Instead, ask ONE short clarifying question that would allow finding the answer in the knowledge base.\n"
 
-SYSTEM_PROMPT_FAQ_OLD = (
-        "You are a helpful customer-support assistant.\n"
-        "Answer the user's question ONLY using the FAQ entries below.\n"
-        "Always respond as a JSON object with a single key \"answer\".\n"
-        "In the \"answer\" value, paraphrase the relevant information. "
-        "If the FAQ does not contain the information needed to answer the question, "
-        "reply that you don't know AND ask the user if there is anything else you can help with.\n"
-        "FAQ entries:\n" )
-
-
 SYSTEM_PROMPT_LANG_FIRST =  f"\nAnswer in the language "
 SYSTEM_PROMPT_LANG_SECOND =  f" (ISO language code)."
 SYSTEM_PROMPT_NO_LANG = "\nAnswer in the same language as the user's question."

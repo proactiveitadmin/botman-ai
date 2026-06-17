@@ -17,6 +17,14 @@
 			  }
 			},
 
+			"kb_parameters": {
+			  "M": {
+				"kb_smalltalk_min_score": { "N": 0.35 }
+				"kb_vector_min_score_low": { "N": 0.43 }
+				"kb_vector_fastpath_min_score": { "N": 0.50 }
+			  }
+			},
+
 			"twilio": {
 			  "M": {
 				"account_sid_param": { "S": "/botman/prod/clubProactiveIT/twilio_sid" },
@@ -44,7 +52,8 @@
 
 			"pinecone": {
 			  "M": {
-				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" },
+				"api_key_param": { "S": "/botman/prod/clubProactiveIT/pc_api_key" }
 			  }
 			}
 		}
@@ -64,6 +73,14 @@
 				"from_email": { "S": "no-reply@default.pl" },
 				"from_name": { "S": "default" },
 				"region": { "S": "eu-central-1" }
+			  }
+			},
+
+			"kb_parameters": {
+			  "M": {
+				"kb_smalltalk_min_score": { "N": 0.35 }
+				"kb_vector_min_score_low": { "N": 0.43 }
+				"kb_vector_fastpath_min_score": { "N": 0.50 }
 			  }
 			},
 
@@ -94,7 +111,8 @@
 
 			"pinecone": {
 			  "M": {
-				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" }
+				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" },
+				"api_key_param": { "S": "/botman/prod/clubProactiveIT/pc_api_key" }
 			  }
 			}
 		}

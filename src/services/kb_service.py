@@ -30,9 +30,6 @@ from ..common.constants import (
     PC_NAME_SMALLTALK,
     PC_NAME_KB,
     FAQ_ANSWER_KEY,
-    KB_SMALLTALK_MIN_SCORE,
-    KB_VECTOR_MIN_SCORE_LOW,
-    KB_VECTOR_FASTPATH_MIN_SCORE,
     KB_RETRIEVED_CHUNKS,
     SMALLTALK_RETRIEVED_CHUNKS,
     KB_FETCHED_CHUNKS,
@@ -81,9 +78,12 @@ class KBService:
     # -------------------------------------------------------------------------
     # Helpery 
     # -------------------------------------------------------------------------
+    def _tenant_kb_params(self, tenant_id: str) -> str:
+        tenant = self.tenants.get_kb_config(tenant_id)
+        return tenant.get("kb_parameters") or settings.get_default_language()
+        
     def _tenant_default_lang(self, tenant_id: str) -> str:
-        tenant = self.tenants.get(tenant_id) or {}
-        return tenant.get("language_code") or settings.get_default_language()
+        return self.tenants.get_language(tenant_id)
 
     def _faq_key(self, tenant_id: str, language_code: str | None) -> str:
         # np. "tenantA/faq_pl.json" albo "tenantA/faq_en.json"
@@ -94,13 +94,6 @@ class KBService:
 
     def _cache_key(self, tenant_id: str, language_code: str | None) -> str:
         return f"{tenant_id}#{language_code or 'en'}"
-
-    def _get_env_float(self, name: str, default: float) -> float:
-        value: Optional[str] = os.getenv(name)
-        try:
-            return float(value) if value is not None else default
-        except (TypeError, ValueError):
-            return default
 
     # -------------------------------------------------------------------------
     # FAQ z S3
@@ -313,7 +306,7 @@ class KBService:
 
                     # 2) dopiero potem próg score (fallback)
                     st_top1 = float(getattr(st[0], "score", 0.0) or 0.0)
-                    st_min = self._get_env_float("KB_SMALLTALK_MIN_SCORE", KB_SMALLTALK_MIN_SCORE)
+                    st_min = self.tenants.get_kb_smalltalk_min_score(tenant_id)
                     if st_top1 >= st_min:
                         ans = self._vector._extract_answer_from_text(txt0)
                         if ans:
@@ -332,7 +325,7 @@ class KBService:
                 )
 
             # Vector confidence gating:
-            strict_threshold = self._get_env_float("KB_VECTOR_MIN_SCORE_LOW", KB_VECTOR_MIN_SCORE_LOW)
+            strict_threshold = self.tenants.get_kb_vector_min_score_low(tenant_id)
        
             if retrieved_chunks:
                 try:
@@ -380,7 +373,7 @@ class KBService:
                     "text[:200]": (getattr(ch, "text", "") or "")[:200],
                 })
 
-            min_score  = self._get_env_float("KB_VECTOR_FASTPATH_MIN_SCORE", KB_VECTOR_FASTPATH_MIN_SCORE)
+            min_score  = self.tenants.get_kb_vector_fastpath_min_score(tenant_id)
 
             for idx, best in enumerate((retrieved_chunks or [])[:KB_FETCHED_CHUNKS]):  
 
@@ -434,59 +427,8 @@ class KBService:
         if chunks_for_prompt:
             system_prompt = self._vector.build_kb_prompt(chunks=chunks_for_prompt, language_code=language_code, strict_mode=strict_mode)
         else:
-            #3--------------
-            # legacy retrieval (backward-compatible)
-            logger.warning(
-                {
-                    "component": "kb_service",
-                    "event": "no retrieved_chunks",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                    "vector_enabled": vector_enabled,
-                }
-            )
+            return None
             
-            # 1) FAQ z S3 lub domyślne
-            tenant_faq = self._load_tenant_faq(tenant_id, language_code)
-            if not tenant_faq:
-                tenant_language = self._tenant_default_lang(tenant_id)
-                tenant_faq = self._load_tenant_faq(tenant_id, tenant_language)
-            if not tenant_faq:
-                logger.warning(
-                    {
-                        "component": "kb_service",
-                        "event": "no FAQ used default",
-                        "tenant_id": tenant_id,
-                        "lang": language_code,
-                    }
-                )
-                tenant_faq = DEFAULT_FAQ
-
-            if not tenant_faq:
-                return None
-                
-            relevant_faq = self._select_relevant_faq_entries(
-                question=question,
-                tenant_faq=tenant_faq,
-                k=3,
-            )
-
-            # build Q/A context
-            lines: list[str] = []
-            for key, answer in relevant_faq.items():
-                if not answer:
-                    continue
-                lines.append(f"Q: {key}")
-                lines.append(f"A: {answer}")
-            faq_context = "\n".join(lines)
-
-            if not faq_context:
-                # brak dopasowania w FAQ -> nie przekazujemy całej bazy do modelu
-                # (to powoduje halucynacje lub odpowiedzi grzecznościowe).
-                faq_context = ""
-
-            system_prompt = self._client.build_old_prompt(language_code, faq_context)
-            #3--------------
         with timed(
             "prompt_build",
             logger=logger,
