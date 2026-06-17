@@ -137,8 +137,7 @@ class CampaignService:
         if conv and conv.get("language_code"):
             return conv["language_code"]
 
-        tenant = self.tenants.get(tenant_id) or {}
-        return tenant.get("language_code") or settings.get_default_language()
+        return self.tenants.get_language(tenant_id)
 
     def build_message(
         self,

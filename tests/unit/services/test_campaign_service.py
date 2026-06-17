@@ -22,6 +22,9 @@ class FakeTenants:
 
     def get(self, tenant_id):
         return self.tenant
+        
+    def get_language(self, tenant_id: str):
+         return self.tenant["language_code"]
 
 
 def make_service(conv=None, tenant=None):

@@ -32,7 +32,6 @@ from ..common.constants import (
     SYSTEM_PROMPT_FAQ_JSON,
     SYSTEM_PROMPT_FAQ_STRICT,
     SYSTEM_PROMPT_FAQ_NO_STRICT,
-    SYSTEM_PROMPT_FAQ_OLD,
     SYSTEM_PROMPT_LANG_FIRST,
     SYSTEM_PROMPT_LANG_SECOND,
     SYSTEM_PROMPT_NO_LANG,
@@ -433,14 +432,3 @@ class OpenAIClient:
             sys += SYSTEM_PROMPT_FAQ_NO_LANG
         return sys
         
-    def build_old_prompt( self, language_code: Optional[str], context: str) -> str:
-        sys = SYSTEM_PROMPT_FAQ_OLD        
-        sys += f"{context}\n"
-        sys += SYSTEM_PROMPT_HISTORY
-        if language_code:
-            sys += SYSTEM_PROMPT_LANG_FIRST
-            sys += f"{language_code}"
-            sys += SYSTEM_PROMPT_LANG_SECOND
-        else:
-            sys += SYSTEM_PROMPT_FAQ_NO_LANG
-        return sys

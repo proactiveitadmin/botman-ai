@@ -1,4 +1,7 @@
 import json
+from tests.helpers.fakes_routing import (
+    FakeTenantsRepo,
+)
 
 def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
     import json
@@ -65,7 +68,8 @@ def test_answer_ai_uses_vector_retrieval_when_enabled(monkeypatch):
 
     openai_client = DummyOpenAIClient()
     svc._client = openai_client
-
+    svc.tenants = FakeTenantsRepo()
+    
     # --- execute ---
     result = svc.answer_ai(
         question="What are your hours?",

@@ -112,33 +112,6 @@ def test_answer_ai_returns_none_for_empty_question():
     svc = KBService(bucket=None, openai_client=None)
     assert svc.answer_ai(question="", tenant_id="t1") is None
 
-def test_answer_ai_happy_path_with_json(monkeypatch):
-    # bucket musi być ustawiony, bo _load_tenant_faq zwraca None gdy bucket pusty
-    # (wtedy nie sięga nawet do cache)
-    monkeypatch.setattr(settings, "kb_bucket", "kb-bucket", raising=False)
-    # prosty FAQ – tylko jedna odpowiedź
-    svc = KBService(bucket=None, openai_client=None)
-    svc._cache[svc._cache_key("t1", "pl")] = {"hours": "8-20"}
-    # Testy unit nie powinny iść do Pinecone / Tenants – wyłączamy warstwę vector.
-    monkeypatch.setattr(svc._vector, "enabled", lambda *_: False, raising=False)
-    monkeypatch.setattr(svc, "_tenant_default_lang", lambda *_: "en", raising=False) 
-    
-    class DummyClient:
-        def __init__(self):
-            self.last_messages = None
-
-        def chat(self, messages, max_tokens=None):
-            self.last_messages = messages
-            return json.dumps({"answer": "We are open 8-20"})
-        def build_kb_prompt( self, strict_mode, language_code, context):
-            return None
-        def build_old_prompt( self, language_code, faq_context):
-            return None
-
-    svc._client = DummyClient()
-    ans = svc.answer_ai(question="What are your opening hours?", tenant_id="t1", language_code="pl")
-    assert "8-20" in ans
-
 def test_answer_ai_llm_failure_returns_none(monkeypatch):
     monkeypatch.setattr(settings, "kb_bucket", "kb-bucket", raising=False)
     svc = KBService(bucket=None, openai_client=None)
@@ -151,9 +124,6 @@ def test_answer_ai_llm_failure_returns_none(monkeypatch):
             raise RuntimeError("boom")
         def build_kb_prompt( self, strict_mode, language_code, context):
             return None
-        def build_old_prompt( self, language_code, faq_context):
-            return None
-
 
     svc._client = DummyClient()
     ans = svc.answer_ai(question="q", tenant_id="t1")

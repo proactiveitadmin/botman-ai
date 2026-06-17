@@ -3,6 +3,12 @@ from typing import Any
 from boto3.dynamodb.conditions import Key
 from ..common.aws import ddb_resource
 from ..common.logging import logger
+from ..common.config import settings
+from ..common.constants import (
+    KB_SMALLTALK_MIN_SCORE,
+    KB_VECTOR_MIN_SCORE_LOW,
+    KB_VECTOR_FASTPATH_MIN_SCORE,
+)
 
 
 class TenantsRepo:
@@ -12,6 +18,13 @@ class TenantsRepo:
     def get(self, tenant_id: str) -> dict | None:
         return self.table.get_item(Key={"tenant_id": tenant_id}).get("Item")
 
+    def _get_env_float(self, name: str, default: float) -> float:
+        value: Optional[str] = os.getenv(name)
+        try:
+            return float(value) if value is not None else default
+        except (TypeError, ValueError):
+            return default
+            
     def list_all(self) -> list[dict]:
         """Lists all tenants.
 
@@ -94,12 +107,16 @@ class TenantsRepo:
             logger.exception({"tenants_repo": "query_failed", "error": str(e), "pg_api_key": "***"})
         return None
 
+    def get_language(self, tenant_id: str):
+        item = self.get(tenant_id) or {}
+        return item.get("language_code") or settings.get_default_language()
+        
     def set_language(self, tenant_id: str, language_code: str):
-            self.table.update_item(
-                Key={"tenant_id": tenant_id},
-                UpdateExpression="SET language_code = :lang",
-                ExpressionAttributeValues={":lang": language_code},
-            )
+        self.table.update_item(
+            Key={"tenant_id": tenant_id},
+            UpdateExpression="SET language_code = :lang",
+            ExpressionAttributeValues={":lang": language_code},
+        )
 
     def get_email_config(self, tenant_id: str) -> dict | None:
         """Zwraca konfigurację email dla tenanta (lub None jeśli brak/wyłączona)."""
@@ -140,3 +157,71 @@ class TenantsRepo:
             ExpressionAttributeNames={"#email": "email"},
             ExpressionAttributeValues={":email": current},
         )
+        
+    def get_kb_smalltalk_min_score(self, tenant_id: str) -> float:
+        """Zwraca minimalny score smalltalk dla tenanta."""
+
+        item = self.get(tenant_id) or {}
+        kb_cfg = item.get("kb_parameters")
+
+        if not isinstance(kb_cfg, dict):
+            return self._get_env_float(
+                "KB_SMALLTALK_MIN_SCORE",
+                KB_SMALLTALK_MIN_SCORE,
+            )
+
+        value = kb_cfg.get("kb_smalltalk_min_score")
+
+        if value in (None, ""):
+            return self._get_env_float(
+                "KB_SMALLTALK_MIN_SCORE",
+                KB_SMALLTALK_MIN_SCORE,
+            )
+
+        return float(value)
+        
+    def get_kb_vector_min_score_low(self, tenant_id: str) -> float:
+        """Zwraca minimalny score dla tenanta."""
+
+        item = self.get(tenant_id) or {}
+        kb_cfg = item.get("kb_parameters")
+
+        if not isinstance(kb_cfg, dict):
+            return self._get_env_float(
+                "KB_VECTOR_MIN_SCORE_LOW",
+                KB_VECTOR_MIN_SCORE_LOW,
+            )
+
+        value = kb_cfg.get("kb_vector_min_score_low")
+
+        if value in (None, ""):
+            return self._get_env_float(
+                "KB_VECTOR_MIN_SCORE_LOW",
+                KB_VECTOR_MIN_SCORE_LOW,
+            )
+
+        return float(value)
+        
+    def get_kb_vector_fastpath_min_score(self, tenant_id: str) -> float:
+        """Zwraca minimalny score fastpath dla tenanta."""
+
+        item = self.get(tenant_id) or {}
+        kb_cfg = item.get("kb_parameters")
+
+        if not isinstance(kb_cfg, dict):
+            return self._get_env_float(
+                "KB_VECTOR_FASTPATH_MIN_SCORE",
+                KB_VECTOR_FASTPATH_MIN_SCORE,
+            )
+
+        value = kb_cfg.get("kb_vector_fastpath_min_score")
+
+        if value in (None, ""):
+            return self._get_env_float(
+                "KB_VECTOR_FASTPATH_MIN_SCORE",
+                KB_VECTOR_FASTPATH_MIN_SCORE,
+            )
+
+        return float(value)
+        
+        

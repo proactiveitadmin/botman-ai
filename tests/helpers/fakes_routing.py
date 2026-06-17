@@ -67,10 +67,21 @@ class FakeTenantsRepo:
     def __init__(self, lang: str = "pl"):
         self.lang = lang
 
+    def get_language(self, tenant_id: str):
+         return self.lang
+   
     def get(self, tenant_id: str):
         return {"tenant_id": tenant_id, "language_code": self.lang}
 
-
+    def get_kb_smalltalk_min_score(self, tenant_id: str) -> float:
+        return 0.35
+        
+    def get_kb_vector_min_score_low(self, tenant_id: str) -> float:
+        return 0.43
+        
+    def get_kb_vector_fastpath_min_score(self, tenant_id: str) -> float:
+        return 0.50
+        
 class FakeMembersIndex:
     def __init__(self, member_id: str = "999"):
         self.member_id = member_id
