@@ -54,12 +54,16 @@ def _to_internal_from(wa_id: str | None) -> str | None:
         return None
     return f"whatsapp:+{n}"
 
+def _get_verify_token(tenant_id: str | None) -> str:
+    if tenant_id:
+        cfg = tenant_cfg.get(tenant_id)
+        wa_cfg = cfg.get("whatsapp_cloud") or cfg.get("whatsapp") or {}
+        token = (wa_cfg.get("verify_token") or "").strip()
+        if token:
+            return token
 
-def _verify_signature(raw_body: str, header_sig: str, app_secret: str) -> bool:
-    """Verify Meta webhook signature.
-
-    Header format: 'sha256=<hex>'.
-    """
+    return (os.getenv("WHATSAPP_VERIFY_TOKEN") or "").strip()
+def _verify_signature(body_bytes: bytes, header_sig: str, app_secret: str) -> bool:
     dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
     if dev_mode:
         logger.info({"security": "whatsapp_signature_skipped_dev"})
@@ -72,13 +76,17 @@ def _verify_signature(raw_body: str, header_sig: str, app_secret: str) -> bool:
     if not header_sig:
         return False
 
-    hs = header_sig.strip()
-    if hs.startswith("sha256="):
-        hs = hs.split("=", 1)[1]
+    header_sig = header_sig.strip()
+    if not header_sig.startswith("sha256="):
+        return False
 
-    mac = hmac.new(app_secret.encode("utf-8"), raw_body.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(mac, hs)
+    expected = "sha256=" + hmac.new(
+        app_secret.encode("utf-8"),
+        body_bytes,
+        hashlib.sha256,
+    ).hexdigest()
 
+    return hmac.compare_digest(expected, header_sig)
 
 def _tenant_from_path(event: dict) -> str | None:
     path_params = event.get("pathParameters") or {}
@@ -107,7 +115,7 @@ def _handle_get(event: dict, tenant_id: str | None) -> dict:
     if mode != "subscribe" or not challenge:
         return {"statusCode": 400, "body": "Bad Request"}
 
-    verify_token = (os.getenv("WHATSAPP_VERIFY_TOKEN") or "").strip()
+    verify_token = _get_verify_token(tenant_id)
 
     if verify_token and hmac.compare_digest(token or "", verify_token):
         return {"statusCode": 200, "body": str(challenge)}
@@ -168,17 +176,18 @@ def lambda_handler(event, context):
 
         # POST
         raw_body = event.get("body") or ""
+
         if event.get("isBase64Encoded"):
             import base64
-            raw_body = base64.b64decode(raw_body).decode("utf-8", errors="ignore")
+            body_bytes = base64.b64decode(raw_body)
+        else:
+            body_bytes = raw_body.encode("utf-8")
 
-
-        if len(raw_body) > 256 * 1024:
+        if len(body_bytes) > 256 * 1024:
             return {"statusCode": 413, "body": "Payload too large"}
 
-        # Parse JSON early (needed to resolve tenant when endpoint is shared)
         try:
-            payload = json.loads(raw_body) if raw_body else {}
+            payload = json.loads(body_bytes.decode("utf-8"))
         except Exception:
             return {"statusCode": 400, "body": "Invalid JSON"}
         
@@ -204,7 +213,7 @@ def lambda_handler(event, context):
         wa_cfg = (cfg.get("whatsapp_cloud") or cfg.get("whatsapp") or {})
         app_secret = (wa_cfg.get("app_secret") or "").strip()
 
-        if not _verify_signature(raw_body, sig, app_secret):
+        if not _verify_signature(body_bytes, sig, app_secret):
             logger.warning({"webhook": "invalid_signature", "tenant_id": tenant_id})
             return {"statusCode": 403, "body": "Forbidden"}
 
@@ -302,5 +311,5 @@ def lambda_handler(event, context):
         return {"statusCode": 200, "body": "OK"}
 
     except Exception as e:
-        logger.error({"whatsapp_webhook_error": str(e)})
-        return {"statusCode": 200, "body": "OK"}
+        logger.exception({"whatsapp_webhook_error": str(e), "tenant_id": tenant_id})
+        return {"statusCode": 500, "body": "Internal Server Error"}

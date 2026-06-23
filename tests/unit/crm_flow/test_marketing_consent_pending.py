@@ -9,13 +9,13 @@ class FakeTemplateService:
     """
     Minimalny TemplateService:
     - confirm_words: słowa akceptacji (TAK)
-    - decline_words: słowa odmowy (NIE) - dla marketingu nieużywane, ale CRMFlow tego oczekuje dla rezerwacji
+    - reject_words: słowa odmowy (NIE) - dla marketingu nieużywane, ale CRMFlow tego oczekuje dla rezerwacji
     - pozostałe template: zwracamy po prostu nazwę templata dla łatwych asercji
     """
     def render_named(self, tenant_id: str, template_name: str, lang: str | None, ctx: dict):
         if template_name == "confirm_words":
             return "tak yes ok"
-        if template_name == "decline_words":
+        if template_name == "reject_words":
             return "nie no"
         return template_name
 

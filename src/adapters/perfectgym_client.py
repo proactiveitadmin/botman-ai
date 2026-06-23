@@ -1,21 +1,30 @@
-import requests
-import time
-import random
-from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
-from urllib.parse import quote
-import logging
+from __future__ import annotations
 
-from ..common.logging_utils import mask_phone
+import random
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+import requests
+
 from ..common.config import settings
-from ..common.timing import timed
-from ..common.constants import (
-    CRM_MARKETING_AGREEMENT_ID,
-)
-    
-logger = logging.getLogger("Dialo")
+from ..common.constants import CRM_MARKETING_AGREEMENT_ID
+from ..common.logging import logger
+from ..common.logging_utils import mask_phone
+
+JsonDict = Dict[str, Any]
+
 
 class PerfectGymClient:
+    """Client do integracji z PerfectGym API.
+
+    `base_url` powinien zwykle wskazywać na endpoint OData, np.:
+    `https://<club>.perfectgym.com/api/v2.2/odata`.
+    """
+
+    DEFAULT_TIMEOUT_S = 10
+    TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+
     def __init__(
         self,
         *,
@@ -23,28 +32,40 @@ class PerfectGymClient:
         client_id: str | None = None,
         client_secret: str | None = None,
     ) -> None:
-        # np. "https://<club>.perfectgym.com/api/v2.2/odata"
-        self.base_url: str = ((base_url or "")).rstrip("/")
-        self.client_id: str = (client_id or "")
-        self.client_secret: str = (client_secret or "")
+        self.base_url = (base_url or "").rstrip("/")
+        self.client_id = client_id or ""
+        self.client_secret = client_secret or ""
         self.logger = logger
-    
+
     @classmethod
-    def from_tenant_config(cls, tenant_cfg: dict) -> "PerfectGymClient":
-        pg = (tenant_cfg or {}).get("pg") or {}
-        if not isinstance(pg, dict):
-            pg = {}
+    def from_tenant_config(cls, tenant_cfg: dict | None) -> "PerfectGymClient":
+        pg_cfg = (tenant_cfg or {}).get("pg") or {}
+        if not isinstance(pg_cfg, dict):
+            pg_cfg = {}
+
         return cls(
-            base_url=pg.get("base_url"),
-            client_id=pg.get("client_id"),
-            client_secret=pg.get("client_secret"),
+            base_url=pg_cfg.get("base_url"),
+            client_id=pg_cfg.get("client_id"),
+            client_secret=pg_cfg.get("client_secret"),
         )
 
     # ------------------------------------------------------------------ #
-    # Helpers
+    # HTTP helpers
     # ------------------------------------------------------------------ #
 
-    def _headers(self) -> Dict[str, str]:
+    @property
+    def api_root(self) -> str:
+        """Base URL bez końcowego `/odata` dla endpointów nie-OData."""
+        suffix = "/odata"
+        if self.base_url.lower().endswith(suffix):
+            return self.base_url[: -len(suffix)]
+        return self.base_url
+
+    @property
+    def is_odata_url(self) -> bool:
+        return self.base_url.lower().endswith("/odata")
+
+    def _headers(self) -> dict[str, str]:
         return {
             "X-Client-id": self.client_id,
             "X-Client-Secret": self.client_secret,
@@ -52,186 +73,276 @@ class PerfectGymClient:
         }
 
     def _ensure_base_url(self) -> bool:
-        if not self.base_url:
-            self.logger.warning({"pg": "base_url_missing"})
-            return False
-        return True
+        if self.base_url:
+            return True
+        self.logger.warning({"pg": "base_url_missing"})
+        return False
+
+    def _odata_url(self, path: str) -> str:
+        return f"{self.base_url}/{path.lstrip('/')}"
+
+    def _api_url(self, path: str) -> str:
+        return f"{self.api_root}/{path.lstrip('/')}"
+
+    @staticmethod
+    def _escape_odata_string(value: str) -> str:
+        return value.replace("'", "''")
+
+    @staticmethod
+    def _safe_json(resp: requests.Response) -> Any:
+        try:
+            return resp.json()
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _first_value(payload: Any) -> JsonDict:
+        if isinstance(payload, list):
+            return payload[0] if payload else {}
+        if isinstance(payload, dict) and "value" in payload:
+            items = payload.get("value") or []
+            return items[0] if items else {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _coerce_int(value: int | str, field_name: str) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"invalid_{field_name}") from exc
+
+    @staticmethod
+    def _format_pg_datetime(dt: datetime) -> str:
+        """Format wymagany przez PG/OData: `YYYY-MM-DDTHH:MM:SS.mmmZ`."""
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
     def _compute_backoff(self, resp: requests.Response | None, attempt: int) -> float:
-        base = float(getattr(settings, "pg_retry_base_delay_s", 0.2))
-        max_d = float(getattr(settings, "pg_retry_max_delay_s", 2.0))
-        # exponential backoff: base * 2^(attempt-1)
-        delay = min(max_d, base * (2 ** max(0, attempt - 1)))
+        base_delay = float(getattr(settings, "pg_retry_base_delay_s", 0.2))
+        max_delay = float(getattr(settings, "pg_retry_max_delay_s", 2.0))
+        delay = min(max_delay, base_delay * (2 ** max(0, attempt - 1)))
 
-        # Retry-After header (if present) overrides if shorter than max_d
-        if resp is not None:
-            ra = resp.headers.get("Retry-After") if hasattr(resp, "headers") else None
-            if ra:
-                try:
-                    ra_f = float(ra)
-                    if 0 <= ra_f <= max_d:
-                        delay = ra_f
-                except ValueError:
-                    pass
+        retry_after = resp.headers.get("Retry-After") if resp is not None else None
+        if retry_after:
+            try:
+                retry_after_s = float(retry_after)
+            except ValueError:
+                retry_after_s = None
+            if retry_after_s is not None and 0 <= retry_after_s <= max_delay:
+                delay = retry_after_s
 
-        # jitter
-        delay *= random.uniform(0.9, 1.1)
-        return delay
+        return delay * random.uniform(0.9, 1.1)
 
-    def _request_with_retry(self, method: str, url: str, **kwargs) -> requests.Response:
-        """Make an HTTP request with retry/backoff for transient errors.
+    def _request_with_retry(self, method: str, url: str, **kwargs: Any) -> requests.Response:
+        """HTTP request z retry/backoff dla transient errorów.
 
-        Notes:
-        - For GET we call requests.get(...) to stay compatible with our lightweight test fixture
-          that monkeypatches requests.get.
-        - For POST/other verbs we call requests.request(...) to stay compatible with tests that
-          monkeypatch requests.request.
-        - This helper DOES NOT call raise_for_status(); callers decide how to handle 4xx.
+        Nie wywołuje `raise_for_status()`. Callery decydują, które błędy
+        mają być wyjątkiem, a które business-error zwracanym do wyższej warstwy.
         """
         max_attempts = int(getattr(settings, "pg_retry_max_attempts", 3))
-        kwargs.setdefault("timeout", 10)
+        kwargs.setdefault("timeout", self.DEFAULT_TIMEOUT_S)
 
-        method_u = method.upper()
+        method = method.upper()
         for attempt in range(1, max_attempts + 1):
-            resp: requests.Response | None = None
+            response: requests.Response | None = None
             try:
-                resp = requests.request(method_u, url, **kwargs)
-
-                if resp is not None and resp.status_code in (429, 500, 502, 503, 504) and attempt < max_attempts:
-                    time.sleep(self._compute_backoff(resp=resp, attempt=attempt))
+                response = requests.request(method, url, **kwargs)
+                if (
+                    response.status_code in self.TRANSIENT_STATUS_CODES
+                    and attempt < max_attempts
+                ):
+                    time.sleep(self._compute_backoff(response, attempt))
                     continue
-
-                return resp
-
+                return response
             except requests.RequestException:
                 if attempt >= max_attempts:
                     raise
-                time.sleep(self._compute_backoff(resp=resp, attempt=attempt))
+                time.sleep(self._compute_backoff(response, attempt))
 
-        # should be unreachable, but keep mypy happy
         raise requests.RequestException("exhausted retries")
 
+    def _get_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        fallback: Any,
+        log_event: str,
+        log_context: dict[str, Any] | None = None,
+        root: str = "odata",
+    ) -> Any:
+        if not self._ensure_base_url():
+            return fallback
+
+        url = self._odata_url(path) if root == "odata" else self._api_url(path)
+        try:
+            response = self._request_with_retry(
+                "GET",
+                url,
+                headers=self._headers(),
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+        except requests.RequestException as exc:
+            self.logger.error(
+                {
+                    "pg": log_event,
+                    "error": str(exc),
+                    **(log_context or {}),
+                }
+            )
+            return fallback
+
+    # ------------------------------------------------------------------ #
+    # PerfectGym business errors
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _extract_pg_business_error(payload: Any) -> dict[str, Any] | None:
+        if not isinstance(payload, dict):
+            return None
+
+        errors = payload.get("errors")
+        if not isinstance(errors, list) or not errors:
+            return None
+
+        first_error = errors[0]
+        if not isinstance(first_error, dict):
+            return None
+
+        return {
+            "message": first_error.get("message"),
+            "code": first_error.get("code"),
+            "property": first_error.get("property"),
+        }
+
+    @staticmethod
+    def _map_pg_error_to_internal(pg_error: dict[str, Any] | None) -> str | None:
+        if not pg_error:
+            return None
+
+        return {
+            "ClassesAlreadyBooked": "classes_already_booked",
+        }.get(pg_error.get("code"))
 
     # ------------------------------------------------------------------ #
     # Members
     # ------------------------------------------------------------------ #
 
-    def get_member(self, member_id: str) -> Dict[str, Any]:
+    def get_member(self, member_id: str) -> JsonDict:
         if not self._ensure_base_url():
             return {"member_id": member_id, "status": "Current", "balance": 0}
 
-        url = (
-            f"{self.base_url}/Members({member_id})"
-            "?$expand=Contracts($filter=Status eq 'Current'),memberbalance"
+        response = self._request_with_retry(
+            "GET",
+            self._odata_url(f"Members({member_id})"),
+            headers=self._headers(),
+            params={"$expand": "Contracts($filter=Status eq 'Current'),memberbalance"},
         )
-        resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
-        resp.raise_for_status()
-        return resp.json()
-        
-    def get_member_type_by_phone(self, phone: str) -> Optional[str]:
-        """Zwraca memberType dla numeru telefonu (PerfectGym-specific).
+        response.raise_for_status()
+        return response.json()
 
-        W PG pobieramy memberów z endpointu /Members filtrowanego po phoneNumber,
-        a następnie odczytujemy pole memberType (czasem zwracane jako membertype).
-        """
-        try:
-            resp = self.get_member_by_phone(phone=phone)
-            items = (resp or {}).get("value") or []
-            if not items:
-                return None
-            mt = items[0].get("memberType") or items[0].get("membertype")
-            return (str(mt).strip() if mt is not None else None)
-        except Exception:
-            return None
-            
-    def get_member_1st_name_by_phone(self, phone: str) -> Optional[str]:
-        """Zwraca firstName dla numeru telefonu (PerfectGym-specific).
-
-        W PG pobieramy memberów z endpointu /Members filtrowanego po phoneNumber,
-        a następnie odczytujemy pole firstName (czasem zwracane jako firstName).
-        """
-        try:
-            resp = self.get_member_by_phone(phone=phone)
-            items = (resp or {}).get("value") or []
-            if not items:
-                return None
-            mt = items[0].get("firstName") or items[0].get("firstname")
-            return (str(mt).strip() if mt is not None else None)
-        except Exception:
-            return None
-
-    def get_member_by_phone(self, phone: str) -> Dict[str, Any]:
-        """
-        Zwraca listę memberów dopasowanych po numerze telefonu.
-
-        GET /Members?$expand=MemberBalance&$filter=phoneNumber eq '<phone-url-encoded>'
-        """
-        if not self._ensure_base_url():
-            return {"value": []}
-
-        # PerfectGym oczekuje numeru w formacie %2B48..., więc url-encode
-        quoted = quote(phone, safe="")  # '+48123...' → '%2B48123...'
-
-        url = (
-            f"{self.base_url}/Members"
-            f"?$expand=MemberBalance"
-            f"&$filter=phoneNumber eq '{quoted}'"
+    def get_member_by_phone(self, phone: str) -> JsonDict:
+        return self._get_json(
+            "Members",
+            params={
+                "$expand": "MemberBalance",
+                "$filter": f"phoneNumber eq '{self._escape_odata_string(phone)}'",
+            },
+            fallback={"value": []},
+            log_event="get_member_by_phone_error",
+            log_context={"phone": mask_phone(phone)},
         )
 
+    def _get_first_member_field_by_phone(self, phone: str, *field_names: str) -> str | None:
         try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
-            resp.raise_for_status()
-            return resp.json()
-        except requests.RequestException as e:
-            self.logger.error(
+            payload = self.get_member_by_phone(phone)
+            items = (payload or {}).get("value") or []
+            if not items:
+                return None
+
+            member = items[0]
+            for field_name in field_names:
+                value = member.get(field_name)
+                if value is not None:
+                    return str(value).strip()
+            return None
+        except Exception as exc:  # defensive: to są helpery UX, nie krytyczna ścieżka
+            self.logger.warning(
                 {
-                    "pg": "get_member_by_phone_error",
+                    "pg": "get_member_field_by_phone_error",
                     "phone": mask_phone(phone),
-                    "error": str(e),
+                    "fields": field_names,
+                    "error": str(exc),
                 }
             )
-            return {"value": []}
-    @staticmethod
-    def _extract_pg_business_error(payload: Any) -> dict | None:
-        """Wyciąga pierwszy business error z odpowiedzi PG.
+            return None
 
-        Oczekiwany format:
-        {
-            "errors": [
-                {
-                    "message": "Classes already booked.",
-                    "code": "ClassesAlreadyBooked",
-                    ...
-                }
-            ]
+    def get_member_type_by_phone(self, phone: str) -> str | None:
+        return self._get_first_member_field_by_phone(phone, "memberType", "membertype")
+
+    def get_member_1st_name_by_phone(self, phone: str) -> str | None:
+        return self._get_first_member_field_by_phone(phone, "firstName", "firstname")
+
+    def get_member_balance(self, member_id: int) -> JsonDict:
+        empty_balance = {
+            "club_id": None,
+            "prepaidBalance": 0,
+            "prepaidBonusBalance": 0,
+            "currentBalance": 0,
+            "negativeBalanceSince": None,
+            "raw": {},
         }
-        """
-        if not isinstance(payload, dict):
-            return None
-        errors = payload.get("errors")
-        if not isinstance(errors, list) or not errors:
-            return None
-        first = errors[0]
-        if not isinstance(first, dict):
-            return None
+
+        payload = self._get_json(
+            f"Members({member_id})",
+            params={"$expand": "memberBalance"},
+            fallback=None,
+            log_event="get_member_balance_error",
+            log_context={"member_id": member_id},
+        )
+        if payload is None:
+            return empty_balance
+
+        data = self._first_value(payload)
+        member_balance = data.get("memberBalance") or data.get("MemberBalance") or {}
+        club_id = data.get("homeClubId")
+
+        self.logger.info({"pg": "get_member_balance_ok", "member_id": member_id})
         return {
-            "message": first.get("message"),
-            "code": first.get("code"),
-            "property": first.get("property"),
+            "club_id": club_id,
+            "prepaidBalance": member_balance.get("prepaidBalance", 0),
+            "prepaidBonusBalance": member_balance.get("prepaidBonusBalance", 0),
+            "currentBalance": member_balance.get("currentBalance", 0),
+            "negativeBalanceSince": member_balance.get("negativeBalanceSince"),
+            "raw": member_balance,
         }
 
-    @staticmethod
-    def _map_pg_error_to_internal(pg_error: dict | None) -> str | None:
-        """Mapuje znane błędy PG na stabilne kody wewnętrzne."""
-        if not pg_error:
-            return None
-        code = pg_error.get("code")
-        if code == "ClassesAlreadyBooked":
-            return "classes_already_booked"
-        return None
+    def get_marketing_consent_for_member(self, member_id: int) -> bool:
+        if not self._ensure_base_url():
+            return False
+
+        odata_filter = (
+            f"memberId eq {int(member_id)} "
+            f"and memberAgreementId eq {CRM_MARKETING_AGREEMENT_ID} "
+            "and agreed eq true"
+        )
+
+        payload = self._get_json(
+            "MemberAgreementAnswers",
+            params={"$filter": odata_filter},
+            fallback={"value": []},
+            log_event="pg_marketing_consent_check_failed",
+            log_context={"member_id": member_id},
+        )
+        return bool((payload or {}).get("value"))
 
     # ------------------------------------------------------------------ #
-    # Classes / rezerwacje
+    # Classes / reservations
     # ------------------------------------------------------------------ #
 
     def reserve_class(
@@ -241,117 +352,89 @@ class PerfectGymClient:
         idempotency_key: Optional[str] = None,
         comments: Optional[str] = None,
         allow_overlap: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Rezerwacja zajęć w PerfectGym – endpoint:
-        POST /api/v2.2/ClassBooking/BookClass
-
-        Zakładamy, że pg_base_url wskazuje na /api/v2.2/odata
-        → dlatego usuwamy /odata na potrzeby BookClass.
-        """
+    ) -> JsonDict:
         if not self._ensure_base_url():
-            # Fallback w trybie "dev" bez PG – udajemy sukces          
-            logger.warning({
-                "msg": "PG disabled (dev mode)", 
-                "class_id": class_id, 
-                "member_id": member_id})
+            self.logger.warning(
+                {
+                    "msg": "PG disabled (dev mode)",
+                    "class_id": class_id,
+                    "member_id": member_id,
+                }
+            )
             return {
                 "ok": True,
                 "status_code": 200,
                 "data": {"fake": True, "classId": class_id, "memberId": member_id},
             }
 
-        # API BookClass zwykle jest pod /api/v2.2, bez /odata
-        api_root = self.base_url.replace("/odata", "")
-        url = f"{api_root}/ClassBooking/BookClass"
-
-        payload = {
-            "memberId": int(member_id),
-            "classId": int(class_id),
-            "bookDespiteOtherBookingsAtTheSameTime": bool(allow_overlap),
-            "comments": comments or "booked by Dialo WhatsApp",
-        }
+        try:
+            payload = {
+                "memberId": self._coerce_int(member_id, "member_id"),
+                "classId": self._coerce_int(class_id, "class_id"),
+                "bookDespiteOtherBookingsAtTheSameTime": bool(allow_overlap),
+                "comments": comments or "booked by Dialo WhatsApp",
+            }
+        except ValueError as exc:
+            return {
+                "ok": False,
+                "status_code": None,
+                "error": str(exc),
+                "body": None,
+            }
 
         headers = self._headers()
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
+
         try:
-            resp = self._request_with_retry("POST", url, json=payload, headers=headers, timeout=10)
-        except requests.RequestException as e:
+            response = self._request_with_retry(
+                "POST",
+                self._api_url("ClassBooking/BookClass"),
+                json=payload,
+                headers=headers,
+            )
+        except requests.RequestException as exc:
             self.logger.error(
                 {
                     "pg": "reserve_class_error",
                     "member_id": member_id,
                     "class_id": class_id,
-                    "error": str(e),
+                    "error": str(exc),
                 }
             )
             return {
                 "ok": False,
                 "status_code": None,
-                "error": str(e),
+                "error": str(exc),
                 "body": None,
             }
 
-        # PG czasem zwraca business-error w JSON nawet dla 4xx.
-        # Parsujemy JSON przed raise_for_status, żeby móc go zmapować i dać lepszy UX.
-        try:
-            data = resp.json()
-        except ValueError:
-            data = None
-
-        if resp.status_code >= 400:
+        data = self._safe_json(response)
+        if response.status_code >= 400:
             pg_error = self._extract_pg_business_error(data)
-            mapped = self._map_pg_error_to_internal(pg_error)
-
-            # nadal wywołaj raise_for_status() żeby error był spójny w logach
-            try:
-                resp.raise_for_status()
-            except requests.HTTPError as e:
-                self.logger.error(
-                    {
-                        "pg": "reserve_class_error",
-                        "member_id": member_id,
-                        "error": "HTTP error",
-                    }
-                )
-                return {
-                    "ok": False,
-                    "status_code": resp.status_code,
-                    "error": "HTTP error",
-                    "body": resp.text,
-                    "data": data,
-                    "pg_error": pg_error,
-                    "mapped_error": mapped,
-                }
-
-            # teoretycznie nie powinno się zdarzyć, ale zostawiamy bezpieczny fallback
+            mapped_error = self._map_pg_error_to_internal(pg_error)
             self.logger.error(
                 {
                     "pg": "reserve_class_error",
                     "member_id": member_id,
-                    "error": "HTTP error",
+                    "class_id": class_id,
+                    "status_code": response.status_code,
+                    "pg_error": pg_error,
+                    "mapped_error": mapped_error,
                 }
             )
             return {
                 "ok": False,
-                "status_code": resp.status_code,
-                "error": str(e),
-                "body": resp.text,
+                "status_code": response.status_code,
+                "error": "HTTP error",
+                "body": response.text,
+                "data": data,
+                "pg_error": pg_error,
+                "mapped_error": mapped_error,
             }
 
-        try:
-            data = resp.json()
-        except ValueError:
-            data = None
+        return {"ok": True, "status_code": response.status_code, "data": data}
 
-        return {
-            "ok": True,
-            "status_code": resp.status_code,
-            "data": data,
-        }
-
-   
     def get_available_classes(
         self,
         club_id: int | None = None,
@@ -361,399 +444,127 @@ class PerfectGymClient:
         class_type_query: str | None = None,
         fields: list[str] | None = None,
         top: int | None = None,
-    ) -> Dict[str, Any]:
-        """
-        Pobiera listę klas w formacie identycznym jak działający curl.
-        """
-
+    ) -> JsonDict:
+        # Zachowuję argumenty `club_id`, `member_id`, `fields` dla kompatybilności API.
+        # `club_id` i `member_id` nie były używane w oryginalnym kodzie.
         if not self._ensure_base_url():
             return {"value": []}
 
-        url = f"{self.base_url}/Classes"
-        
-        # Uproszczony tryb (bez OData query params) — używany w testach i w prostych integracjach,
-        # gdy base_url nie wskazuje na /odata.
-        if "odata" not in self.base_url.lower():
-            try:
-                resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
-                resp.raise_for_status()
-                return resp.json()
-            except Exception as e:
-                self.logger.error({"pg": "get_available_classes_error", "error": str(e)})
-                return {"value": []}
-                
-        # --- FORMATOWANIE DATY DOKŁADNIE JAK W CURLU --- #
-        if from_iso is None:
-            from_iso = datetime.utcnow()
-            
-        if to_iso is None:
-            to_iso = from_iso + timedelta(days=2)
+        if not self.is_odata_url:
+            return self._get_json(
+                "Classes",
+                fallback={"value": []},
+                log_event="get_available_classes_error",
+            )
 
-        # Format: 2025-11-22T19:33:10.201Z
-        # PG wymaga milisekund oraz "Z" na końcu
-        start_str = (
-            from_iso.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]  # mikrosekundy → milisekundy
-            + "Z"
-        )
-        end_str = (
-            to_iso.strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]  # mikrosekundy → milisekundy
-            + "Z"
-        )
-        filter_expr = f"isDeleted eq false and startdate gt {start_str} and startdate lt {end_str}"
-        # dodatkowy filtr po typie zajęć (np. 'pilates')
-        # wymaganie: and contains(tolower(classType/name),'pilates')
+        start = from_iso or datetime.now(timezone.utc)
+        end = to_iso or start + timedelta(days=2)
+
+        filter_parts = [
+            "isDeleted eq false",
+            f"startdate gt {self._format_pg_datetime(start)}",
+            f"startdate lt {self._format_pg_datetime(end)}",
+        ]
+
         if class_type_query:
-            q = class_type_query.strip().lower().replace("'", "''")
-            if q:
-                filter_expr += f" and contains(tolower(classType/name),'{q}')"
-        # --- PARAMETRY IDENTYCZNE JAK W TWOIM CURLU --- #
-        params = {
-            "$filter": filter_expr,
+            query = self._escape_odata_string(class_type_query.strip().lower())
+            if query:
+                filter_parts.append(f"contains(tolower(classType/name),'{query}')")
+
+        params: dict[str, Any] = {
+            "$filter": " and ".join(filter_parts),
             "$expand": "classType",
             "$orderby": "startdate",
         }
-
+        if fields:
+            params["$select"] = ",".join(fields)
         if top is not None:
             params["$top"] = str(top)
 
-        try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            self.logger.info(
-                {
-                    "pg": "get_available_classes_ok",
-                    "count": len(data.get('value', [])),
-                }
-            )
-            return data
-
-        except requests.RequestException as e:
-            self.logger.error({
-                "pg": "get_available_classes_error",
-                "error": str(e),
-            })
-            return {"value": []}
-    # ------------------------------------------------------------------ #
-    # Contracts / balance
-    # ------------------------------------------------------------------ #
-  
-    def get_contract_by_member_id(self, member_id: str) -> Dict[str, Any]:
-        """
-        Zwraca aktualny kontrakt członka PerfectGym albo pusty dict.
-
-        Używa:
-          GET /Members({member_id})?$expand=Contracts($filter=Status eq 'Current'),memberbalance
-        """
-        if not self._ensure_base_url():
-            return {"value": []}
-
-        # dokładnie taki URL, jak w logu, który działał
-        url = (
-            f"{self.base_url}/Members({member_id})"
-            "?$expand=Contracts($filter=Status eq 'Current'),memberbalance"
+        payload = self._get_json(
+            "Classes",
+            params=params,
+            fallback={"value": []},
+            log_event="get_available_classes_error",
         )
+        self.logger.info(
+            {
+                "pg": "get_available_classes_ok",
+                "count": len((payload or {}).get("value", [])),
+            }
+        )
+        return payload
 
+    def get_class(self, class_id: int | str) -> JsonDict:
         try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # PerfectGym w takim zapytaniu zwraca pojedynczego membera z polem Contracts
-            if isinstance(data, list):
-                data = data[0] if data else {}
-
-            contracts = data.get("Contracts") or data.get("contracts") or []
-
-            current = next(
-                (
-                    c for c in contracts
-                    if c.get("Status") == "Current" or c.get("status") == "Current"
-                ),
-                None,
-            )
-
-            return current or {}
-
-        except requests.RequestException as e:
-            self.logger.error(
-                {
-                    "pg": "get_contract_by_member_id_error",
-                    "member_id": member_id,
-                    "error": str(e),
-                }
-            )
-            return {}  
-            
-    def get_paymentplan_by_member_id(self, member_id: str) -> Dict[str, Any]:
-        if not self._ensure_base_url():
+            class_id_int = self._coerce_int(class_id, "class_id")
+        except ValueError as exc:
+            self.logger.error({"pg": "get_class_error", "class_id": class_id, "error": str(exc)})
             return {}
 
-        url = f"{self.base_url}/contracts"
-
-        params = {
-            "$filter": f"memberId eq {member_id}",
-            "$expand": "paymentPlan($expand=allowedPaymentTypes)"
-        }
-
-        try:
-            resp = self._request_with_retry(
-                "GET",
-                url,
-                headers=self._headers(),
-                params=params,
-                timeout=10
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-            contracts = data.get("value", []) if isinstance(data, dict) else data
-
-            if not contracts:
-                return {}
-
-            contract = contracts[0]
-            return contract.get("paymentPlan") or {}
-
-        except requests.RequestException as e:
-            self.logger.error({
-                "pg": "get_paymentplan_by_member_id_error",
-                "member_id": member_id,
-                "error": str(e),
-            })
-            return {}
-
-    def get_member_balance(self, member_id: int) -> Dict[str, Any]:
-        """
-        GET /Members({id})?$expand=memberBalance
-        """
-        if not self._ensure_base_url():
-            return {
-                "club_id": None,
-                "prepaidBalance": 0,
-                "prepaidBonusBalance": 0,
-                "currentBalance": 0,
-                "negativeBalanceSince": None,
-                "raw": {},
-            }
-
-        url = f"{self.base_url}/Members({member_id})?$expand=memberBalance"
-        try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # jeśli to /Members?filter=... przypadkiem:
-            if "value" in data:
-                items = data.get("value") or []
-                data = items[0] if items else {}
-
-            mb = data.get("memberBalance") or {}
-            club_id = data.get("homeClubId") or {}
-            self.logger.info(
-                {"pg": "get_member_balance_ok", "member_id": member_id}
-            )
-            return {
-                "club_id": club_id,
-                "prepaidBalance": mb.get("prepaidBalance", 0),
-                "prepaidBonusBalance": mb.get("prepaidBonusBalance", 0),
-                "currentBalance": mb.get("currentBalance", 0),
-                "negativeBalanceSince": mb.get("negativeBalanceSince"),
-                "raw": mb,
-            }
-        except requests.RequestException as e:
-            self.logger.error(
-                {"pg": "get_member_balance_error", "member_id": member_id, "error": str(e)}
-            )
-            return {
-                "club_id": None,
-                "prepaidBalance": 0,
-                "prepaidBonusBalance": 0,
-                "currentBalance": 0,
-                "negativeBalanceSince": None,
-                "raw": {},
-            }
-    
-    def get_marketing_consent_for_member(self, member_id: int) -> bool:
-        """
-        Sprawdza w PerfectGym czy member ma zgodę marketingową (agreed = true).
-        memberAgreementId traktujemy jako stałą (1).
-        """
-        odata_filter = (
-            f"memberId eq {int(member_id)} "
-            f"and memberAgreementId eq {CRM_MARKETING_AGREEMENT_ID} "
-            f"and agreed eq true"
+        payload = self._get_json(
+            f"Classes({class_id_int})",
+            params={"$expand": "classType"},
+            fallback={},
+            log_event="get_class_error",
+            log_context={"class_id": class_id_int},
         )
-
-        url = (
-            f"{self.base_url}/MemberAgreementAnswers"
-            f"?$filter={quote(odata_filter, safe=' =$andtruefalse')}"
-        )
-
-        try:
-            resp = self._request_with_retry(
-                "GET",
-                url,
-                headers=self._headers(),
-                timeout=10,
-            )
-            resp.raise_for_status()
-            data = resp.json() or {}
-            return bool(data.get("value"))
-        except Exception as e:
-            logger.error(
-                {
-                    "crm": "pg_marketing_consent_check_failed",
-                    "member_id": member_id,
-                    "error": str(e),
-                }
-            )
-            # fail-safe: jak nie wiemy, to NIE wysyłamy
-            return False
+        data = self._first_value(payload)
+        if data:
+            self.logger.info({"pg": "get_class_ok", "class_id": class_id_int})
+        return data
 
     # ------------------------------------------------------------------ #
-    # Classes – pojedyncza klasa po ID
+    # Contracts / payment plans / debt
     # ------------------------------------------------------------------ #
 
-    def get_class(self, class_id: int | str) -> Dict[str, Any]:
-        """
-        Zwraca pojedyncze zajęcia (klasę) po ID.
-
-        GET /Classes({id})?$expand=classType
-        """
-        if not self._ensure_base_url():
-            # brak konfiguracji PG → zwracamy pusty obiekt, żeby nie wywalić flow
-            return {}
-
-        cid = int(class_id) if isinstance(class_id, str) and class_id.isdigit() else class_id
-        url = f"{self.base_url}/Classes({cid})?$expand=classType"
-        
-        try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # na wszelki wypadek – gdyby ktoś jednak zrobił redirect na kolekcję
-            if isinstance(data, dict) and "value" in data:
-                items = data.get("value") or []
-                data = items[0] if items else {}
-
-            self.logger.info(
-                {
-                    "pg": "get_class_ok",
-                    "class_id": cid,
-                }
-            )
-            return data
-
-        except requests.RequestException as e:
-            self.logger.error(
-                {
-                    "pg": "get_class_error",
-                    "class_id": cid,
-                    "error": str(e),
-                }
-            )
-            return {}
-
-    def get_debt_payment_link(
-        self,
-        member_id: int | str,
-        club_id: int | str,
-        return_url: str,
-        save_payment_source_after_success: bool = False,
-    ) -> Dict[str, Any]:
-        """
-        Generuje link do płatności za aktualne zadłużenie klienta.
-
-        1) Pobiera niezapłacone, nieanulowane i nieusunięte ContractCharges.
-        2) Pomija płatności z przyszłości na podstawie pola dueDate.
-        3) Dla pozostałych pozycji wywołuje CreditCards/PayWithRedirect.
-
-        Zwraca m.in. URL płatności, kwotę całkowitą oraz listę pozycji,
-        za które klient płaci.
-        """
-        if not self._ensure_base_url():
-            self.logger.error(
-                {
-                    "pg": "get_debt_payment_link_charges_error",
-                    "member_id": mid,
-                    "error": "base_url_missing",
-                }
-            )
-            return {
-                "ok": False,
-                "status_code": None,
-                "error": "base_url_missing",
-                "url": None,
-                "items": [],
-                "totalAmount": 0,
-            }
-
-        try:
-            mid = int(member_id)
-            cid = int(club_id)
-        except (TypeError, ValueError):
-            self.logger.error(
-                {
-                    "pg": "get_debt_payment_link_charges_error",
-                    "member_id": mid,
-                    "cid": club_id,
-                }
-            )
-            return {
-                "ok": False,
-                "status_code": None,
-                "error": "invalid_member_or_club_id",
-                "url": None,
-                "items": [],
-                "totalAmount": 0,
-            }
-
-        charges_url = f"{self.base_url}/ContractCharges"
-        charges_params = {
-            "$filter": (
-                f"memberid eq {mid} "
-                "and isCancelled eq false "
-                "and isDeleted eq false"
+    def get_contract_by_member_id(self, member_id: str) -> JsonDict:
+        payload = self._get_json(
+            f"Members({member_id})",
+            params={"$expand": "Contracts($filter=Status eq 'Current'),memberbalance"},
+            fallback={},
+            log_event="get_contract_by_member_id_error",
+            log_context={"member_id": member_id},
+        )
+        data = self._first_value(payload)
+        contracts = data.get("Contracts") or data.get("contracts") or []
+        return next(
+            (
+                contract
+                for contract in contracts
+                if contract.get("Status") == "Current" or contract.get("status") == "Current"
             ),
-            "$select": "id,memberId,dueDate,leftToPay,description",
-        }
+            {},
+        )
 
-        try:
-            charges_resp = self._request_with_retry(
-                "GET",
-                charges_url,
-                headers=self._headers(),
-                params=charges_params,
-                timeout=10,
-            )
-            charges_resp.raise_for_status()
-            charges_data = charges_resp.json() or {}
-        except requests.RequestException as e:
-            self.logger.error(
-                {
-                    "pg": "get_debt_payment_link_charges_error",
-                    "member_id": mid,
-                    "error": str(e),
-                }
-            )
-            return {
-                "ok": False,
-                "status_code": getattr(locals().get("charges_resp", None), "status_code", None),
-                "error": str(e),
-                "url": None,
-                "items": [],
-                "totalAmount": 0,
-            }
+    def get_paymentplan_by_member_id(self, member_id: str) -> JsonDict:
+        payload = self._get_json(
+            "contracts",
+            params={
+                "$filter": f"memberId eq {member_id}",
+                "$expand": "paymentPlan($expand=allowedPaymentTypes)",
+            },
+            fallback={},
+            log_event="get_paymentplan_by_member_id_error",
+            log_context={"member_id": member_id},
+        )
+        contracts = payload.get("value", []) if isinstance(payload, dict) else payload
+        if not contracts:
+            return {}
+        return contracts[0].get("paymentPlan") or {}
 
+    def _build_current_debt_items(self, charges: list[JsonDict]) -> tuple[list[JsonDict], list[JsonDict], float]:
         now = datetime.now().astimezone()
-        payment_items: List[Dict[str, Any]] = []
-        customer_items: List[Dict[str, Any]] = []
+        payment_items: list[JsonDict] = []
+        customer_items: list[JsonDict] = []
         total_amount = 0.0
 
-        for charge in (charges_data.get("value") or []):
-            left_to_pay = float(charge.get("leftToPay") or 0)
+        for charge in charges:
+            try:
+                left_to_pay = float(charge.get("leftToPay") or 0)
+            except (TypeError, ValueError):
+                continue
+
             if left_to_pay <= 0:
                 continue
 
@@ -766,12 +577,9 @@ class PerfectGymClient:
                     if due_date > now:
                         continue
                 except ValueError:
-                    # Jeśli PG zwróci nieparsowalną datę, bezpiecznie pomijamy pozycję,
-                    # żeby nie naliczyć przyszłej lub błędnej płatności.
                     self.logger.warning(
                         {
                             "pg": "get_debt_payment_link_invalid_due_date",
-                            "member_id": mid,
                             "charge_id": charge.get("id"),
                             "dueDate": due_date_raw,
                         }
@@ -799,8 +607,73 @@ class PerfectGymClient:
             )
             total_amount += amount
 
-        total_amount = round(total_amount, 2)
+        return payment_items, customer_items, round(total_amount, 2)
 
+    def get_debt_payment_link(
+        self,
+        member_id: int | str,
+        club_id: int | str,
+        return_url: str,
+        save_payment_source_after_success: bool = False,
+    ) -> JsonDict:
+        if not self._ensure_base_url():
+            return {
+                "ok": False,
+                "status_code": None,
+                "error": "base_url_missing",
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+            }
+
+        try:
+            member_id_int = self._coerce_int(member_id, "member_id")
+            club_id_int = self._coerce_int(club_id, "club_id")
+        except ValueError as exc:
+            self.logger.error(
+                {
+                    "pg": "get_debt_payment_link_charges_error",
+                    "member_id": member_id,
+                    "club_id": club_id,
+                    "error": str(exc),
+                }
+            )
+            return {
+                "ok": False,
+                "status_code": None,
+                "error": "invalid_member_or_club_id",
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+            }
+
+        charges_payload = self._get_json(
+            "ContractCharges",
+            params={
+                "$filter": (
+                    f"memberid eq {member_id_int} "
+                    "and isCancelled eq false "
+                    "and isDeleted eq false"
+                ),
+                "$select": "id,memberId,dueDate,leftToPay,description",
+            },
+            fallback=None,
+            log_event="get_debt_payment_link_charges_error",
+            log_context={"member_id": member_id_int},
+        )
+        if charges_payload is None:
+            return {
+                "ok": False,
+                "status_code": None,
+                "error": "failed_to_fetch_charges",
+                "url": None,
+                "items": [],
+                "totalAmount": 0,
+            }
+
+        payment_items, customer_items, total_amount = self._build_current_debt_items(
+            charges_payload.get("value") or []
+        )
         if not payment_items:
             return {
                 "ok": True,
@@ -811,122 +684,102 @@ class PerfectGymClient:
                 "message": "no_current_debt",
             }
 
-        api_root = self.base_url.replace("/odata", "")
-        payment_url = f"{api_root}/CreditCards/PayWithRedirect"
         payload = {
             "returnUrl": return_url,
             "savePaymentSourceAfterSuccess": bool(save_payment_source_after_success),
-            "memberId": mid,
-            "clubId": cid,
+            "memberId": member_id_int,
+            "clubId": club_id_int,
             "membershipTransactionItems": payment_items,
             "totalAmount": total_amount,
         }
 
+        payment_response: requests.Response | None = None
+        payment_data: Any = None
         try:
-            payment_resp = self._request_with_retry(
+            payment_response = self._request_with_retry(
                 "POST",
-                payment_url,
+                self._api_url("CreditCards/PayWithRedirect"),
                 json=payload,
                 headers=self._headers(),
-                timeout=10,
             )
+            payment_data = self._safe_json(payment_response)
+            payment_response.raise_for_status()
 
-            try:
-                payment_data = payment_resp.json()
-            except ValueError:
-                payment_data = None
-
-            if payment_resp.status_code >= 400:
-                payment_resp.raise_for_status()
-
-            payment_url_value = (payment_data or {}).get("url")
             self.logger.info(
                 {
                     "pg": "get_debt_payment_link_ok",
-                    "member_id": mid,
+                    "member_id": member_id_int,
                     "items_count": len(payment_items),
                     "total_amount": total_amount,
                 }
             )
             return {
                 "ok": True,
-                "status_code": payment_resp.status_code,
-                "url": payment_url_value,
+                "status_code": payment_response.status_code,
+                "url": (payment_data or {}).get("url"),
                 "processKey": (payment_data or {}).get("processKey"),
                 "paymentProviderName": (payment_data or {}).get("paymentProviderName"),
                 "items": customer_items,
                 "totalAmount": total_amount,
                 "data": payment_data,
             }
-
-        except requests.RequestException as e:
+        except requests.RequestException as exc:
             self.logger.error(
                 {
                     "pg": "get_debt_payment_link_payment_error",
-                    "member_id": mid,
-                    "error": str(e),
+                    "member_id": member_id_int,
+                    "error": str(exc),
                 }
             )
             return {
                 "ok": False,
-                "status_code": getattr(locals().get("payment_resp", None), "status_code", None),
-                "error": str(e),
+                "status_code": getattr(payment_response, "status_code", None),
+                "error": str(exc),
                 "url": None,
                 "items": customer_items,
                 "totalAmount": total_amount,
-                "data": locals().get("payment_data", None),
+                "data": payment_data,
             }
 
-    def get_product_payment_link(self, member_id: int, product_id: int | str) -> Dict[str, Any]:
-        """
-        Zwraca url produktu.
+    # ------------------------------------------------------------------ #
+    # Products
+    # ------------------------------------------------------------------ #
 
-        GET /Products?$filter=Id eq 'product_id' and isDeleted eq false
-        """
-        if not self._ensure_base_url():
-            # brak konfiguracji PG → zwracamy pusty obiekt, żeby nie wywalić flow
-            return {}
-
-        # dopuszczamy zarówno int, jak i str z cyframi
-        pid = int(product_id) if isinstance(product_id, str) and product_id.isdigit() else product_id
-
-        url = f"{self.base_url}/Products"
-        filter_expr = f" Id eq {pid} and isDeleted eq false"
-        # --- PARAMETRY IDENTYCZNE JAK W CURLU --- #
-        params = {
-            "$filter": filter_expr,
-        }
+    def get_product(self, product_id: int | str) -> JsonDict:
         try:
-            resp = self._request_with_retry("GET", url, headers=self._headers(), params=params, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-
-            # na wszelki wypadek – gdyby ktoś jednak zrobił redirect na kolekcję
-            if isinstance(data, dict) and "value" in data:
-                items = data.get("value") or []
-                data = items[0] if items else {}
-                self.logger.info(
-                    {
-                        "pg": "get_product_ok",
-                        "product_id": pid,
-                        "member_id": member_id,
-                    }
-                )
-            #return data
-            self.logger.warning(
-                {
-                    "pg": "get_product_not_implemented",
-                    "product_id": pid,
-                }
-            )
-            return {}
-
-        except requests.RequestException as e:
+            product_id_int = self._coerce_int(product_id, "product_id")
+        except ValueError as exc:
             self.logger.error(
-                {
-                    "pg": "get_product_error",
-                    "product_id": pid,
-                    "error": str(e),
-                }
+                {"pg": "get_product_error", "product_id": product_id, "error": str(exc)}
             )
             return {}
+
+        payload = self._get_json(
+            "Products",
+            params={"$filter": f"Id eq {product_id_int} and isDeleted eq false"},
+            fallback={},
+            log_event="get_product_error",
+            log_context={"product_id": product_id_int},
+        )
+        product = self._first_value(payload)
+        if product:
+            self.logger.info({"pg": "get_product_ok", "product_id": product_id_int})
+        return product
+
+    def get_product_payment_link(self, member_id: int, product_id: int | str) -> JsonDict:
+        """TODO: implementacja generowania linku produktu.
+
+        Oryginalna metoda pobierała produkt, ale finalnie zawsze zwracała `{}`.
+        Zostawiam publiczną sygnaturę i obecny kontrakt zwrotki, żeby nie zepsuć
+        istniejących callerów. Dane produktu są pobierane i logowane diagnostycznie.
+        """
+        product = self.get_product(product_id)
+        self.logger.warning(
+            {
+                "pg": "get_product_payment_link_not_implemented",
+                "member_id": member_id,
+                "product_id": product_id,
+                "product_found": bool(product),
+            }
+        )
+        return {}

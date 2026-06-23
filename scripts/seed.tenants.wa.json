@@ -5,8 +5,7 @@
         "Item": {
 			"tenant_id": { "S": "clubProactiveIT" },
 			"language_code": { "S": "pl" },
-			"twilio_to": { "S": "whatsapp:+48694017163" },			
-			"wa_phone_number_id": { "S": "965611866635232" },
+			"twilio_to": { "S": "whatsapp:+14155238886" },				
 			"return_url": { "S": "https://www.proactiveit.pl/en/home" },
 
 			"email": {
@@ -20,9 +19,9 @@
 
 			"kb_parameters": {
 			  "M": {
-				"kb_smalltalk_min_score": { "N": 0.35 }
-				"kb_vector_min_score_low": { "N": 0.43 }
-				"kb_vector_fastpath_min_score": { "N": 0.50 }
+				"kb_smalltalk_min_score": { "N": "0.35" },
+				"kb_vector_min_score_low": { "N": "0.43" },
+				"kb_vector_fastpath_min_score": { "N": "0.50" }
 			  }
 			},
 
@@ -61,7 +60,9 @@
 			"whatsapp_cloud": {
 			  "M": {
 				"access_token_param": { "S": "/botman/prod/clubProactiveIT/wa_access_token" },
-				"api_version": { "S": "v25.0" }
+				"api_version": { "S": "v25.0" },
+				"app_secret_param": { "S": "/botman/prod/clubProactiveIT/wa_app_secret" },
+				"verify_token": { "S": "hello whatsapp" }
 			  }
 			}
 		}
@@ -87,9 +88,9 @@
 
 			"kb_parameters": {
 			  "M": {
-				"kb_smalltalk_min_score": { "N": 0.35 }
-				"kb_vector_min_score_low": { "N": 0.43 }
-				"kb_vector_fastpath_min_score": { "N": 0.50 }
+				"kb_smalltalk_min_score": { "N": "0.35" },
+				"kb_vector_min_score_low": { "N": "0.43" },
+				"kb_vector_fastpath_min_score": { "N": "0.50" }
 			  }
 			},
 
@@ -115,20 +116,22 @@
 				"token_param": { "S": "/botman/prod/default/jira_token" },
 				"project_key": { "S": "KAN" },
 				"issue_type_name": { "S": "Task" }
-			}
-		  },
+			  }
+		    },
 
 			"pinecone": {
 			  "M": {
 				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" },
-				"api_key_param": { "S": "/botman/prod/clubProactiveIT/pc_api_key" }
+				"api_key_param": { "S": "/botman/prod/default/pc_api_key" }
 			  }
 			},
 
 			"whatsapp_cloud": {
 			  "M": {
-				"access_token_param": { "S": "/botman/prod/clubProactiveIT/wa_access_token" },
-				"api_version": { "S": "v25.0" }			  
+				"access_token_param": { "S": "/botman/prod/default/wa_access_token" },
+				"api_version": { "S": "v25.0" },
+				"app_secret_param": { "S": "/botman/prod/default/wa_app_secret" },
+				"verify_token": { "S": "hello whatsapp" }
 			  }
 			}
 		}

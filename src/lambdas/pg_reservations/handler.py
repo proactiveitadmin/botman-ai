@@ -26,13 +26,7 @@ def _resolve_tenant_id(event: dict, body: dict) -> str | None:
     if tenant_id:
         return str(tenant_id).strip() or None
 
-    # 2) API key -> tenant (for integrations that cannot call per-tenant URL)
-    api_key = _get_header(headers, "X-Api-Key") or _get_header(headers, "X-PG-Api-Key")
-    if api_key:
-        item = tenants_repo.find_by_pg_api_key(str(api_key).strip())
-        return (item or {}).get("tenant_id")
-
-    # 3) optional fallback: tenant_id in request body (manual tests / tools)
+    # 2) optional fallback: tenant_id in request body (manual tests / tools)
     tenant_id = body.get("tenant_id") or body.get("tenant")
     if tenant_id:
         return str(tenant_id).strip() or None

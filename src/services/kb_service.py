@@ -6,17 +6,13 @@ Odpowiada za pobieranie odpowiedzi FAQ dla danego tenanta:
 - jeśli nie ma pliku lub nie ma konfiguracji, korzysta z domyślnego DEFAULT_FAQ.
 """
 
-import os
 import json
 import re
-import time  
-import random
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 from botocore.exceptions import ClientError
 from .kb_vector_service import KBVectorService
 from .clients_factory import ClientsFactory
-from .tenant_config_service import default_tenant_config_service
 from ..common.logging import logger
 from ..repos.tenants_repo import TenantsRepo
 from ..domain.templates import DEFAULT_FAQ
@@ -252,211 +248,310 @@ class KBService:
         # fallback na domyślne (na razie bez wariantów językowych)
         return DEFAULT_FAQ.get(topic)
  
-    def answer_ai(
+    def _chunk_score(self, chunk) -> float:
+        """Safely read vector score from a retrieved chunk."""
+        try:
+            return float(getattr(chunk, STR_CHUNK_SCORE, 0.0) or 0.0)
+        except Exception:
+            return 0.0
+
+    def _extract_answer_from_chunk(self, chunk) -> Optional[str]:
+        """Extract `A: ...` answer from a KB chunk."""
+        text = (getattr(chunk, "text", "") or "").strip()
+        if not text:
+            return None
+
+        match = re.search(
+            FASTPATCH_SEARCH_REGEX,
+            text,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if match:
+            answer = (match.group(1) or "").strip()
+        else:
+            parts = re.split(
+                FASTPATCH_SPLIT_REGEX,
+                text,
+                maxsplit=1,
+                flags=re.IGNORECASE,
+            )
+            answer = parts[1].strip() if len(parts) == 2 else ""
+
+        if not answer or answer == ANSWER_NO_INFO:
+            return None
+        return answer
+
+    def _log_retrieved_chunks(self, chunks: list) -> None:
+        for rank, chunk in enumerate(chunks[:KB_RETRIEVED_CHUNKS], start=1):
+            logger.warning(
+                {
+                    "component": "kb_service",
+                    "event": "retrieved_top",
+                    "rank": rank,
+                    "score": getattr(chunk, "score", None),
+                    "faq_key": getattr(chunk, "faq_key", None),
+                    "text[:200]": (getattr(chunk, "text", "") or "")[:200],
+                }
+            )
+
+    def _smalltalk_direct_answer(
         self,
         *,
         question: str,
         tenant_id: str,
-        language_code: Optional[str] = None,
-        history: list[dict] | None = None,
+        chunk,
     ) -> Optional[str]:
         """
-        Generuje odpowiedź na pytanie użytkownika na podstawie FAQ tenanta
-        z użyciem LLM (OpenAIClient).
+        Return deterministic smalltalk answer when the user message is only smalltalk.
 
-        - wybiera kilka najbardziej pasujących wpisów FAQ (retrieval),
-        - opcjonalnie dokleja historię rozmowy (user/assistant),
-        - oczekuje JSON-a {FAQ_ANSWER_KEY: "..."} i zwraca sam tekst odpowiedzi.
+        The deterministic Q: match is checked before score threshold. This preserves
+        the previous behavior while keeping the public `answer_ai` flow small.
         """
-        question = (question or "").strip()
-        if not question:
+        if not self._is_smalltalk_only(question):
             return None
-           
-        top1 = 0.0
-        top2 = 0.0
-        gap = 0.0
-        strict_mode = False
-        chunks_for_prompt = []
-        retrieved_chunks = []
-            
-        # 2) retrieval: prefer Pinecone (vector DB) when configured.
-        vector_enabled = self._vector.enabled(tenant_id)
-        if vector_enabled:
-            # 0) smalltalk fast-path (NO LLM)
-            #1--------------
-            st = self._vector.retrieve(
-                tenant_id=tenant_id,
-                language_code=language_code,
-                question=question,
-                category=PC_NAME_SMALLTALK,
-                top_k=SMALLTALK_RETRIEVED_CHUNKS,
-            )
 
-            if st:
-                if self._is_smalltalk_only(question):
-                    qn = self._norm(question)
-                    txt0 = (st[0].text or "").strip()
+        text = (getattr(chunk, "text", "") or "").strip()
+        normalized_question = self._norm(question)
 
-                    # 1) deterministic: czy w chunku jest dokładnie takie Q: ?
-                    qs = re.findall(r"^\s*Q:\s*(.+)$", txt0, flags=re.IGNORECASE | re.MULTILINE)
-                    if any(self._norm(qline) == qn for qline in qs):
-                        ans = self._vector._extract_answer_from_text(txt0)  # albo lokalnie ten sam regex na A:
-                        if ans:
-                            return ans
+        questions = re.findall(
+            r"^\s*Q:\s*(.+)$",
+            text,
+            flags=re.IGNORECASE | re.MULTILINE,
+        )
+        if any(self._norm(q_line) == normalized_question for q_line in questions):
+            answer = self._vector._extract_answer_from_text(text)
+            if answer:
+                return answer
 
-                    # 2) dopiero potem próg score (fallback)
-                    st_top1 = float(getattr(st[0], "score", 0.0) or 0.0)
-                    st_min = self.tenants.get_kb_smalltalk_min_score(tenant_id)
-                    if st_top1 >= st_min:
-                        ans = self._vector._extract_answer_from_text(txt0)
-                        if ans:
-                            return ans
-            #1--------------
-                chunks_for_prompt += st[:1]
-            if chunks_for_prompt and self._is_smalltalk_only(question):
-                retrieved_chunks = []
-            else:
-                retrieved_chunks = self._vector.retrieve(
-                    tenant_id=tenant_id,
-                    language_code=language_code,
-                    question=question,
-                    category=PC_NAME_KB,
-                    top_k=KB_RETRIEVED_CHUNKS,
-                )
+        score = self._chunk_score(chunk)
+        min_score = self.tenants.get_kb_smalltalk_min_score(tenant_id)
+        if score >= min_score:
+            answer = self._vector._extract_answer_from_text(text)
+            if answer:
+                return answer
 
-            # Vector confidence gating:
-            strict_threshold = self.tenants.get_kb_vector_min_score_low(tenant_id)
-       
-            if retrieved_chunks:
-                try:
-                    top1 = float(getattr(retrieved_chunks[0], STR_CHUNK_SCORE, 0.0) or 0.0)
-                except Exception:
-                    top1 = 0.0
-                if len(retrieved_chunks) > 1:
-                    try:
-                        top2 = float(getattr(retrieved_chunks[1], STR_CHUNK_SCORE, 0.0) or 0.0)
-                    except Exception:
-                        top2 = 0.0
-                gap = max(0.0, top1 - top2)
-                if top1 < strict_threshold:
-                    strict_mode = True
-                logger.info({
-                    "component": "kb_service",
-                    "event": "vector_scores",
-                    "tenant_id": tenant_id,
-                    "lang": language_code,
-                    "matches": len(retrieved_chunks) if retrieved_chunks else 0,
-                    "top1": top1,
-                    "top2": top2,
-                    "gap": gap,
-                    "strict_threshold": strict_threshold,
-                })
-            if not retrieved_chunks and not chunks_for_prompt:
-                logger.info({"component":"kb_service","event":"no_chunks_smalltalk_and_kb"})
+        return None
 
-            if not retrieved_chunks and chunks_for_prompt:
-                logger.info({"component":"kb_service","event":"kb_empty_using_smalltalk_only", })
+    def _retrieve_smalltalk_chunks(
+        self,
+        *,
+        question: str,
+        tenant_id: str,
+        language_code: Optional[str],
+    ) -> tuple[Optional[str], list]:
+        """
+        Retrieve smalltalk chunks.
 
-        # FAST PATH: if vector retrieval returns chunks that already include "A: ...",
-        # return the best-match answer directly and avoid an extra LLM call.
-        if retrieved_chunks:
-            #2--------------
-            # FAST-PATH safety: only return a direct FAQ answer when similarity is high.
-            # Otherwise fall back to LLM synthesis / explicit "no info" response.
-            for i, ch in enumerate(retrieved_chunks[:KB_RETRIEVED_CHUNKS], start=1):
-                logger.warning({
-                    "component": "kb_service",
-                    "event": "retrieved_top",
-                    "rank": i,
-                    "score": getattr(ch, "score", None),
-                    "faq_key": getattr(ch, "faq_key", None),
-                    "text[:200]": (getattr(ch, "text", "") or "")[:200],
-                })
+        Returns:
+            (direct_answer, chunks_for_prompt)
+        """
+        chunks = self._vector.retrieve(
+            tenant_id=tenant_id,
+            language_code=language_code,
+            question=question,
+            category=PC_NAME_SMALLTALK,
+            top_k=SMALLTALK_RETRIEVED_CHUNKS,
+        )
+        if not chunks:
+            return None, []
 
-            min_score  = self.tenants.get_kb_vector_fastpath_min_score(tenant_id)
+        direct_answer = self._smalltalk_direct_answer(
+            question=question,
+            tenant_id=tenant_id,
+            chunk=chunks[0],
+        )
+        if direct_answer:
+            return direct_answer, []
 
-            for idx, best in enumerate((retrieved_chunks or [])[:KB_FETCHED_CHUNKS]):  
+        return None, chunks[:1]
 
-                best_score = getattr(best, STR_CHUNK_SCORE, 0.0) or 0.0
-                # reuse gap computed earlier
-                if best_score < min_score:
-                    continue
+    def _retrieve_kb_chunks(
+        self,
+        *,
+        question: str,
+        tenant_id: str,
+        language_code: Optional[str],
+        skip_for_smalltalk_only: bool,
+    ) -> list:
+        if skip_for_smalltalk_only:
+            return []
 
-                # Extract the answer portion from the chunk (chunk_faq uses "Q:" and "A:").
-                txt = (best.text or "").strip()
-                if not txt:
+        return self._vector.retrieve(
+            tenant_id=tenant_id,
+            language_code=language_code,
+            question=question,
+            category=PC_NAME_KB,
+            top_k=KB_RETRIEVED_CHUNKS,
+        )
 
-                    continue
-                    
-                m = re.search(FASTPATCH_SEARCH_REGEX, txt, flags=re.IGNORECASE | re.DOTALL)
-                if m:
-                    ans = (m.group(1) or "").strip()
-                else:
-                    # Fallback: try split on 'A:' if newlines differ
-                    parts = re.split(FASTPATCH_SPLIT_REGEX, txt, maxsplit=1, flags=re.IGNORECASE)
-                    ans = parts[1].strip() if len(parts) == 2 else ""
-                if not ans:                
+    def _should_use_strict_mode(
+        self,
+        *,
+        tenant_id: str,
+        language_code: Optional[str],
+        chunks: list,
+    ) -> bool:
+        """Log vector scores and decide whether prompt should be strict."""
+        if not chunks:
+            return False
 
-                    continue
-                if ans == ANSWER_NO_INFO:
-                    logger.info(
-                        {
-                            "component": "kb_service",
-                            "event": "fastpath_skip_no_info_chunk",
-                            "tenant_id": tenant_id,
-                            "lang": language_code,
-                            "band": "mid",
-                        }
-                    )
-                    continue
+        top1 = self._chunk_score(chunks[0])
+        top2 = self._chunk_score(chunks[1]) if len(chunks) > 1 else 0.0
+        gap = max(0.0, top1 - top2)
+        strict_threshold = self.tenants.get_kb_vector_min_score_low(tenant_id)
+
+        logger.info(
+            {
+                "component": "kb_service",
+                "event": "vector_scores",
+                "tenant_id": tenant_id,
+                "lang": language_code,
+                "matches": len(chunks),
+                "top1": top1,
+                "top2": top2,
+                "gap": gap,
+                "strict_threshold": strict_threshold,
+            }
+        )
+        return top1 < strict_threshold
+
+    def _fastpath_answer_from_kb_chunks(
+        self,
+        *,
+        chunks: list,
+        tenant_id: str,
+        language_code: Optional[str],
+    ) -> Optional[str]:
+        """Return direct answer from high-confidence KB chunks, without LLM."""
+        if not chunks:
+            return None
+
+        self._log_retrieved_chunks(chunks)
+        min_score = self.tenants.get_kb_vector_fastpath_min_score(tenant_id)
+
+        for chunk in chunks[:KB_FETCHED_CHUNKS]:
+            if self._chunk_score(chunk) < min_score:
+                continue
+
+            answer = self._extract_answer_from_chunk(chunk)
+            if not answer:
                 logger.info(
                     {
                         "component": "kb_service",
-                        "event": "returns fastpath answer",
+                        "event": "fastpath_skip_no_info_chunk",
                         "tenant_id": tenant_id,
                         "lang": language_code,
-                        "ans": ans,
+                        "band": "mid",
                     }
                 )
-                if ans and ans != ANSWER_NO_INFO:
-                    return ans
-            #2--------------        
-            chunks_for_prompt += retrieved_chunks
-        if chunks_for_prompt and self._is_smalltalk_only(question):
+                continue
+
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "returns fastpath answer",
+                    "tenant_id": tenant_id,
+                    "lang": language_code,
+                    "ans": answer,
+                }
+            )
+            return answer
+
+        return None
+
+    def _retrieve_chunks_for_answer_ai(
+        self,
+        *,
+        question: str,
+        tenant_id: str,
+        language_code: Optional[str],
+    ) -> tuple[Optional[str], list, list, bool]:
+        """
+        Retrieve smalltalk and KB chunks.
+
+        Returns:
+            (direct_answer, chunks_for_prompt, kb_chunks, strict_mode)
+        """
+        if not self._vector.enabled(tenant_id):
+            return None, [], [], False
+
+        direct_answer, chunks_for_prompt = self._retrieve_smalltalk_chunks(
+            question=question,
+            tenant_id=tenant_id,
+            language_code=language_code,
+        )
+        if direct_answer:
+            return direct_answer, [], [], False
+
+        smalltalk_only = self._is_smalltalk_only(question)
+        kb_chunks = self._retrieve_kb_chunks(
+            question=question,
+            tenant_id=tenant_id,
+            language_code=language_code,
+            skip_for_smalltalk_only=bool(chunks_for_prompt and smalltalk_only),
+        )
+        strict_mode = self._should_use_strict_mode(
+            tenant_id=tenant_id,
+            language_code=language_code,
+            chunks=kb_chunks,
+        )
+
+        if not kb_chunks and not chunks_for_prompt:
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "no_chunks_smalltalk_and_kb",
+                }
+            )
+        elif not kb_chunks and chunks_for_prompt:
+            logger.info(
+                {
+                    "component": "kb_service",
+                    "event": "kb_empty_using_smalltalk_only",
+                }
+            )
+
+        if chunks_for_prompt and smalltalk_only:
             strict_mode = True
-        if chunks_for_prompt:
-            system_prompt = self._vector.build_kb_prompt(chunks=chunks_for_prompt, language_code=language_code, strict_mode=strict_mode)
-        else:
-            return None
-            
+
+        return None, chunks_for_prompt, kb_chunks, strict_mode
+
+    def _build_answer_ai_messages(
+        self,
+        *,
+        question: str,
+        system_prompt: str,
+        history: list[dict] | None,
+        tenant_id: str,
+        language_code: Optional[str],
+    ) -> list[dict]:
         with timed(
             "prompt_build",
             logger=logger,
             component="kb_service",
-            extra={
-                "tenant_id": tenant_id,
-                "lang": language_code,
-            },
+            extra={"tenant_id": tenant_id, "lang": language_code},
         ):
-            messages: list[dict] = [
-                {"role": "system", "content": system_prompt},
-            ]
-            if history:
-                history = [m for m in history if m.get("role") == "user"]
-                messages.extend(history)
+            messages: list[dict] = [{"role": "system", "content": system_prompt}]
 
-            # 5) aktualne pytanie
-            question_content = f"{question}\n\n"
-            question_content += FAQ_MSG_JSON
-            
+            if history:
+                user_history = [m for m in history if m.get("role") == "user"]
+                messages.extend(user_history)
+
             messages.append(
                 {
                     "role": FAQ_ROLE_USER,
-                    "content": question_content,
+                    "content": f"{question}\n\n{FAQ_MSG_JSON}",
                 }
             )
+            return messages
 
-        # Emit prompt_size as a separate log field (measured after building messages).
+    def _log_prompt_size(
+        self,
+        *,
+        messages: list[dict],
+        tenant_id: str,
+        language_code: Optional[str],
+    ) -> None:
         try:
             prompt_chars = sum(len(str(m.get("content") or "")) for m in messages)
             logger.warning(
@@ -472,7 +567,7 @@ class KBService:
         except Exception:
             pass
 
-        # 6) Wołamy LLM
+    def _call_answer_ai_llm(self, *, messages: list[dict], tenant_id: str) -> Optional[str]:
         try:
             raw = self._client.chat(messages=messages, max_tokens=512)
         except Exception as e:
@@ -484,11 +579,17 @@ class KBService:
                 }
             )
             return None
-        
-        if not raw:
-            return None
 
-        raw = raw.strip()
+        raw = (raw or "").strip()
+        return raw or None
+
+    def _parse_answer_ai_response(
+        self,
+        *,
+        raw: str,
+        tenant_id: str,
+        language_code: Optional[str],
+    ) -> Optional[str]:
         if raw == ANSWER_NO_INFO:
             logger.info(
                 {
@@ -501,8 +602,6 @@ class KBService:
             )
             return None
 
-        # 7) próbujemy wyciągnąć FAQ_ANSWER_KEY z JSON-a
-        #4--------------
         try:
             logger.info(
                 {
@@ -512,30 +611,98 @@ class KBService:
                 }
             )
             data = json.loads(raw)
-            if isinstance(data, dict):
-                if FAQ_ANSWER_KEY in data:
-                    ans = data.get(FAQ_ANSWER_KEY)
-                    if isinstance(ans, str):
-                        ans = ans.strip()
-                        if ans == ANSWER_NO_INFO:
-                            return None
-                        return ans
-                    return None
-                parts = []
-                for v in data.values():
-                    if isinstance(v, str):
-                        v = v.strip()
-                        if v and v != ANSWER_NO_INFO:
-                            parts.append(v)
-                if parts:
-                    return "\n".join(parts)
-                return None
-
         except Exception:
             return None
-        #4--------------
-        return None
-        
+
+        if not isinstance(data, dict):
+            return None
+
+        answer = data.get(FAQ_ANSWER_KEY)
+        if isinstance(answer, str):
+            answer = answer.strip()
+            return answer if answer and answer != ANSWER_NO_INFO else None
+
+        parts = []
+        for value in data.values():
+            if not isinstance(value, str):
+                continue
+            value = value.strip()
+            if value and value != ANSWER_NO_INFO:
+                parts.append(value)
+
+        return "\n".join(parts) if parts else None
+
+    def answer_ai(
+        self,
+        *,
+        question: str,
+        tenant_id: str,
+        language_code: Optional[str] = None,
+        history: list[dict] | None = None,
+    ) -> Optional[str]:
+        """
+        Generate FAQ answer using vector retrieval and optional LLM synthesis.
+
+        Flow:
+          1. Try deterministic smalltalk answer.
+          2. Retrieve KB chunks.
+          3. Return high-confidence FAQ answer directly when possible.
+          4. Otherwise build a grounded prompt and parse JSON answer from LLM.
+        """
+        question = (question or "").strip()
+        if not question:
+            return None
+
+        direct_answer, chunks_for_prompt, kb_chunks, strict_mode = (
+            self._retrieve_chunks_for_answer_ai(
+                question=question,
+                tenant_id=tenant_id,
+                language_code=language_code,
+            )
+        )
+        if direct_answer:
+            return direct_answer
+
+        fastpath_answer = self._fastpath_answer_from_kb_chunks(
+            chunks=kb_chunks,
+            tenant_id=tenant_id,
+            language_code=language_code,
+        )
+        if fastpath_answer:
+            return fastpath_answer
+
+        chunks_for_prompt.extend(kb_chunks)
+        if not chunks_for_prompt:
+            return None
+
+        system_prompt = self._vector.build_kb_prompt(
+            chunks=chunks_for_prompt,
+            language_code=language_code,
+            strict_mode=strict_mode,
+        )
+        messages = self._build_answer_ai_messages(
+            question=question,
+            system_prompt=system_prompt,
+            history=history,
+            tenant_id=tenant_id,
+            language_code=language_code,
+        )
+        self._log_prompt_size(
+            messages=messages,
+            tenant_id=tenant_id,
+            language_code=language_code,
+        )
+
+        raw = self._call_answer_ai_llm(messages=messages, tenant_id=tenant_id)
+        if not raw:
+            return None
+
+        return self._parse_answer_ai_response(
+            raw=raw,
+            tenant_id=tenant_id,
+            language_code=language_code,
+        )
+
     def list_faq_keys(self, tenant_id: str, language_code: str) -> set[str]:
         faq = self._load_tenant_faq(tenant_id, language_code) or {}
         if not faq:

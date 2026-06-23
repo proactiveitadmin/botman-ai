@@ -71,11 +71,7 @@ class WhatsAppCloudClient:
         if not isinstance(wa, dict):
             wa = {}
         local_access_token=(wa.get("access_token") or "").strip() or None
-        logger.warning(
-            {
-                "temp!!! access_token": local_access_token,
-            }
-        )
+
         return cls(
             access_token=(wa.get("access_token") or "").strip() or None,
             phone_number_id=(tenant_cfg or {}).get("wa_phone_number_id"),

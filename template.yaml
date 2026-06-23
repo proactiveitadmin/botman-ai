@@ -233,13 +233,29 @@ Resources:
           AttributeType: S
         - AttributeName: twilio_to
           AttributeType: S         
+        - AttributeName: wa_phone_number_id
+          AttributeType: S
+        - AttributeName: pg_api_key
+          AttributeType: S
       KeySchema:
         - AttributeName: tenant_id
           KeyType: HASH
       GlobalSecondaryIndexes:
-        - IndexName: TwilioToIndex
+        - IndexName: TwilioToIndex2
           KeySchema:
             - AttributeName: twilio_to
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: WhatsAppPhoneNumberIdIndex
+          KeySchema:
+            - AttributeName: wa_phone_number_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: PgApiKeyIndex
+          KeySchema:
+            - AttributeName: pg_api_key
               KeyType: HASH
           Projection:
             ProjectionType: ALL
@@ -588,7 +604,7 @@ Resources:
               Action:
                  - dynamodb:Query
               Resource:
-                 - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Tenants-${AWS::StackName}/index/TwilioToIndex'
+                 - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Tenants-${AWS::StackName}/index/TwilioToIndex2'
       Environment:
         Variables:
           InboundEventsQueueUrl: !Ref InboundEventsQueue
@@ -628,6 +644,11 @@ Resources:
               Condition:
                 StringEquals:
                   kms:ViaService: !Sub 'ssm.${AWS::Region}.amazonaws.com'
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/Tenants-${AWS::StackName}/index/WhatsAppPhoneNumberIdIndex'
       Environment:
         Variables:
           InboundEventsQueueUrl: !Ref InboundEventsQueue

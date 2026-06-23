@@ -1,5 +1,5 @@
 import os
-from typing import Any
+from typing import Any, Optional
 from boto3.dynamodb.conditions import Key
 from ..common.aws import ddb_resource
 from ..common.logging import logger
@@ -42,7 +42,7 @@ class TenantsRepo:
 
     def find_by_twilio_to(self, to_number: str) -> dict | None:
         """
-        Resolve tenant by Twilio destination number (To) using GSI TwilioToIndex.
+        Resolve tenant by Twilio destination number (To) using GSI TwilioToIndex2.
 
         Expected tenant item shape:
           - tenant_id: str (PK)
@@ -53,22 +53,29 @@ class TenantsRepo:
             Prefer migrating data to 'twilio_to' (or separate mapping table if many-to-one).
         """
         if not to_number:
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing to number",
+            })
             return None
 
         # Primary path: query GSI
         try:
             resp = self.table.query(
-                IndexName="TwilioToIndex",
+                IndexName="TwilioToIndex2",
                 KeyConditionExpression=Key("twilio_to").eq(to_number),
                 Limit=1,
             )
             items = resp.get("Items") or []
             if items:
                 return items[0]
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing item in tenant config ddb",
+            })
         except Exception as e:
-            logger.exception({"tenants_repo": "query_failed", "error": str(e), "to": to_number})
-
-        
+            logger.error({"tenants_repo": "query_failed", "error": str(e), "to": to_number})
+      
         #do not scan if not found - scan is not allowed!
         return None
 
@@ -76,6 +83,10 @@ class TenantsRepo:
     def find_by_whatsapp_phone_number_id(self, phone_number_id: str) -> dict | None:
         """Resolve tenant by WhatsApp Cloud API phone_number_id using GSI WhatsAppPhoneNumberIdIndex."""
         if not phone_number_id:
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing phone_number_id",
+            })
             return None
         try:
             resp = self.table.query(
@@ -86,13 +97,21 @@ class TenantsRepo:
             items = resp.get("Items") or []
             if items:
                 return items[0]
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing item in tenant config ddb",
+            })
         except Exception as e:
-            logger.exception({"tenants_repo": "query_failed", "error": str(e), "phone_number_id": phone_number_id})
+            logger.error({"tenants_repo": "query_failed", "error": str(e), "phone_number_id": phone_number_id})
         return None
 
     def find_by_pg_api_key(self, api_key: str) -> dict | None:
         """Resolve tenant by PerfectGym API key using GSI PgApiKeyIndex."""
         if not api_key:
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing PerfectGym API key",
+            })
             return None
         try:
             resp = self.table.query(
@@ -103,8 +122,12 @@ class TenantsRepo:
             items = resp.get("Items") or []
             if items:
                 return items[0]
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing item in tenant config ddb",
+            })
         except Exception as e:
-            logger.exception({"tenants_repo": "query_failed", "error": str(e), "pg_api_key": "***"})
+            logger.error({"tenants_repo": "query_failed", "error": str(e), "pg_api_key": "***"})
         return None
 
     def get_language(self, tenant_id: str):
@@ -123,8 +146,16 @@ class TenantsRepo:
         item = self.get(tenant_id) or {}
         email_cfg = item.get("email")
         if not email_cfg or not isinstance(email_cfg, dict):
+            logger.error({
+                "component": "tenants_repo",
+                "event": "missing email config",
+            })
             return None
         if email_cfg.get("enabled") is False:
+            logger.error({
+                "component": "tenants_repo",
+                "event": "email config disabled",
+            })
             return None
         return email_cfg
 

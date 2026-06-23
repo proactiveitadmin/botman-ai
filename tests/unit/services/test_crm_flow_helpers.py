@@ -337,7 +337,7 @@ def test_handle_pending_confirmation_reserves_class_on_confirm(msg):
         "class_date": "2026-06-10",
         "class_time": "18:30",
     })
-    tpl = FakeTpl({"confirm_words": "tak, ok", "reserve_class_confirmed": "Zarezerwowano {class_name}"})
+    tpl = FakeTpl({"confirm_words": "tak, ok", "reject_words": "nie", "reserve_class_confirmed": "Zarezerwowano {class_name}"})
     svc = make_service(crm=crm, conv=conv, tpl=tpl)
     msg.body = "tak"
 
@@ -359,7 +359,7 @@ def test_handle_pending_confirmation_returns_already_booked(msg):
     crm.reserve_result = ENUM_CRM_RETURN_ALREADY_BOOKED
     conv = FakeConv()
     conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending", "kind": "reserve_class", "class_id": "101", "member_id": "105", "idempotency_key": "idem-1"})
-    tpl = FakeTpl({"confirm_words": "tak", "reserve_class_already_booked": "Już masz rezerwację"})
+    tpl = FakeTpl({"confirm_words": "tak", "reject_words": "nie", "reserve_class_already_booked": "Już masz rezerwację"})
     svc = make_service(crm=crm, conv=conv, tpl=tpl)
     msg.body = "tak"
 
@@ -371,7 +371,7 @@ def test_handle_pending_confirmation_returns_already_booked(msg):
 def test_handle_pending_confirmation_declines_on_non_confirm(msg):
     conv = FakeConv()
     conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending", "kind": "reserve_class", "class_id": "101"})
-    tpl = FakeTpl({"confirm_words": "tak", "reserve_class_declined": "Anulowano"})
+    tpl = FakeTpl({"confirm_words": "tak", "reject_words": "nie", "reserve_class_declined": "Anulowano"})
     svc = make_service(conv=conv, tpl=tpl)
     msg.body = "nie"
 
@@ -385,7 +385,7 @@ def test_handle_pending_marketing_optin_confirm_grants_consent_after_existing_ve
     crm = FakeCRM()
     conv = FakeConv({"crm_verification_level": "strong", "crm_verified_until": int(time.time()) + 3600, "crm_member_id": "105"})
     conv.put({"pk": "pending#whatsapp:+48111111111", "sk": "pending",  "kind": INTENT_MARKETING_OPTIN, "member_id": "105"})
-    tpl = FakeTpl({"confirm_words": "tak", "system_marketing_optin_done": "Zgoda zapisana"})
+    tpl = FakeTpl({"confirm_words": "tak", "reject_words": "nie", "system_marketing_optin_done": "Zgoda zapisana"})
     svc = make_service(crm=crm, conv=conv, tpl=tpl)
     msg.body = "tak"
 
@@ -400,7 +400,7 @@ def test_handle_pending_marketing_optout_confirm_revokes_consent_after_existing_
     crm = FakeCRM()
     conv = FakeConv({"crm_verification_level": "strong", "crm_verified_until": int(time.time()) + 3600, "crm_member_id": "105"})
     conv.put("pending#whatsapp:+48111111111", "pending", {"kind": INTENT_MARKETING_OPTOUT, "member_id": "105"})
-    tpl = FakeTpl({"confirm_words": "tak", "system_marketing_optout_done": "Zgoda cofnięta"})
+    tpl = FakeTpl({"confirm_words": "tak", "reject_words": "nie", "system_marketing_optout_done": "Zgoda cofnięta"})
     svc = make_service(crm=crm, conv=conv, tpl=tpl)
     msg.body = "tak"
 
@@ -413,7 +413,7 @@ def test_handle_pending_marketing_optout_confirm_revokes_consent_after_existing_
 def test_handle_pending_marketing_non_confirm_cancels(msg):
     conv = FakeConv()
     conv.put("pending#whatsapp:+48111111111", "pending", {"kind": INTENT_MARKETING_OPTIN, "member_id": "105"})
-    tpl = FakeTpl({"confirm_words": "tak", "system_confirm_cancelled": "Anulowano zmianę"})
+    tpl = FakeTpl({"confirm_words": "tak", "reject_words": "nie", "system_confirm_cancelled": "Anulowano zmianę"})
     svc = make_service(conv=conv, tpl=tpl)
     msg.body = "nie"
 

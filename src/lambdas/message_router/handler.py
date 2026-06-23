@@ -43,13 +43,11 @@ def _parse_record(record: dict) -> dict | None:
             return json.loads(raw_body)
         return raw_body or {}
     except Exception as e:
-        logger.error(
-            {
-                "sender": "message_router_bad_json",
-                "err": str(e),
-                "raw": raw_body,
-            }
-        )
+        logger.error({
+            "sender": "message_router_bad_json",
+            "err": str(e),
+            "raw": raw_body,
+        })
         return None
 
 
@@ -153,8 +151,8 @@ def _publish_actions(actions, original_body: dict):
             {
                 "handler": "message_router",
                 "event": "queued_outbound",
-                "from": mask_phone(original_body.get("from")),
-                "to": mask_phone(payload.get("to")),
+                "from": mask_phone(from_phone),
+                "to": mask_phone(to_phone),
                 "body": shorten_body(payload.get("body")),
                 "enqueue_ms": int((time.perf_counter() - t0) * 1000),
                 "tenant_id": payload.get("tenant_id", original_body.get("tenant_id")),
@@ -229,30 +227,26 @@ def lambda_handler(event, context):
         # ordering key: MessageGroupId should match conversation_id when present
         conv_id = msg_body.get("conversation_id")
         if gid and conv_id and gid != conv_id:
-            logger.error(
-                {
-                    "handler": "message_router",
-                    "event": "ordering_key_mismatch",
-                    "messageId": r.get("messageId"),
-                    "MessageGroupId": gid,
-                    "conversation_id": conv_id,
-                }
-            )
+            logger.error({
+                "handler": "message_router",
+                "event": "ordering_key_mismatch",
+                "messageId": r.get("messageId"),
+                "MessageGroupId": gid,
+                "conversation_id": conv_id,
+            })
             batch_failures.append({"itemIdentifier": r.get("messageId")})
             continue
 
         # deduplication: if FIFO dedup id is set and we can derive expected, enforce it
         expected_dedup = msg_body.get("message_sid") or msg_body.get("event_id")
         if dedup_id and expected_dedup and dedup_id != expected_dedup:
-            logger.error(
-                {
-                    "handler": "message_router",
-                    "event": "deduplication_id_mismatch",
-                    "messageId": r.get("messageId"),
-                    "MessageDeduplicationId": dedup_id,
-                    "expected": expected_dedup,
-                }
-            )
+            logger.error({
+                "handler": "message_router",
+                "event": "deduplication_id_mismatch",
+                "messageId": r.get("messageId"),
+                "MessageDeduplicationId": dedup_id,
+                "expected": expected_dedup,
+            })
             batch_failures.append({"itemIdentifier": r.get("messageId")})
             continue
 
@@ -264,17 +258,6 @@ def lambda_handler(event, context):
             if not IDEMPOTENCY.try_acquire(inbound_key, meta={"scope": "inbound"}):
                 logger.info({"handler": "message_router", "event": "duplicate_inbound", "tenant_id": tenant_id})
                 continue
-        logger.info(
-            {
-                "handler": "message_router",
-                "event": "received",
-                "from": mask_phone(msg_body.get("from")),
-                "to": mask_phone(msg_body.get("to")),
-                "body": shorten_body(msg_body.get("body")),
-                "tenant_id": msg_body.get("tenant_id"),
-                "channel": msg_body.get("channel", "whatsapp"),
-            }
-        )
 
         # --- per-tenant soft limiter (no sleep; retry via batch failure) ---
         try:
@@ -299,30 +282,7 @@ def lambda_handler(event, context):
         t_msg = time.perf_counter()
 
         msg = _build_message(msg_body)
-        # Canonical conversation key for Messages history (no PII).
-        conv_key = conversation_key(
-            msg.tenant_id,
-            msg.channel or "whatsapp",
-            msg.channel_user_id or msg.from_phone,
-            msg.conversation_id,
-        )
-        # logujemy inbound do Messages
-        try:
-            MESSAGES.log_message(
-                tenant_id=msg.tenant_id,
-                conversation_id=conv_key,
-                msg_id=new_id("in-"),
-                direction="inbound",
-                body=msg.body or "",
-                from_phone=msg.from_phone,
-                to_phone=msg.to_phone,
-                channel=msg.channel or "whatsapp",
-                channel_user_id=msg.channel_user_id or msg.from_phone,
-                language_code=None,
-            )
-        except Exception:
-            # nie blokujemy flow jeśli logowanie padnie
-            pass
+
 
         try:
             actions = ROUTER.handle(msg)

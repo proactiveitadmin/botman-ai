@@ -1625,6 +1625,34 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item $item
+# ==== 49. reject_words (AR) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reject_words#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reject_words"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "لا,لا.,رفض,أرفض,إلغاء,الغاء,توقف,كلا,غير مهتم,لا أريد,لا اريد,أبداً,ابدا"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
 
 # ==== 49. today_words (ar) ====
 
@@ -1763,6 +1791,61 @@ aws dynamodb put-item `
     },
     "body": {
         "S": "عذرًا، لم نتمكن من إنشاء رابط الدفع. يرجى المحاولة لاحقًا أو التواصل مع الاستقبال."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_confirm_create#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_confirm_create"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "هل تريد أن أقوم بإنشاء طلب دعم لموظفي الاستقبال؟ أجب: نعم أو لا."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_cancelled#ar"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_cancelled"
+    },
+    "language_code": {
+        "S": "ar"
+    },
+    "body": {
+        "S": "حسنًا، لم أقم بإنشاء الطلب. إذا غيرت رأيك، يمكنك إرسال رسالة مرة أخرى."
     },
     "placeholders": {
         "L": []

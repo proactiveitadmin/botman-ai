@@ -1,325 +1,464 @@
 """
 Lambda odpowiedzialna za uruchamianie kampanii marketingowych.
 
-Działa w trybie batch:
-- czyta aktywne kampanie z tabeli DDB,
-- wybiera odbiorców,
-- wrzuca wiadomości do kolejki outbound.
+Tryb batch:
+- pobiera aktywnych tenantów albo tenant_id z eventu,
+- pobiera kampanie due z DDB po GSI tenant_id + next_run_time,
+- atomowo claimuje kampanię przez ustawienie active=False,
+- wybiera i waliduje odbiorców,
+- wrzuca wiadomości do kolejki outbound SQS,
+- best-effort loguje wysłaną wiadomość w repozytorium konwersacji.
 """
 
-import os
+from __future__ import annotations
+
 import json
-import time
-from datetime import datetime, timezone
+import os
+from datetime import datetime
+from typing import Any, Iterable, Iterator, Mapping, Protocol
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
-from ...services.campaign_service import CampaignService
-from ...repos.conversations_repo import ConversationsRepo
-from ...common.aws import sqs_client, ddb_resource, resolve_queue_url
-from ...common.logging import logger
-from ...common.utils import normalize_whatsapp_channel_user_id
-from ...services.clients_factory import ClientsFactory
-from ...repos.tenants_repo import TenantsRepo
-from ...common.security import decrypt_phone, conversation_key
-from ...services.metrics_service import MetricsService
+from ...common.aws import ddb_resource, resolve_queue_url, sqs_client
 from ...common.constants import (
-    CAMPAIGNS_TENANT_NEXT_RUN_INDEX, 
-    CAMPAIGNS_TIME_ZONE, 
-    CAMPAIGNS_1ST_NAME_PLACEHOLDER, 
+    CAMPAIGNS_1ST_NAME_PLACEHOLDER,
     CAMPAIGNS_PAYMENT_URL_PLACEHOLDER,
     CAMPAIGNS_PRODUCT_ID_PLACEHOLDER,
+    CAMPAIGNS_TENANT_NEXT_RUN_INDEX,
+    CAMPAIGNS_TIME_ZONE,
 )
+from ...common.logging import logger
+from ...common.security import conversation_key, decrypt_phone
+from ...common.utils import normalize_whatsapp_channel_user_id
+from ...repos.conversations_repo import ConversationsRepo
+from ...repos.tenants_repo import TenantsRepo
+from ...services.campaign_service import CampaignService
+from ...services.clients_factory import ClientsFactory
+from ...services.metrics_service import MetricsService
 
-OUTBOUND_QUEUE_URL = os.getenv("OutboundQueueUrl")
-CAMPAIGNS_TABLE = os.getenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
+CAMPAIGNS_TABLE_NAME = os.getenv("DDB_TABLE_CAMPAIGNS", "Campaigns")
+OUTBOUND_QUEUE_ENV_NAME = "OutboundQueueUrl"
+MESSAGE_TYPE_CAMPAIGN = "campaign"
+WHATSAPP_CHANNEL = "whatsapp"
 
-svc = CampaignService()
-conv_repo = ConversationsRepo()
-clients = ClientsFactory()
-tenants_repo = TenantsRepo()
-metrics = MetricsService()
 
-def build_campaign_context(tenant_id: str, member_id: int, phone_number: str, product_id: str | None = None) -> dict:
-    ctx: dict = {}
-    member_1st_name = clients.perfectgym(tenant_id).get_member_1st_name_by_phone(phone=phone_number)
-    ctx[str(CAMPAIGNS_1ST_NAME_PLACEHOLDER)] = member_1st_name
-    
-    if product_id:
-        pay_url = clients.perfectgym(tenant_id).get_product_payment_link(
+class PerfectGymClient(Protocol):
+    def get_member_1st_name_by_phone(self, *, phone: str) -> str | None: ...
+
+    def get_product_payment_link(self, *, member_id: int, product_id: str) -> str | None: ...
+
+    def get_member_by_phone(self, phone: str) -> Mapping[str, Any] | None: ...
+
+    def get_marketing_consent_for_member(self, *, member_id: int) -> bool: ...
+
+    def get_member_type_by_phone(self, *, phone: str) -> str | None: ...
+
+
+class CampaignRunner:
+    def __init__(
+        self,
+        *,
+        campaign_service: CampaignService | None = None,
+        conversations_repo: ConversationsRepo | None = None,
+        clients_factory: ClientsFactory | None = None,
+        tenants_repo: TenantsRepo | None = None,
+        metrics_service: MetricsService | None = None,
+        table: Any | None = None,
+        outbound_queue_url: str | None = None,
+        sqs: Any | None = None,
+    ) -> None:
+        self.campaign_service = campaign_service or CampaignService()
+        self.conversations_repo = conversations_repo or ConversationsRepo()
+        self.clients_factory = clients_factory or ClientsFactory()
+        self.tenants_repo = tenants_repo or TenantsRepo()
+        self.metrics = metrics_service or MetricsService()
+        self.table = table or ddb_resource().Table(CAMPAIGNS_TABLE_NAME)
+        self.outbound_queue_url = outbound_queue_url or resolve_queue_url(OUTBOUND_QUEUE_ENV_NAME)
+        self.sqs = sqs or sqs_client()
+
+    def run(self, event: Mapping[str, Any] | None) -> dict[str, Any]:
+        processed_campaigns = 0
+        sent_messages = 0
+
+        for tenant_id in self._resolve_tenant_ids(event):
+            for campaign in self._iter_due_campaigns(tenant_id):
+                if not campaign.get("active", False):
+                    self._log_campaign_skip(campaign, tenant_id, "item_not_active")
+                    continue
+
+                if not self._claim_campaign(campaign):
+                    self._log_campaign_skip(campaign, tenant_id, "already_claimed")
+                    continue
+
+                processed_campaigns += 1
+                sent_messages += self._process_campaign(campaign, fallback_tenant_id=tenant_id)
+
+        return {
+            "statusCode": 200,
+            "body": json.dumps(
+                {
+                    "processed_campaigns": processed_campaigns,
+                    "sent_messages": sent_messages,
+                }
+            ),
+        }
+
+    def _resolve_tenant_ids(self, event: Mapping[str, Any] | None) -> list[str]:
+        tenant_id = (event or {}).get("tenant_id")
+        if tenant_id and tenant_id not in {"*", "all", "ALL"}:
+            return [str(tenant_id)]
+
+        return [
+            tenant["tenant_id"]
+            for tenant in self.tenants_repo.list_all()
+            if tenant.get("tenant_id")
+        ]
+
+    def _iter_due_campaigns(self, tenant_id: str) -> Iterator[dict[str, Any]]:
+        # Zachowujemy format oryginalnego pola next_run_time: YYYY-MM-DDTHH:MM:SS.
+        # Porównanie leksykograficzne działa poprawnie tylko wtedy, gdy wszystkie wartości
+        # są zapisane w tym samym timezone i dokładnie tym samym formacie.
+        now_iso = datetime.now(ZoneInfo(CAMPAIGNS_TIME_ZONE)).strftime("%Y-%m-%dT%H:%M:%S")
+        query_kwargs = {
+            "IndexName": CAMPAIGNS_TENANT_NEXT_RUN_INDEX,
+            "KeyConditionExpression": Key("tenant_id").eq(tenant_id)
+            & Key("next_run_time").lte(now_iso),
+        }
+
+        while True:
+            response = self.table.query(**query_kwargs)
+            yield from response.get("Items", [])
+
+            last_key = response.get("LastEvaluatedKey")
+            if not last_key:
+                return
+
+            query_kwargs["ExclusiveStartKey"] = last_key
+
+    def _claim_campaign(self, campaign: Mapping[str, Any]) -> bool:
+        """Atomowo oznacza kampanię jako obsłużoną.
+
+        Chroni przed podwójną wysyłką, gdy dwie Lambdy równolegle pobiorą tę samą
+        kampanię z GSI. Jeśli druga Lambda próbuje claimować już nieaktywną kampanię,
+        DynamoDB zwróci ConditionalCheckFailedException.
+        """
+        try:
+            self.table.update_item(
+                Key={"pk": campaign["pk"]},
+                UpdateExpression="SET #active = :inactive",
+                ConditionExpression="#active = :active",
+                ExpressionAttributeNames={"#active": "active"},
+                ExpressionAttributeValues={":active": True, ":inactive": False},
+            )
+            return True
+        except ClientError as exc:
+            error_code = exc.response.get("Error", {}).get("Code")
+            if error_code == "ConditionalCheckFailedException":
+                return False
+            raise
+
+    def _process_campaign(self, campaign: Mapping[str, Any], *, fallback_tenant_id: str) -> int:
+        tenant_id = str(campaign.get("tenant_id") or fallback_tenant_id)
+        perfectgym = self.clients_factory.perfectgym(tenant_id)
+        sent = 0
+
+        for recipient in self.campaign_service.select_recipients(campaign):
+            if self._process_recipient(campaign, tenant_id, perfectgym, recipient):
+                sent += 1
+
+        logger.info(
+            {
+                "campaign": "processed",
+                "campaign_id": campaign.get("campaign_id"),
+                "tenant_id": tenant_id,
+                "sent_messages": sent,
+            }
+        )
+        return sent
+
+    def _process_recipient(
+        self,
+        campaign: Mapping[str, Any],
+        tenant_id: str,
+        perfectgym: PerfectGymClient,
+        recipient: Any,
+    ) -> bool:
+        phone = self._decrypt_recipient_phone(campaign, tenant_id, recipient)
+        if not phone:
+            return False
+
+        member_id = self._get_member_id(campaign, tenant_id, perfectgym, phone)
+        if member_id is None:
+            return False
+
+        if not self._has_marketing_consent(campaign, tenant_id, perfectgym, member_id):
+            return False
+
+        if not self._matches_member_type_filters(campaign, tenant_id, perfectgym, phone):
+            return False
+
+        context = self._build_campaign_context(
+            tenant_id=tenant_id,
+            member_id=member_id,
+            phone_number=phone,
+            product_id=campaign.get(CAMPAIGNS_PRODUCT_ID_PLACEHOLDER),
+            perfectgym=perfectgym,
+        )
+        message = self.campaign_service.build_message(
+            campaign=campaign,
+            tenant_id=tenant_id,
+            recipient_phone=phone,
+            context=context,
+        )
+
+        channel_user_id = normalize_whatsapp_channel_user_id(phone)
+        payload = self._build_outbound_payload(message, tenant_id, channel_user_id)
+        self._send_to_outbound_queue(payload)
+        self._log_outbound_message(message, tenant_id, channel_user_id)
+
+        self.metrics.incr(
+            "TenantCampaignSendOk",
+            tenant_id=tenant_id,
+            component="campaign_runner",
+        )
+        return True
+
+    def _decrypt_recipient_phone(
+        self,
+        campaign: Mapping[str, Any],
+        tenant_id: str,
+        recipient: Any,
+    ) -> str | None:
+        if not isinstance(recipient, Mapping) or not recipient.get("token"):
+            self._log_campaign_skip(campaign, tenant_id, "no_phone_token")
+            return None
+
+        phone = decrypt_phone(tenant_id, recipient["token"])
+        if not phone:
+            self._log_campaign_skip(campaign, tenant_id, "no_phone_mapping")
+            return None
+
+        return phone
+
+    def _get_member_id(
+        self,
+        campaign: Mapping[str, Any],
+        tenant_id: str,
+        perfectgym: PerfectGymClient,
+        phone: str,
+    ) -> int | None:
+        members_response = perfectgym.get_member_by_phone(phone)
+        members = (members_response or {}).get("value") or []
+        if not members:
+            self._log_campaign_skip(campaign, tenant_id, "no_member")
+            return None
+
+        raw_id = members[0].get("Id") or members[0].get("id")
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            logger.warning(
+                {
+                    "campaign": "get_member_id_failed",
+                    "campaign_id": campaign.get("campaign_id"),
+                    "tenant_id": tenant_id,
+                    "raw_id": raw_id,
+                }
+            )
+            return None
+
+    def _has_marketing_consent(
+        self,
+        campaign: Mapping[str, Any],
+        tenant_id: str,
+        perfectgym: PerfectGymClient,
+        member_id: int,
+    ) -> bool:
+        if perfectgym.get_marketing_consent_for_member(member_id=member_id):
+            return True
+
+        self._log_campaign_skip(campaign, tenant_id, "no_marketing_consent_for_member")
+        return False
+
+    def _matches_member_type_filters(
+        self,
+        campaign: Mapping[str, Any],
+        tenant_id: str,
+        perfectgym: PerfectGymClient,
+        phone: str,
+    ) -> bool:
+        include_tags = self._normalize_tags(self.campaign_service.select_include_tags(campaign))
+        exclude_tags = self._normalize_tags(self.campaign_service.select_exclude_tags(campaign))
+
+        if not include_tags and not exclude_tags:
+            return True
+
+        member_type = perfectgym.get_member_type_by_phone(phone=phone)
+        normalized_member_type = self._normalize_tag(member_type)
+
+        if include_tags and normalized_member_type not in include_tags:
+            logger.warning(
+                {
+                    "campaign": "not_included",
+                    "campaign_id": campaign.get("campaign_id"),
+                    "tenant_id": tenant_id,
+                    "include_tags": sorted(include_tags),
+                    "member_type": member_type,
+                }
+            )
+            return False
+
+        if exclude_tags and normalized_member_type in exclude_tags:
+            logger.warning(
+                {
+                    "campaign": "excluded",
+                    "campaign_id": campaign.get("campaign_id"),
+                    "tenant_id": tenant_id,
+                    "exclude_tags": sorted(exclude_tags),
+                    "member_type": member_type,
+                }
+            )
+            return False
+
+        return True
+
+    def _build_campaign_context(
+        self,
+        *,
+        tenant_id: str,
+        member_id: int,
+        phone_number: str,
+        product_id: Any,
+        perfectgym: PerfectGymClient,
+    ) -> dict[str, Any]:
+        context: dict[str, Any] = {}
+        first_name = perfectgym.get_member_1st_name_by_phone(phone=phone_number)
+        context[str(CAMPAIGNS_1ST_NAME_PLACEHOLDER)] = first_name
+
+        if not product_id:
+            return context
+
+        payment_url = perfectgym.get_product_payment_link(
             member_id=member_id,
             product_id=str(product_id),
         )
-        logger.warning({
-            "temp build_campaign_context": " url",
-            "tenant_id": tenant_id,
-            "member_id": member_id,
-            "product_id": str(product_id),
-            "pay_url": pay_url,
-            "str(pay_url)": str(pay_url),
-        })
-        
-        if pay_url:
-            ctx[str(CAMPAIGNS_PAYMENT_URL_PLACEHOLDER)] = {"type": "link", "url": pay_url}
+        if payment_url:
+            context[str(CAMPAIGNS_PAYMENT_URL_PLACEHOLDER)] = {
+                "type": "link",
+                "url": payment_url,
+            }
         else:
-            logger.warning({
-                "build_campaign_context": "missing url",
-                "tenant_id": tenant_id,
-                "member_id": member_id,
-                "product_id": str(product_id),
-            })
-    return ctx
-
-def check_member_type(tenant_id: str, tag: str, phone_number: str, exclude: bool = False):  
-    member_type = clients.perfectgym(tenant_id).get_member_type_by_phone(
-        phone=phone_number,
-    )
-    if member_type is None:
-        return False
-    return member_type.lower() != tag.lower() if exclude else member_type.lower() == tag.lower()
-
-def lambda_handler(event, context):
-    """
-    Główny handler kampanii:
-    - NIE skanuje tabeli kampanii,
-    - pobiera kampanie "due" przez GSI tenant_id + next_run_time (<= now),
-    - dla każdej aktywnej kampanii wysyła wiadomości do odbiorców
-    """
-    table = ddb_resource().Table(CAMPAIGNS_TABLE)
-    out_q_url = resolve_queue_url("OutboundQueueUrl")
-
-    tenant_id = (event or {}).get("tenant_id")
-
-    # Scheduled events may not provide tenant_id. In demo we iterate tenants.
-    if not tenant_id or tenant_id in ("*", "all", "ALL"):       
-        tenant_ids = [t.get("tenant_id") for t in tenants_repo.list_all() if t.get("tenant_id")]        
-    else:     
-        tenant_ids = [tenant_id]
-
-    def iter_due_campaigns(tenant_id: str):
-        """
-        Query po GSI (tenant_id + next_run_time), z paginacją.
-        Pobiera kampanie, których next_run_time <= teraz i ustawia 
-        pole active na false
-        """
-        # ISO 8601 UTC (lexicographically sortable)        
-        now_dt = datetime.now(ZoneInfo(CAMPAIGNS_TIME_ZONE))
-        now_iso = now_dt.strftime("%Y-%m-%dT%H:%M:%S")
-        
-
-        query_kwargs = {
-            "IndexName": CAMPAIGNS_TENANT_NEXT_RUN_INDEX,
-            "KeyConditionExpression": Key("tenant_id").eq(tenant_id) & Key("next_run_time").lte(now_iso),
-        }
-
-        resp = table.query(**query_kwargs)
-        for it in resp.get("Items", []):
-            yield it
-
-        while "LastEvaluatedKey" in resp:
-            resp = table.query(**query_kwargs, ExclusiveStartKey=resp["LastEvaluatedKey"])
-
-            for it in resp.get("Items", []):
-                logger.warning({
-                    "checkpoint": "yield_item_next_page",
-                    "item_id": it.get("id"),
-                    "repr_item": repr(it),
-                })
-                yield it
-              
-    for tid in tenant_ids:
-        for item in iter_due_campaigns(tid):
-            if not item.get("active", False):                
-                logger.warning(
-                    {
-                        "campaign": "item not active",
-                        "campaign_id": item.get("campaign_id"),
-                        "tenant_id": item.get("tenant_id", tid),
-                    }
-                )
-                continue
-            table.update_item(
-                Key={
-                    "pk": item["pk"],
-                },
-                UpdateExpression="SET active = :active",
-                ExpressionAttributeValues={
-                    ":active": False,
-                },
-            )
-
-            tenant_id_item = item.get("tenant_id") or tid
-            for recipient in svc.select_recipients(item):
-                # recipient ma byc dict z token (bez PII w Campaigns)
-                if isinstance(recipient, dict) and recipient.get("token"):
-                    phone_enc = recipient.get("token")   
-                    phone = decrypt_phone(tenant_id_item, phone_enc) if phone_enc else ""
-                    if not phone:
-                        logger.warning(
-                            {
-                                "campaign": "no_phone_mapping",
-                                "campaign_id": item.get("campaign_id"),
-                                "tenant_id": tenant_id_item,
-                            }
-                        )
-                        continue
-                else:
-                    logger.warning(
-                        {
-                            "campaign": "no_phone",
-                            "campaign_id": item.get("campaign_id"),
-                            "tenant_id": tenant_id_item,
-                        }
-                    )
-                    continue
-
-                members = clients.perfectgym(tenant_id_item).get_member_by_phone(phone)
-                items = (members or {}).get("value") or []
-                if not items:
-                    logger.warning(
-                        {
-                            "campaign": "no member",
-                            "campaign_id": item.get("campaign_id"),
-                            "tenant_id": item.get("tenant_id", tid),
-                        }
-                    )
-                    continue
-
-                raw_id = items[0].get("Id") or items[0].get("id")
-                member_id = None
-
-                try:
-                    member_id = int(raw_id)
-                except (TypeError, ValueError):
-                    logger.warning(
-                        {
-                            "campaign": "get_member_id_failed",
-                            "campaign_id": item.get("campaign_id"),
-                            "tenant_id": item.get("tenant_id", tid),
-                            "raw_id": raw_id,
-                        }
-                    )
-                    continue
-
-                if not clients.perfectgym(tenant_id_item).get_marketing_consent_for_member(
-                    member_id=member_id,
-                    ):
-                    logger.warning(
-                        {
-                            "campaign": "no marketing_consent_for_member",
-                            "campaign_id": item.get("campaign_id"),
-                            "tenant_id": item.get("tenant_id", tid),
-                        }
-                    )
-                    continue
-
-                include_tags = svc.select_include_tags(item)
-
-                if include_tags:
-                    is_included = any(
-                        check_member_type(
-                            tenant_id_item,
-                            tag,
-                            phone,
-                            exclude=False,
-                        )
-                        for tag in include_tags
-                    )
-
-                    if not is_included:
-                        logger.warning(
-                            {
-                                "campaign": "not included",
-                                "campaign_id": item.get("campaign_id"),
-                                "tenant_id": item.get("tenant_id", tid),
-                                "include_tags": include_tags,
-                            }
-                        )
-                        continue
-
-
-                exclude_tags = svc.select_exclude_tags(item)
-
-                if exclude_tags:
-                    is_excluded = any(
-                        check_member_type(
-                            tenant_id_item,
-                            tag,
-                            phone,
-                            exclude=False,
-                        )
-                        for tag in exclude_tags
-                    )
-
-                    if is_excluded:
-                        logger.warning(
-                            {
-                                "campaign": "excluded",
-                                "campaign_id": item.get("campaign_id"),
-                                "tenant_id": item.get("tenant_id", tid),
-                                "exclude_tags": exclude_tags,
-                            }
-                        )
-                        continue
-                    
-                product_id = item.get(CAMPAIGNS_PRODUCT_ID_PLACEHOLDER)
-                context = build_campaign_context(tenant_id_item, member_id, phone, product_id) 
-
-                msg = svc.build_message(
-                    campaign=item,
-                    tenant_id=tenant_id_item,
-                    recipient_phone=phone,
-                    context=context,
-                )
-                to = normalize_whatsapp_channel_user_id(phone)
-                
-                payload = {
-                    "to": to,
-                    "body": msg["body"],
-                    "tenant_id": tenant_id_item,
-                    "message_type": "campaign",
-                }     
-                if msg.get("language_code"):
-                    payload["language_code"] = msg["language_code"]
-
-                sqs_client().send_message(
-                    QueueUrl=out_q_url,
-                    MessageBody=json.dumps(payload),
-                )
-                
-                conv_key = conversation_key(
-                    tenant_id_item,
-                    "whatsapp",
-                    to,
-                    None,
-                )
-                try:
-                    MESSAGES.log_message(
-                        tenant_id=msg.tenant_id,
-                        conversation_id=conv_key,
-                        msg_id=new_id("out-"),
-                        direction="outbound",
-                        body=msg.body or "",
-                        from_phone=msg.from_phone,
-                        to_phone=msg.to_phone,
-                        channel=msg.channel or "whatsapp",
-                        channel_user_id=msg.channel_user_id or msg.from_phone,
-                        language_code=None,
-                        tag="campaign"
-                    )
-                except Exception:
-                    # nie blokujemy flow jeśli logowanie padnie
-                    pass
-                    
-                
-                metrics.incr("TenantCampaignSendOk", tenant_id=tenant_id_item, component="campaign_runner")
-                
-            logger.info(
+            logger.warning(
                 {
-                    "campaign": "send",
-                    "campaign_id": item.get("campaign_id"),
-                    "tenant_id": tenant_id_item,
+                    "campaign": "missing_payment_url",
+                    "tenant_id": tenant_id,
+                    "member_id": member_id,
+                    "product_id": str(product_id),
                 }
             )
-    return {"statusCode": 200}
+
+        return context
+
+    def _build_outbound_payload(
+        self,
+        message: Any,
+        tenant_id: str,
+        channel_user_id: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "to": channel_user_id,
+            "body": self._message_value(message, "body", ""),
+            "tenant_id": tenant_id,
+            "message_type": MESSAGE_TYPE_CAMPAIGN,
+        }
+
+        language_code = self._message_value(message, "language_code")
+        if language_code:
+            payload["language_code"] = language_code
+
+        return payload
+
+    def _send_to_outbound_queue(self, payload: Mapping[str, Any]) -> None:
+        self.sqs.send_message(
+            QueueUrl=self.outbound_queue_url,
+            MessageBody=json.dumps(payload, ensure_ascii=False),
+        )
+
+    def _log_outbound_message(self, message: Any, tenant_id: str, channel_user_id: str) -> None:
+        conversation_id = conversation_key(
+            tenant_id,
+            WHATSAPP_CHANNEL,
+            channel_user_id,
+            None,
+        )
+        try:
+            self.conversations_repo.log_message(
+                tenant_id=tenant_id,
+                conversation_id=conversation_id,
+                msg_id=f"out-{uuid4().hex}",
+                direction="outbound",
+                body=self._message_value(message, "body", ""),
+                from_phone=self._message_value(message, "from_phone"),
+                to_phone=self._message_value(message, "to_phone", channel_user_id),
+                channel=self._message_value(message, "channel", WHATSAPP_CHANNEL),
+                channel_user_id=self._message_value(message, "channel_user_id", channel_user_id),
+                language_code=self._message_value(message, "language_code"),
+                tag=MESSAGE_TYPE_CAMPAIGN,
+            )
+        except Exception:
+            # Logowanie konwersacji nie może blokować wysyłki kampanii.
+            logger.exception(
+                {
+                    "campaign": "log_outbound_message_failed",
+                    "tenant_id": tenant_id,
+                    "conversation_id": conversation_id,
+                }
+            )
+
+    @staticmethod
+    def _message_value(message: Any, key: str, default: Any = None) -> Any:
+        if isinstance(message, Mapping):
+            return message.get(key, default)
+        return getattr(message, key, default)
+
+    @staticmethod
+    def _normalize_tag(value: Any) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().casefold()
+        return normalized or None
+
+    @classmethod
+    def _normalize_tags(cls, tags: Iterable[Any] | None) -> set[str]:
+        return {
+            normalized
+            for tag in tags or []
+            if (normalized := cls._normalize_tag(tag)) is not None
+        }
+
+    @staticmethod
+    def _log_campaign_skip(campaign: Mapping[str, Any], tenant_id: str, reason: str) -> None:
+        logger.warning(
+            {
+                "campaign": reason,
+                "campaign_id": campaign.get("campaign_id"),
+                "tenant_id": campaign.get("tenant_id") or tenant_id,
+            }
+        )
+
+
+_RUNNER: CampaignRunner | None = None
+
+
+def get_runner() -> CampaignRunner:
+    global _RUNNER
+    if _RUNNER is None:
+        _RUNNER = CampaignRunner()
+    return _RUNNER
+
+
+def lambda_handler(event: Mapping[str, Any] | None, context: Any) -> dict[str, Any]:
+    return get_runner().run(event)

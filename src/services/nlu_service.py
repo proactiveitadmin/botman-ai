@@ -1,18 +1,8 @@
 from __future__ import annotations
 import re
 from ..common.constants import (
-    INTENT_FAQ,
-    INTENT_HANDOVER,
-    INTENT_VERIFICATION,
     INTENT_CLARIFY,
-    INTENT_TICKET,
-    INTENT_TICKET_STATUS,
-    INTENT_AVAILABLE_CLASSES,
-    INTENT_CONTRACT_STATUS,
-    INTENT_CRM_MEMBER_BALANCE,
     INTENT_ACK,
-    INTENT_MARKETING_OPTOUT,
-    INTENT_MARKETING_OPTIN,
 )
 from ..adapters.openai_client import OpenAIClient
 

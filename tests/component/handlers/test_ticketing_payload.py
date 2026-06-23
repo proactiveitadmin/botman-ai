@@ -104,10 +104,27 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     actions1 = svc.handle(msg1)
 
     assert actions1
-    assert len(svc.ticketing.calls) == 0, "Ticket nie powinien być tworzony w 1. kroku (bot prosi o komentarz)."
+    assert len(svc.ticketing.calls) == 0, "Ticket nie powinien być tworzony w 1. kroku (bot prosi o zgodę)."
 
-    # --- krok 2: komentarz -> dopiero teraz tworzy się ticket ---
+    # --- krok 2: zgoda - bot czeka na komentarz ---
     msg2 = Message(
+        tenant_id="t-1",
+        from_phone="+48123123123",
+        to_phone="+48xxx",
+        body="tak",
+        channel="whatsapp",
+        channel_user_id="whatsapp:+48123123123",
+    )
+    actions2 = svc.handle(msg2)
+
+
+    actions1 = svc.handle(msg1)
+
+    assert actions1
+    assert len(svc.ticketing.calls) == 0, "Ticket nie powinien być tworzony w 2. kroku (bot prosi o komentarz)."
+    
+    # --- krok 3: komentarz -> dopiero teraz tworzy się ticket ---
+    msg3 = Message(
         tenant_id="t-1",
         from_phone="+48123123123",
         to_phone="+48xxx",
@@ -115,11 +132,11 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
         channel="whatsapp",
         channel_user_id="whatsapp:+48123123123",
     )
-    actions2 = svc.handle(msg2)
+    actions3 = svc.handle(msg3)
 
-    assert actions2
-    assert actions2[0].type == "reply"
-    assert len(svc.ticketing.calls) == 1, "Ticket powinien być utworzony po komentarzu (2. krok)."
+    assert actions3
+    assert actions3[0].type == "reply"
+    assert len(svc.ticketing.calls) == 1, "Ticket powinien być utworzony po komentarzu (3. krok)."
 
     call = svc.ticketing.calls[0]
 

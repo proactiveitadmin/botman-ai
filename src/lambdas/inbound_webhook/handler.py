@@ -82,7 +82,7 @@ def _resolve_tenant_id(event: dict, params: dict) -> str:
     """
     Tenant resolution strategy:
       1) path param /webhook/{tenant} (or /webhooks/twilio/{tenant})
-      2) Twilio 'To' number mapping via TenantsRepo (GSI TwilioToIndex)
+      2) Twilio 'To' number mapping via TenantsRepo (GSI TwilioToIndex2)
     """
     path_params = event.get("pathParameters") or {}
     tenant_from_path = (

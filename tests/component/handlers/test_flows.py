@@ -142,7 +142,11 @@ DUMMY_TEMPLATES = {
     # Tu ważne: traktujemy body jako listę słów rozdzieloną przecinkami,
     # bo _get_words_set pewnie robi split po przecinku / białych znakach
     ("confirm_words", "pl"): {
-        "body": "tak, tak., potwierdzam, ok, zgadzam się, oczywiście, pewnie, jasne",
+        "body": "tak,jasne",
+        "placeholders": [],
+    },
+    ("reject_words", "pl"): {
+        "body": "nie",
         "placeholders": [],
     },
     ("reserve_class_decline_words", "pl"): {
@@ -158,6 +162,10 @@ DUMMY_TEMPLATES = {
     },
     ("ticket_more_info", "pl"): {
         "body": "Doprecyzuj proszę zgłoszenie (krótki komentarz).",
+        "placeholders": [],
+    },
+    ("ticket_confirm_create", "pl"): {
+        "body": "Czy chcesz utworzyć zgłoszenie do recepcji? Odpowiedz: tak lub nie.",
         "placeholders": [],
     },
 
@@ -442,23 +450,21 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
 
     router_handler.lambda_handler(event1, None)
 
-    # W 1. kroku ticket nie powinien być jeszcze tworzony
-    assert not dummy_ticketing.calls, "Ticket nie powinien być tworzony na 1. wiadomość (bot ma poprosić o komentarz)."
+    assert not dummy_ticketing.calls
 
     msgs_1 = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs_1, "Brak wiadomości outbound po 1. kroku"
-
     payloads_1 = [json.loads(m["Body"]) for m in msgs_1]
-    ask_more = [
-        p
-        for p in payloads_1
+
+    confirm = [
+        p for p in payloads_1
         if p.get("to") == "whatsapp:+48123123123"
         and (
-            "doprecyz" in (p.get("body") or "").lower()
-            or "ticket_more_info" in (p.get("body") or "")
+            "ticket_confirm_create" in (p.get("body") or "")
+            or "czy chcesz utworzyć zgłoszenie" in (p.get("body") or "").lower()
         )
     ]
-    assert ask_more, f"Nie znaleziono prośby o doprecyzowanie. Outbound: {[p.get('body') for p in payloads_1]}"
+
+    assert confirm, f"Nie znaleziono prośby o potwierdzenie. Outbound: {[p.get('body') for p in payloads_1]}"
 
     # --- KROK 2: komentarz -> tworzymy ticket + potwierdzenie ---
     event2 = {
@@ -469,7 +475,7 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
                         "event_id": "evt-ticket-2",
                         "from": "whatsapp:+48123123123",
                         "to": "whatsapp:+48000000000",
-                        "body": "Nie mogę przedłużyć karnetu w aplikacji, wyskakuje błąd.",
+                        "body": "tak",
                         "tenant_id": "default",
                     }
                 )
@@ -479,29 +485,22 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
 
     router_handler.lambda_handler(event2, None)
 
-    assert dummy_ticketing.calls, "Ticket powinien zostać utworzony po komentarzu (2. krok)."
+    assert dummy_ticketing.calls
+    assert dummy_ticketing.calls[0]["tenant_id"] == "default"
 
     msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
-    assert msgs_2, "Brak wiadomości outbound po 2. kroku"
-
     payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
-    ticket_msgs = [
-        p
-        for p in payloads_2
+
+    created = [
+        p for p in payloads_2
         if p.get("to") == "whatsapp:+48123123123"
         and (
-            "utworzyłem zgłoszenie" in (p.get("body") or "").lower()
-            or "numer:" in (p.get("body") or "").lower()
+            "ABC-123" in (p.get("body") or "")
             or "ticket_created_ok" in (p.get("body") or "")
         )
     ]
 
-    assert ticket_msgs, (
-        "Nie znaleziono wiadomości potwierdzającej utworzenie zgłoszenia.\n"
-        f"Wiadomości w kolejce: {[p.get('body') for p in payloads_2]}"
-    )
-
-    assert any("ABC-123" in (p.get("body") or "") for p in ticket_msgs)
+    assert created, f"Nie znaleziono potwierdzenia utworzenia ticketa. Outbound: {[p.get('body') for p in payloads_2]}"
 
 def test_reservation_flow_with_email_otp(aws_stack, mock_ai, mock_pg, monkeypatch, router):
     outbound_url = aws_stack["outbound"]

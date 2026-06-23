@@ -212,6 +212,8 @@ class FakeTemplateServicePG:
         # słowa TAK / NIE
         if template_code == "confirm_words":
             return "tak ok potwierdzam"
+        if template_code == "reject_words":
+            return "nie"
 
         if template_code == "decline_words":
             return "nie rezygnuję"
@@ -234,6 +236,9 @@ class FakeTemplateServicePG:
 
         if template_code == "handover_to_staff":
             return "Łączę Cię z pracownikiem."
+            
+        if template_code == "ticket_confirm_create":
+            return "Czy chcesz utworzyć zgłoszenie do recepcji? Odpowiedz: tak lub nie."
 
         return template_code
 

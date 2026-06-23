@@ -8,64 +8,89 @@ Na podstawie wyniku NLU decyduje, czy:
 - dopytać użytkownika (clarify).
 """
 
+from __future__ import annotations
+
 import time
-import re
-import logging
-import os
-import boto3
-from datetime import datetime
-from typing import List, Optional
-from botocore.config import Config
+from dataclasses import dataclass, replace
+from typing import Any, Callable
 
-from ..domain.models import Message, Action
-from ..common.utils import build_reply_action
 from ..common.config import settings
-from ..common.timing import timed
-from ..common.security import conversation_key
-from ..services.nlu_service import NLUService
-from ..services.kb_service import KBService
-from ..services.template_service import TemplateService
-from ..services.crm_service import CRMService
-from .clients_factory import ClientsFactory
-from .tenant_config_service import default_tenant_config_service
-from ..services.ticketing_service import TicketingService
-from ..services.metrics_service import MetricsService
-from ..services.crm_flow_service import CRMFlowService
-from ..services.language_service import LanguageService
-from ..repos.conversations_repo import ConversationsRepo
-from ..repos.tenants_repo import TenantsRepo
-from ..repos.messages_repo import MessagesRepo
-
 from ..common.constants import (
-    #STATES
-    STATE_AWAITING_CONFIRMATION,
+    # STATES
     STATE_AWAITING_CHALLENGE,
     STATE_AWAITING_CLASS_SELECTION,
+    STATE_AWAITING_CONFIRMATION,
     STATE_AWAITING_MESSAGE,
+    STATE_AWAITING_TICKET_CONFIRMATION,
     STATE_AWAITING_TICKET_COMMENT,
-    #INTENTS
-    INTENT_RESERVE_CLASS,
-    INTENT_FAQ,
-    INTENT_HANDOVER,
-    INTENT_VERIFICATION,
-    INTENT_CLARIFY,
-    INTENT_TICKET,
-    INTENT_TICKET_STATUS,
+    # INTENTS
+    INTENT_ACK,
     INTENT_AVAILABLE_CLASSES,
+    INTENT_CLARIFY,
     INTENT_CONTRACT_STATUS,
     INTENT_CRM_MEMBER_BALANCE,
-    INTENT_ACK,
-    INTENT_MARKETING_OPTOUT,
+    INTENT_FAQ,
+    INTENT_HANDOVER,
     INTENT_MARKETING_OPTIN,
-    #PARAMS
-    DEFAULT_NLU_CONFIDENCE,
+    INTENT_MARKETING_OPTOUT,
+    INTENT_RESERVE_CLASS,
+    INTENT_TICKET,
+    INTENT_VERIFICATION,
+    # PARAMS
     DEFAULT_CHANNEL,
-    SESSION_TIMEOUT_SECONDS,
+    DEFAULT_NLU_CONFIDENCE,
     FAQ_AI_HISTORY_LIMIT,
     HISTORY_FETCH_LIMIT,
+    SESSION_TIMEOUT_SECONDS,
+    CRM_CONFIRM_WORDS,
+    CRM_REJECT_WORDS,
+)
+from ..common.logging import logger
+from ..common.logging_utils import mask_phone
+from ..common.security import conversation_key
+from ..common.utils import build_reply_action, new_id
+from ..domain.models import Action, Message
+from ..repos.conversations_repo import ConversationsRepo
+from ..repos.messages_repo import MessagesRepo
+from ..repos.tenants_repo import TenantsRepo
+from ..services.crm_flow_service import CRMFlowService
+from ..services.crm_service import CRMService
+from ..services.kb_service import KBService
+from ..services.language_service import LanguageService
+from ..services.metrics_service import MetricsService
+from ..services.nlu_service import NLUService
+from ..services.template_service import TemplateService
+from ..services.ticketing_service import TicketingService
+from .clients_factory import ClientsFactory
+
+
+TICKET_LIKE_INTENTS = frozenset(
+    {
+        INTENT_TICKET,
+        INTENT_HANDOVER,
+        INTENT_MARKETING_OPTOUT,
+        INTENT_MARKETING_OPTIN,
+    }
 )
 
-logger = logging.getLogger(__name__)
+
+@dataclass(frozen=True)
+class RoutingContext:
+    """Dane wyliczone raz na początku obsługi wiadomości."""
+
+    msg: Message
+    safe_msg: Message
+    lang: str
+    channel: str
+    channel_user_id: str
+    conv: dict[str, Any]
+    state: str | None
+    intent: str
+    slots: dict[str, Any]
+    confidence: float
+    sensitive_data: dict[str, Any]
+    is_new_session: bool
+
 
 class RoutingService:
     """
@@ -85,7 +110,7 @@ class RoutingService:
         _clients_factory: ClientsFactory | None = None,
         crm: CRMService | None = None,
         ticketing: TicketingService | None = None,
-        crm_flow: CRMFlowService | None = None, 
+        crm_flow: CRMFlowService | None = None,
         language: LanguageService | None = None,
     ) -> None:
         self.nlu = nlu or NLUService()
@@ -104,72 +129,92 @@ class RoutingService:
             conv=self.conv,
         )
         self.language = language or LanguageService(conv=self.conv)
-        # cache na słowa typu TAK / NIE z templatek
-        self._words_cache: dict[tuple[str, str, str], set[str]] = {}
 
-    # -------------------------------------------------------------------------
-    #  Helpers ogólne
-    # -------------------------------------------------------------------------
+    # ---------------------------------------------------------------------
+    # API publiczne
+    # ---------------------------------------------------------------------
 
-    def _reply(self, msg, lang, body, channel=None, channel_user_id=None):
-        return build_reply_action(msg, lang, body, channel, channel_user_id)
-   
-    # -------------------------------------------------------------------------
-    #  NLU + zapis intentu/stanu
-    # -------------------------------------------------------------------------
+    def handle(self, msg: Message) -> list[Action]:
+        """Przetwarza pojedynczą wiadomość biznesową i zwraca akcje do wykonania."""
+        ctx = self._build_context(msg)
 
-    def _classify_intent(self, msg: Message, lang: str):
-        """Opakowanie NLU + fallback na clarify."""
-        if msg.intent:
-            intent = msg.intent
-            slots = msg.slots or {}
-            confidence = DEFAULT_NLU_CONFIDENCE
-        else:
-            nlu = self.nlu.classify_intent(msg.body, lang)
-            if isinstance(nlu, dict):
-                intent = nlu.get("intent", INTENT_CLARIFY)
-                slots = nlu.get("slots") or {}
-                confidence = float(nlu.get("confidence", 1.0))
-            else:
-                intent = getattr(nlu, "intent", INTENT_CLARIFY)
-                slots = getattr(nlu, "slots", {}) or {}
-                confidence = float(getattr(nlu, "confidence", 1.0))
-        nlu_min_confidence =  float(getattr(settings, "nlu_min_confidence", 0.3))
-        if intent != INTENT_CLARIFY and confidence < nlu_min_confidence:
-            intent = INTENT_CLARIFY
+        state_response = self._handle_stateful_flow(ctx)
+        if state_response is not None:
+            return state_response
 
-        return intent, slots, confidence
+        pending_response = self.crm_flow.handle_pending_confirmation(ctx.msg, ctx.lang)
+        if pending_response is not None:
+            return pending_response
 
-        
-    def _upsert_conv(self, msg: Message, lang: str, last_intent: str, sm_state: str | None):
-        self.conv.upsert_conversation(
-            tenant_id=msg.tenant_id,
-            channel=msg.channel or DEFAULT_CHANNEL,
-            channel_user_id=msg.channel_user_id or msg.from_phone,
-            last_intent=last_intent,
-            state_machine_status=sm_state,
-            language_code=lang,
+        if ctx.intent == INTENT_ACK:
+            return self._handle_ack(ctx)
+
+        ctx = self._apply_contextual_faq_followup(ctx)
+        self._update_conversation_state(ctx.msg, ctx.lang, ctx.intent, ctx.slots)
+
+        return self._dispatch_intent(ctx)
+
+    # ---------------------------------------------------------------------
+    # Budowanie kontekstu wejściowego
+    # ---------------------------------------------------------------------
+
+    def _build_context(self, msg: Message) -> RoutingContext:
+        lang = self.language.resolve_and_persist_language(msg)
+        channel = msg.channel or DEFAULT_CHANNEL
+        channel_user_id = msg.channel_user_id or msg.from_phone
+        conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
+
+        intent, slots, confidence, sensitive_data, redacted_message = self._classify_intent(
+            msg,
+            lang,
         )
-        
-    def _update_conversation_state(
+        safe_msg = replace(msg, body=redacted_message)
+        self._log_message(msg, safe_msg.body, lang)
+
+        return RoutingContext(
+            msg=msg,
+            safe_msg=safe_msg,
+            lang=lang,
+            channel=channel,
+            channel_user_id=channel_user_id,
+            conv=conv,
+            state=conv.get("state_machine_status"),
+            intent=intent,
+            slots=slots,
+            confidence=confidence,
+            sensitive_data=sensitive_data,
+            is_new_session=self._is_new_session(conv),
+        )
+
+    def _is_new_session(self, conv: dict[str, Any]) -> bool:
+        last_ts = int(conv.get("updated_at") or 0)
+        if last_ts == 0:
+            return True
+        return int(time.time()) - last_ts > SESSION_TIMEOUT_SECONDS
+
+    # ---------------------------------------------------------------------
+    # Helpers ogólne
+    # ---------------------------------------------------------------------
+
+    def _reply(
         self,
         msg: Message,
         lang: str,
-        intent: str,
-        slots: dict,
-    ) -> None:
-        """Ustawia last_intent + ewentualny stan maszyny."""
-        sm_state = None
-        if intent == INTENT_RESERVE_CLASS:
-            cid = (slots.get("class_id") or "").strip()
-            if cid and cid.isdigit():
-                sm_state = STATE_AWAITING_CONFIRMATION
-            elif cid:
-                sm_state = STATE_AWAITING_CLASS_SELECTION
-        elif intent == INTENT_AVAILABLE_CLASSES:
-            sm_state = STATE_AWAITING_CLASS_SELECTION
+        body: str,
+        channel: str | None = None,
+        channel_user_id: str | None = None,
+    ) -> Action:
+        return build_reply_action(msg, lang, body, channel, channel_user_id)
 
-        self._upsert_conv(msg, lang, intent, sm_state)
+    def _template_reply(
+        self,
+        msg: Message,
+        lang: str,
+        template_name: str,
+        params: dict[str, Any] | None = None,
+    ) -> list[Action]:
+        body = self.tpl.render_named(msg.tenant_id, template_name, lang, params or {})
+        return [self._reply(msg, lang, body)]
 
     def _conv_key(self, msg: Message) -> str:
         return conversation_key(
@@ -178,357 +223,497 @@ class RoutingService:
             msg.channel_user_id or msg.from_phone,
             msg.conversation_id,
         )
-        
-    def _fetch_history_items(self, tenant_id: str, conv_key: str) -> list[dict]:  
+
+    def _member_not_linked_reply(self, ctx: RoutingContext) -> list[Action]:
+        return self._template_reply(ctx.msg, ctx.lang, "crm_member_not_linked")
+
+    # ---------------------------------------------------------------------
+    # Logowanie i historia
+    # ---------------------------------------------------------------------
+
+    def _log_message(self, msg: Message, body_for_log: str, lang: str) -> None:
+        """Loguje inbound. Błąd logowania nie może zatrzymać routingu."""
         try:
-            history_items = self.messages.get_last_messages(
+            self.messages.log_message(
+                tenant_id=msg.tenant_id,
+                conversation_id=self._conv_key(msg),
+                msg_id=new_id("in-"),
+                direction="inbound",
+                body=body_for_log or "",
+                from_phone=msg.from_phone,
+                to_phone=msg.to_phone,
+                channel=msg.channel or DEFAULT_CHANNEL,
+                channel_user_id=msg.channel_user_id or msg.from_phone,
+                language_code=lang,
+            )
+            logger.info(
+                {
+                    "component": "routing_service",
+                    "event": "received",
+                    "from": mask_phone(msg.from_phone),
+                    "to": mask_phone(msg.to_phone),
+                    "body": body_for_log,
+                    "tenant_id": msg.tenant_id,
+                    "channel": msg.channel or DEFAULT_CHANNEL,
+                }
+            )
+        except Exception:
+            logger.warning(
+                {
+                    "component": "routing_service",
+                    "event": "message_log_failed",
+                    "tenant_id": msg.tenant_id,
+                }
+            )
+
+    def _fetch_history_items(self, tenant_id: str, conv_key: str) -> list[dict[str, Any]]:
+        try:
+            return self.messages.get_last_messages(
                 tenant_id=tenant_id,
                 conv_key=conv_key,
                 limit=HISTORY_FETCH_LIMIT,
             ) or []
-        except Exception as e:
-            history_items = []
-        return history_items
-        
-    def _history_for_ticket_description(self, items) -> str:
-        history_lines = []
-        for item in reversed(items):
-            direction = item.get("direction", "?")
-            body_item = item.get("body", "")
-            history_lines.append(f"{direction}: {body_item}")
-        return "\n".join(history_lines)
-
-    # -------------------------------------------------------------------------
-    #  Główna metoda
-    # -------------------------------------------------------------------------
-
-    def handle(self, msg: Message) -> List[Action]:
-        """
-        Przetwarza pojedynczą wiadomość biznesową i zwraca listę akcji do wykonania.
-        """
-        text_raw = (msg.body or "").strip()
-
-        # 1) Język
-        lang = self.language.resolve_and_persist_language(msg)
-
-        # 2) Rozmowa + stan maszyny
-        channel = msg.channel or DEFAULT_CHANNEL
-        channel_user_id = msg.channel_user_id or msg.from_phone
-        conv = self.conv.get_conversation(msg.tenant_id, channel, channel_user_id) or {}
-        
-        state = conv.get("state_machine_status")
-
-        now_ts = int(time.time())
-        last_ts = int(conv.get("updated_at") or 0)
-        gap = now_ts - last_ts if last_ts else 0
-        is_new_session = last_ts == 0 or gap > SESSION_TIMEOUT_SECONDS
-
-        # 3) Stany specjalne – bez NLU
-        #3x) Ticket: czekamy na komentarz uzytkownika
-        if state == STATE_AWAITING_TICKET_COMMENT:    
-            conv_key = self._conv_key(msg)
-      
-            history_items: list[dict] = []
-            if self.messages:
-                history_items = self._fetch_history_items(msg.tenant_id, conv_key)
-
-            history_block = self._history_for_ticket_description(history_items)
-            
-            res = self.ticketing.create_data_and_ticket(msg, lang, conv_key, history_block)
-            
-            self.conv.upsert_conversation(
-                tenant_id=msg.tenant_id,
-                channel=channel,
-                channel_user_id=channel_user_id,
-                state_machine_status=STATE_AWAITING_MESSAGE,
-                language_code=lang,
+        except Exception:
+            logger.warning(
+                {
+                    "component": "routing_service",
+                    "event": "history_fetch_failed",
+                    "tenant_id": tenant_id,
+                }
             )
-            ticket_id = None
-            if isinstance(res, dict):
-                ticket_id = res.get(INTENT_TICKET) or res.get("key")
+            return []
 
-            if ticket_id:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "ticket_created_ok",
-                    lang,
-                    {INTENT_TICKET: ticket_id},
-                )
-            else:
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "ticket_created_failed",
-                    lang,
-                    {},
-                )
-            return [self._reply(msg, lang, body)]
+    @staticmethod
+    def _history_for_ticket_description(items: list[dict[str, Any]]) -> str:
+        return "\n".join(
+            f'{item.get("direction", "?")}: {item.get("body", "")}'
+            for item in reversed(items)
+        )
 
-        # 3a) Challenge PG na WhatsApp
-        if state == STATE_AWAITING_CHALLENGE and channel == DEFAULT_CHANNEL:
-            return self.crm_flow.handle_crm_challenge(msg, conv, lang)
-            
-        # 3b) Użytkownik wybiera zajęcia z listy
-        if state == STATE_AWAITING_CLASS_SELECTION:
-            selection_response = self.crm_flow.handle_class_selection(msg, lang)
-            if selection_response is not None:
-                return selection_response
+    def _faq_chat_history(self, ctx: RoutingContext) -> list[dict[str, str]]:
+        if ctx.is_new_session or not self.messages:
+            return []
 
-        # 3c) Pending rezerwacja – TAK/NIE
-        pending_response = self.crm_flow.handle_pending_confirmation(msg, lang)
-        if pending_response is not None:
-            return pending_response
+        history_items = self._fetch_history_items(ctx.msg.tenant_id, self._conv_key(ctx.msg))
+        chat_history = [
+            {"role": "user", "content": body}
+            for item in reversed(history_items)
+            if item.get("direction") == "inbound"
+            for body in [(item.get("body") or "").strip()]
+            if body
+        ]
+        return chat_history[-FAQ_AI_HISTORY_LIMIT:]
 
-        # 4) NLU – klasyfikacja intencji
-        intent, slots, _ = self._classify_intent(msg, lang)
-        
-        # 4x) Fast-path intents (bez LLM/CRM/KB) – tylko szablony.
-        #      Zero hardkodowania: treść kontroluje TemplatesRepo.
-        if intent == INTENT_ACK:
-            tpl_name = "ack_fallback_text"
-            body = self.tpl.render_named(msg.tenant_id, tpl_name, lang, {})
-            self._update_conversation_state(msg, lang, intent, slots)
-            return [self._reply(msg, lang, body)]
+    # ---------------------------------------------------------------------
+    # NLU + zapis intentu/stanu
+    # ---------------------------------------------------------------------
 
-        # 4a) Kontekstowa poprawka: follow-up po FAQ
-        # Jeśli poprzednia intencja była INTENT_FAQ, sesja jest ciągle ta sama,
-        # a NLU zwróciło INTENT_CLARIFY (bo pytanie jest krótkie, typu "A w sobotę?"),
-        # to traktujemy to jako FAQ z kontekstem.
-        last_intent = conv.get("last_intent")
-        if (
-            not is_new_session
-            and last_intent == INTENT_FAQ
-            and intent == INTENT_CLARIFY
-        ):
-            intent = INTENT_FAQ
-            # Slots zwykle i tak nie są potrzebne dla AI-FAQ,
-            # więc nie musimy ich tu ruszać.
-            
-        # 5) Zapis intentu / stanu
-        self._update_conversation_state(msg, lang, intent, slots)
+    def _classify_intent(
+        self,
+        msg: Message,
+        lang: str,
+    ) -> tuple[str, dict[str, Any], float, dict[str, Any], str]:
+        """
+        Opakowanie NLU.
 
-        # 6) Routing po intencji
-        # 6.1.a FAQ
-        if intent == INTENT_FAQ:
-            conv_key = self._conv_key(msg)
-            chat_history: list[dict] = []
+        Gdy `msg.intent` jest już ustawiony, używamy go jako źródła prawdy,
+        ale nadal próbujemy wywołać NLU, żeby uzyskać redacted_message do logów.
+        """
+        fallback_sensitive_data = {"present": False, "categories": []}
+        fallback_body = msg.body or ""
 
-            # historia potrzebna nam tylko jako fallback do answer_ai
-            if not is_new_session and self.messages:
-
-                history_items = self._fetch_history_items(msg.tenant_id, conv_key)
-                for item in reversed(history_items):
-                    if item.get("direction") != "inbound":
-                        continue
-                    body_item = (item.get("body") or "").strip()
-                    if not body_item:
-                        continue
-                    chat_history.append({"role": "user", "content": body_item})
-                chat_history = chat_history[-FAQ_AI_HISTORY_LIMIT:]
-
-            # 3) Fallback – jeśli NLU nie podało topic albo FAQ nie ma wpisu,
-            #    używamy dotychczasowego AI-FAQ (answer_ai) z historią
-            ai_body = self.kb.answer_ai(
-                question=msg.body,
-                tenant_id=msg.tenant_id,
-                language_code=lang,
-                history=chat_history,
+        if msg.intent:
+            redacted_message = self._try_redact_message(msg, lang, fallback_body)
+            return (
+                msg.intent,
+                msg.slots or {},
+                DEFAULT_NLU_CONFIDENCE,
+                fallback_sensitive_data,
+                redacted_message,
             )
 
-            if ai_body:
-                body = self.kb.normalize_ai_answer(ai_body)           
-            else:
-                # Deterministic fallback (no extra LLM calls).
-                body = self.tpl.render_named(msg.tenant_id, "faq_no_info", lang, {})         
-            return [self._reply(msg, lang, body)]
+        try:
+            nlu = self.nlu.classify_intent(msg.body, lang)
+        except Exception:
+            logger.warning(
+                {
+                    "component": "routing_service",
+                    "event": "nlu_classification_failed",
+                    "tenant_id": msg.tenant_id,
+                }
+            )
+            return INTENT_CLARIFY, {}, 0.0, fallback_sensitive_data, fallback_body
 
-        # 6.2 Rezerwacja zajęć
+        intent, slots, confidence, sensitive_data, redacted_message = self._parse_nlu_result(
+            nlu,
+            fallback_body=fallback_body,
+            fallback_sensitive_data=fallback_sensitive_data,
+        )
+        if intent != INTENT_CLARIFY and confidence < self._nlu_min_confidence():
+            intent = INTENT_CLARIFY
+
+        return intent, slots, confidence, sensitive_data, redacted_message
+
+    def _try_redact_message(self, msg: Message, lang: str, fallback_body: str) -> str:
+        try:
+            nlu = self.nlu.classify_intent(msg.body, lang)
+            if isinstance(nlu, dict):
+                return nlu.get("redacted_message") or fallback_body
+            return getattr(nlu, "redacted_message", fallback_body) or fallback_body
+        except Exception:
+            logger.warning(
+                {
+                    "component": "routing_service",
+                    "event": "redaction_failed",
+                    "tenant_id": msg.tenant_id,
+                }
+            )
+            return fallback_body
+
+    @staticmethod
+    def _parse_nlu_result(
+        nlu: Any,
+        fallback_body: str,
+        fallback_sensitive_data: dict[str, Any],
+    ) -> tuple[str, dict[str, Any], float, dict[str, Any], str]:
+        if isinstance(nlu, dict):
+            return (
+                nlu.get("intent", INTENT_CLARIFY),
+                nlu.get("slots") or {},
+                float(nlu.get("confidence", 1.0)),
+                nlu.get("sensitive_data") or fallback_sensitive_data,
+                nlu.get("redacted_message") or fallback_body,
+            )
+
+        return (
+            getattr(nlu, "intent", INTENT_CLARIFY),
+            getattr(nlu, "slots", {}) or {},
+            float(getattr(nlu, "confidence", 1.0)),
+            getattr(nlu, "sensitive_data", fallback_sensitive_data) or fallback_sensitive_data,
+            getattr(nlu, "redacted_message", fallback_body) or fallback_body,
+        )
+
+    @staticmethod
+    def _nlu_min_confidence() -> float:
+        return float(getattr(settings, "nlu_min_confidence", 0.3))
+
+    def _upsert_conv(
+        self,
+        msg: Message,
+        lang: str,
+        last_intent: str,
+        sm_state: str | None,
+    ) -> None:
+        self.conv.upsert_conversation(
+            tenant_id=msg.tenant_id,
+            channel=msg.channel or DEFAULT_CHANNEL,
+            channel_user_id=msg.channel_user_id or msg.from_phone,
+            last_intent=last_intent,
+            state_machine_status=sm_state,
+            language_code=lang,
+        )
+
+    def _update_conversation_state(
+        self,
+        msg: Message,
+        lang: str,
+        intent: str,
+        slots: dict[str, Any],
+    ) -> None:
+        """Ustawia last_intent + ewentualny stan maszyny."""
+        sm_state = self._state_for_intent(intent, slots)
+        logger.info(
+            {
+                "component": "routing_service",
+                "event": "update_conversation_state",
+                "sm_state": sm_state,
+            }
+        )
+        self._upsert_conv(msg, lang, intent, sm_state)
+
+    @staticmethod
+    def _state_for_intent(intent: str, slots: dict[str, Any]) -> str | None:
         if intent == INTENT_RESERVE_CLASS:
             class_id = (slots.get("class_id") or "").strip()
+            if class_id.isdigit():
+                return STATE_AWAITING_CONFIRMATION
+            if class_id:
+                return STATE_AWAITING_CLASS_SELECTION
+        if intent == INTENT_AVAILABLE_CLASSES:
+            return STATE_AWAITING_CLASS_SELECTION
+        return None
 
-            # brak class_id → najpierw lista zajęć
-            if not class_id:
-                # tu ustawiamy stan ręcznie
-                if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
-                    
-                    self._upsert_conv(msg, lang, INTENT_AVAILABLE_CLASSES, STATE_AWAITING_MESSAGE)
+    def _apply_contextual_faq_followup(self, ctx: RoutingContext) -> RoutingContext:
+        if (
+            not ctx.is_new_session
+            and ctx.conv.get("last_intent") == INTENT_FAQ
+            and ctx.intent == INTENT_CLARIFY
+        ):
+            return replace(ctx, intent=INTENT_FAQ)
+        return ctx
 
-                    return self.crm_flow.build_available_classes_response(
-                        msg,
-                        lang,
-                        auto_confirm_single=False,
-                        allow_selection=False,
-                    )
+    # ---------------------------------------------------------------------
+    # Routing stanów rozmowy
+    # ---------------------------------------------------------------------
+
+    def _handle_stateful_flow(self, ctx: RoutingContext) -> list[Action] | None:
+        if ctx.state == STATE_AWAITING_TICKET_CONFIRMATION:
+            return self._handle_awaiting_ticket_confirmation(ctx)
+            
+        if ctx.state == STATE_AWAITING_TICKET_COMMENT:
+            return self._handle_awaiting_ticket_comment(ctx)
+
+        if ctx.state == STATE_AWAITING_CHALLENGE and ctx.channel == DEFAULT_CHANNEL:
+            return self.crm_flow.handle_crm_challenge(ctx.msg, ctx.conv, ctx.lang)
+
+        if ctx.state == STATE_AWAITING_CLASS_SELECTION:
+            selection_response = self.crm_flow.handle_class_selection(ctx.msg, ctx.lang)
+            if selection_response is not None:
+                return selection_response
                 
-                self._upsert_conv(msg, lang, intent, STATE_AWAITING_CLASS_SELECTION)
+        return None
 
-                return self.crm_flow.build_available_classes_response(msg, lang, auto_confirm_single=True)
+    def _handle_awaiting_ticket_confirmation(self, ctx: RoutingContext) -> list[Action] | None:
+        text = (ctx.msg.body or "").strip().lower()
 
-            # class_id to nie ID tylko nazwa typu zajęć (np. 'pilates') → lista z filtrem
-            if class_id and not class_id.isdigit():
-                if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
-                    self._upsert_conv(msg, lang, INTENT_AVAILABLE_CLASSES, STATE_AWAITING_MESSAGE)
+        confirm_words = self.crm_flow._get_words_set(
+            ctx.msg.tenant_id,
+            CRM_CONFIRM_WORDS,
+            ctx.lang,
+        )
+        reject_words = self.crm_flow._get_words_set(
+            ctx.msg.tenant_id,
+            CRM_REJECT_WORDS,
+            ctx.lang,
+        )
 
-                    return self.crm_flow.build_available_classes_response(
-                        msg,
-                        lang,
-                        auto_confirm_single=False,
-                        class_type_query=class_id,
-                        allow_selection=False,
-                    )
-                self._upsert_conv(msg, lang, intent, STATE_AWAITING_CLASS_SELECTION)
-
-                return self.crm_flow.build_available_classes_response(
-                    msg,
-                    lang,
-                    auto_confirm_single=True,
-                    class_type_query=class_id,
-                )
-
-            # mamy class_id → standardowy flow z weryfikacją PG i pending
-            verify_resp = self.crm_flow.ensure_crm_verification(
-                msg,
-                conv,
-                lang,
-                post_intent=INTENT_RESERVE_CLASS,
-                post_slots={"class_id": class_id},
-            )
-            if verify_resp:
-                return verify_resp
-
-            member_id = self._require_member_id(msg, conv, lang)
-            return self.crm_flow.reserve_class_with_id_core(
-                msg,
-                lang,
-                class_id=class_id,
-                member_id=member_id,
-            )
-
-        # 6.3a Handover do człowieka
-       # if intent == INTENT_HANDOVER - tymczasowo pod ticketing
-       
-        #6.3b OPT-IN
-        if intent == INTENT_MARKETING_OPTIN:
+        logger.info({
+            "event": "ticket_confirmation_words_debug",
+            "text": text,
+            "reject_words": list(reject_words),
+            "confirm_words": list(confirm_words),
+        })
+        if text in reject_words:
             self._upsert_conv(
-                msg,
-                lang,
-                INTENT_MARKETING_OPTIN,
+                ctx.msg,
+                ctx.lang,
+                ctx.intent,
+                STATE_AWAITING_MESSAGE,
+            )
+            return self._template_reply(ctx.msg, ctx.lang, "ticket_cancelled")
+
+        if text in confirm_words:
+            self._upsert_conv(
+                ctx.msg,
+                ctx.lang,
+                ctx.intent,
                 STATE_AWAITING_TICKET_COMMENT,
             )
+            return self._template_reply(ctx.msg, ctx.lang, "ticket_more_info")
 
-            body = self.tpl.render_named(
-                msg.tenant_id,
-                "ticket_more_info",
-                lang,
-                {},
-            )
-            return [self._reply(msg, lang, body)]
-            
-        # 6.4 Ticket do systemu ticketowego
-        # handover, optin/optout - tymczasowo pod ticketing
-        if intent in (
-            INTENT_TICKET,
-            INTENT_HANDOVER,
-            INTENT_MARKETING_OPTOUT,
-        ):
-            verify_resp = self.crm_flow.ensure_crm_verification(
-                msg,
-                conv,
-                lang,
-                post_intent=INTENT_CRM_MEMBER_BALANCE,
-                post_slots=slots,
-            )
-            if verify_resp:
-                return verify_resp
-
-            member_id = conv.get("crm_member_id")
-            if member_id:
-                self._upsert_conv(msg, lang, INTENT_HANDOVER, STATE_AWAITING_TICKET_COMMENT)
-                body = self.tpl.render_named(
-                    msg.tenant_id,
-                    "ticket_more_info",
-                    lang,
-                    {},
-                )
-                return [self._reply(msg, lang, body)]
-            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
-            return [self._reply(msg, lang, body)]
-   
-        # 6.5 Lista dostępnych zajęć (bez natychmiastowej rezerwacji)
-        if intent == INTENT_AVAILABLE_CLASSES:
-            if not self.crm_flow.is_crm_member(msg.tenant_id, msg.from_phone):
-                self._upsert_conv(msg, lang, INTENT_AVAILABLE_CLASSES, STATE_AWAITING_MESSAGE)
-
-                return self.crm_flow.build_available_classes_response(
-                    msg,
-                    lang,
-                    auto_confirm_single=False,
-                    allow_selection=False,
-                )
-            self._upsert_conv(msg, lang, intent, STATE_AWAITING_CLASS_SELECTION)
-
-            return self.crm_flow.build_available_classes_response(
-                msg,
-                lang,
-                auto_confirm_single=False,
-            )
-
-        # 6.6 Status kontraktu
-        if intent == INTENT_CONTRACT_STATUS:
-            verify_resp = self.crm_flow.ensure_crm_verification(
-                msg,
-                conv,
-                lang,
-                post_intent=INTENT_CONTRACT_STATUS,
-                post_slots=slots,
-            )
-            if verify_resp:
-                return verify_resp
-            member_id = conv.get("crm_member_id")
-            if member_id:
-                return self.crm_flow.crm_contract_status_core(msg, lang, member_id)
-            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
-            return [self._reply(msg, lang, body)]
-
-        # 6.7 Saldo członkowskie
-        if intent == INTENT_CRM_MEMBER_BALANCE:
-            verify_resp = self.crm_flow.ensure_crm_verification(
-                msg,
-                conv,
-                lang,
-                post_intent=INTENT_CRM_MEMBER_BALANCE,
-                post_slots=slots,
-            )
-            if verify_resp:
-                return verify_resp
-
-            member_id = conv.get("crm_member_id")
-            if member_id:
-                return self.crm_flow.crm_member_balance_core(msg, lang, member_id)
-            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
-            return [self._reply(msg, lang, body)]
+        return None
         
-        # 6.8 Prośba o weryfikację
-        if intent == INTENT_VERIFICATION:
-            verify_resp = self.crm_flow.ensure_crm_verification(
-                msg,
-                conv,
-                lang,
-                post_intent=INTENT_CONTRACT_STATUS,
-                post_slots=slots,
-            )
-            if verify_resp:
-                return verify_resp
-            member_id = conv.get("crm_member_id")
-            if member_id:
-                return self.crm_flow.verification_active(msg, lang, member_id)
-            body = self.tpl.render_named(msg.tenant_id, "crm_member_not_linked", lang, {})
-            return [self._reply(msg, lang, body)]
-     
-        # 6.10 Domyślny clarify
-        body = self.tpl.render_named(
-            msg.tenant_id,
-            "clarify_generic",
-            lang,
-            {},
+    def _handle_awaiting_ticket_comment(self, ctx: RoutingContext) -> list[Action]:
+        conv_key = self._conv_key(ctx.msg)
+        history_items = self._fetch_history_items(ctx.msg.tenant_id, conv_key) if self.messages else []
+        history_block = self._history_for_ticket_description(history_items)
+
+        result = self.ticketing.create_data_and_ticket(
+            ctx.safe_msg,
+            ctx.lang,
+            conv_key,
+            history_block,
         )
-        return [self._reply(msg, lang, body)]
+        self._upsert_conv(
+            ctx.msg,
+            ctx.lang,
+            ctx.intent,
+            STATE_AWAITING_MESSAGE,
+        )
+
+        ticket_id = self._ticket_id_from_result(result)
+        if ticket_id:
+            return self._template_reply(
+                ctx.msg,
+                ctx.lang,
+                "ticket_created_ok",
+                {INTENT_TICKET: ticket_id},
+            )
+        return self._template_reply(ctx.msg, ctx.lang, "ticket_created_failed")
+
+    @staticmethod
+    def _ticket_id_from_result(result: Any) -> str | None:
+        if not isinstance(result, dict):
+            return None
+        return result.get(INTENT_TICKET) or result.get("key")
+
+    # ---------------------------------------------------------------------
+    # Routing intencji
+    # ---------------------------------------------------------------------
+
+    def _dispatch_intent(self, ctx: RoutingContext) -> list[Action]:
+        if ctx.intent == INTENT_FAQ:
+            return self._handle_faq(ctx)
+        if ctx.intent == INTENT_RESERVE_CLASS:
+            return self._handle_reserve_class(ctx)
+        if ctx.intent in TICKET_LIKE_INTENTS:
+            return self._handle_ticket_like(ctx)
+        if ctx.intent == INTENT_AVAILABLE_CLASSES:
+            return self._handle_available_classes(ctx)
+        if ctx.intent == INTENT_CONTRACT_STATUS:
+            return self._handle_contract_status(ctx)
+        if ctx.intent == INTENT_CRM_MEMBER_BALANCE:
+            return self._handle_member_balance(ctx)
+        if ctx.intent == INTENT_VERIFICATION:
+            return self._handle_verification(ctx)
+        return self._template_reply(ctx.msg, ctx.lang, "clarify_generic")
+
+    def _handle_ack(self, ctx: RoutingContext) -> list[Action]:
+        self._update_conversation_state(ctx.msg, ctx.lang, ctx.intent, ctx.slots)
+        return self._template_reply(ctx.msg, ctx.lang, "ack_fallback_text")
+
+    def _handle_faq(self, ctx: RoutingContext) -> list[Action]:
+        ai_body = self.kb.answer_ai(
+            question=ctx.safe_msg.body,
+            tenant_id=ctx.msg.tenant_id,
+            language_code=ctx.lang,
+            history=self._faq_chat_history(ctx),
+        )
+        body = (
+            self.kb.normalize_ai_answer(ai_body)
+            if ai_body
+            else self.tpl.render_named(ctx.msg.tenant_id, "faq_no_info", ctx.lang, {})
+        )
+        return [self._reply(ctx.msg, ctx.lang, body)]
+
+    def _handle_reserve_class(self, ctx: RoutingContext) -> list[Action]:
+        class_id = (ctx.slots.get("class_id") or "").strip()
+
+        if not class_id:
+            return self._available_classes_response(
+                ctx,
+                member_last_intent=INTENT_RESERVE_CLASS,
+                auto_confirm_single=True,
+            )
+
+        if not class_id.isdigit():
+            return self._available_classes_response(
+                ctx,
+                member_last_intent=INTENT_RESERVE_CLASS,
+                auto_confirm_single=True,
+                class_type_query=class_id,
+            )
+
+        verify_resp = self.crm_flow.ensure_crm_verification(
+            ctx.msg,
+            ctx.conv,
+            ctx.lang,
+            post_intent=INTENT_RESERVE_CLASS,
+            post_slots={"class_id": class_id},
+        )
+        if verify_resp:
+            return verify_resp
+
+        member_id = ctx.conv.get("crm_member_id")
+        if not member_id:
+            return self._member_not_linked_reply(ctx)
+
+        return self.crm_flow.reserve_class_with_id_core(
+            ctx.msg,
+            ctx.lang,
+            class_id=class_id,
+            member_id=member_id,
+        )
+
+    def _handle_ticket_like(self, ctx: RoutingContext) -> list[Action]:
+        self._upsert_conv(ctx.msg, ctx.lang, ctx.intent, STATE_AWAITING_TICKET_CONFIRMATION)
+        return self._template_reply(ctx.msg, ctx.lang, "ticket_confirm_create")
+
+    def _handle_available_classes(self, ctx: RoutingContext) -> list[Action]:
+        return self._available_classes_response(
+            ctx,
+            member_last_intent=INTENT_AVAILABLE_CLASSES,
+            auto_confirm_single=False,
+        )
+
+    def _available_classes_response(
+        self,
+        ctx: RoutingContext,
+        *,
+        member_last_intent: str,
+        auto_confirm_single: bool,
+        class_type_query: str | None = None,
+    ) -> list[Action]:
+        if not self.crm_flow.is_crm_member(ctx.msg.tenant_id, ctx.msg.from_phone):
+            self._upsert_conv(ctx.msg, ctx.lang, INTENT_AVAILABLE_CLASSES, STATE_AWAITING_MESSAGE)
+            return self.crm_flow.build_available_classes_response(
+                ctx.msg,
+                ctx.lang,
+                auto_confirm_single=False,
+                class_type_query=class_type_query,
+                allow_selection=False,
+            )
+
+        self._upsert_conv(ctx.msg, ctx.lang, member_last_intent, STATE_AWAITING_CLASS_SELECTION)
+        return self.crm_flow.build_available_classes_response(
+            ctx.msg,
+            ctx.lang,
+            auto_confirm_single=auto_confirm_single,
+            class_type_query=class_type_query,
+        )
+
+    def _handle_contract_status(self, ctx: RoutingContext) -> list[Action]:
+        return self._handle_verified_member_action(
+            ctx,
+            post_intent=INTENT_CONTRACT_STATUS,
+            action=lambda member_id: self.crm_flow.crm_contract_status_core(
+                ctx.msg,
+                ctx.lang,
+                member_id,
+            ),
+        )
+
+    def _handle_member_balance(self, ctx: RoutingContext) -> list[Action]:
+        return self._handle_verified_member_action(
+            ctx,
+            post_intent=INTENT_CRM_MEMBER_BALANCE,
+            action=lambda member_id: self.crm_flow.crm_member_balance_core(
+                ctx.msg,
+                ctx.lang,
+                member_id,
+            ),
+        )
+
+    def _handle_verification(self, ctx: RoutingContext) -> list[Action]:
+        return self._handle_verified_member_action(
+            ctx,
+            post_intent=INTENT_CONTRACT_STATUS,
+            action=lambda member_id: self.crm_flow.verification_active(
+                ctx.msg,
+                ctx.lang,
+                member_id,
+            ),
+        )
+
+    def _handle_verified_member_action(
+        self,
+        ctx: RoutingContext,
+        *,
+        post_intent: str,
+        action: Callable[[str], list[Action]],
+    ) -> list[Action]:
+        verify_resp = self.crm_flow.ensure_crm_verification(
+            ctx.msg,
+            ctx.conv,
+            ctx.lang,
+            post_intent=post_intent,
+            post_slots=ctx.slots,
+        )
+        if verify_resp:
+            return verify_resp
+
+        member_id = ctx.conv.get("crm_member_id")
+        if not member_id:
+            return self._member_not_linked_reply(ctx)
+
+        return action(member_id)

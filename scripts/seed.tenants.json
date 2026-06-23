@@ -4,9 +4,10 @@
       "PutRequest": {
         "Item": {
 			"tenant_id": { "S": "clubProactiveIT" },
-			"language_code": { "S": "en" },
-			"twilio_to": { "S": "whatsapp:+14155238886" },
+			"language_code": { "S": "pl" },
+			"twilio_to": { "S": "whatsapp:+48694017163" },				
 			"return_url": { "S": "https://www.proactiveit.pl/en/home" },
+			"wa_phone_number_id": { "S": "968119183054141" },
 
 			"email": {
 			  "M": {
@@ -19,9 +20,9 @@
 
 			"kb_parameters": {
 			  "M": {
-				"kb_smalltalk_min_score": { "N": 0.35 }
-				"kb_vector_min_score_low": { "N": 0.43 }
-				"kb_vector_fastpath_min_score": { "N": 0.50 }
+				"kb_smalltalk_min_score": { "N": "0.35" },
+				"kb_vector_min_score_low": { "N": "0.43" },
+				"kb_vector_fastpath_min_score": { "N": "0.50" }
 			  }
 			},
 
@@ -55,6 +56,15 @@
 				"index_host": { "S": "https://faq-mx5j5y9.svc.aped-4627-b74a.pinecone.io" },
 				"api_key_param": { "S": "/botman/prod/clubProactiveIT/pc_api_key" }
 			  }
+			},
+
+			"whatsapp_cloud": {
+			  "M": {
+				"access_token_param": { "S": "/botman/prod/clubProactiveIT/wa_access_token" },
+				"api_version": { "S": "v25.0" },
+				"app_secret_param": { "S": "/botman/prod/clubProactiveIT/wa_app_secret" },
+				"verify_token": { "S": "hello whatsapp" }
+			  }
 			}
 		}
 	  }
@@ -64,30 +74,30 @@
         "Item": {
 			"tenant_id": { "S": "default" },
 			"language_code": { "S": "en" },
-			"twilio_to": { "S": "whatsapp:+1400000000" },
-			"return_url": { "S": "https://www.proactiveit.pl/en/home" },"return_url": { "S": "https://www.proactiveit.pl/en/home" },
+			"twilio_to": { "S": "whatsapp:+14155238886" },
+			"return_url": { "S": "https://www.proactiveit.pl/en/home" },
 
 			"email": {
 			  "M": {
 				"enabled": { "BOOL": true },
-				"from_email": { "S": "no-reply@default.pl" },
-				"from_name": { "S": "default" },
+				"from_email": { "S": "no-reply@proactiveit.pl" },
+				"from_name": { "S": "ProActive" },
 				"region": { "S": "eu-central-1" }
 			  }
 			},
 
 			"kb_parameters": {
 			  "M": {
-				"kb_smalltalk_min_score": { "N": 0.35 }
-				"kb_vector_min_score_low": { "N": 0.43 }
-				"kb_vector_fastpath_min_score": { "N": 0.50 }
+				"kb_smalltalk_min_score": { "N": "0.35" },
+				"kb_vector_min_score_low": { "N": "0.43" },
+				"kb_vector_fastpath_min_score": { "N": "0.50" }
 			  }
 			},
 
 			"twilio": {
 			  "M": {
-				"account_sid_param": { "S": "/botman/prod/default/twilio_sid" },
-				"auth_token_param": { "S": "/botman/prod/default/twilio_token" },
+				"account_sid_param": { "S": "/botman/prod/clubProactiveIT/twilio_sid" },
+				"auth_token_param": { "S": "/botman/prod/clubProactiveIT/twilio_token" },
 				"messaging_service_sid": { "S": "" }
 			  }
 			},
@@ -95,19 +105,19 @@
 			"pg": {
 			  "M": {
 				"base_url": { "S": "https://fth.perfectgym.com/api/v2.2/odata" },
-				"client_id_param": { "S": "/botman/prod/default/pg_client_id" },
-				"client_secret_param": { "S": "/botman/prod/default/pg_client_secret" }
+				"client_id_param": { "S": "/botman/prod/clubProactiveIT/pg_client_id" },
+				"client_secret_param": { "S": "/botman/prod/clubProactiveIT/pg_client_secret" }
 			  }
 			},
 
 			"jira": {
 			  "M": {
 				"url": { "S": "https://gym-proactiveit.atlassian.net" },
-				"token_param": { "S": "/botman/prod/default/jira_token" },
+				"token_param": { "S": "/botman/prod/clubProactiveIT/jira_token" },
 				"project_key": { "S": "KAN" },
 				"issue_type_name": { "S": "Task" }
-			}
-		  },
+			  }
+			},
 
 			"pinecone": {
 			  "M": {

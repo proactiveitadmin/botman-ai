@@ -36,6 +36,7 @@ from ..common.constants import (
     SYSTEM_PROMPT_LANG_SECOND,
     SYSTEM_PROMPT_NO_LANG,
     SYSTEM_PROMPT_HISTORY,
+    FALLBACK_REDACTED_MESSAGE,
 )
 
 from openai import OpenAI
@@ -112,6 +113,11 @@ class OpenAIClient:
                     "intent": INTENT_CLARIFY,
                     "confidence": 0.49,
                     "slots": {"echo": user_msg[:80]},
+                    "redacted_message": FALLBACK_REDACTED_MESSAGE ,
+                    "sensitive_data": {
+                        "present": True,
+                        "categories": ["other"],
+                    },
                 }
             )
 
@@ -247,6 +253,11 @@ class OpenAIClient:
                 "intent": INTENT_CLARIFY,
                 "confidence": 0.3,
                 "slots": {"note": note},
+                "redacted_message": FALLBACK_REDACTED_MESSAGE ,
+                "sensitive_data": {
+                    "present": True,
+                    "categories": ["other"],
+                },
             }
         )
 
@@ -273,26 +284,17 @@ class OpenAIClient:
             extra={"prompt": "intent_classification", "lang": lang},
         ):
             messages = [
-            {"role": "system", "content": SYSTEM_PROMPT_INTENT},
+            {
+                "role": "system", 
+                "content": SYSTEM_PROMPT_INTENT
+            },
             {
                 "role": "user",
-                "content": (
-                    f"LANG={lang}\nTEXT={text}\n\n"
-                    "Respond strictly in json according to the specification above."
-                ),
+                "content": (f"LANG={lang}\nTEXT={text}\n\n"),
             },
             ]
 
         prompt_size = sum(len(m.get("content") or "") for m in messages)
-        logger.warning(
-            {
-                "component": "openai_client",
-                "event": "prompt_size",
-                "prompt": "intent_classification",
-                "size_chars": prompt_size,
-                "messages": len(messages),
-            }
-        )
 
         content = self.chat(messages, model=self.model, max_tokens=256)
         return self._parse_classification(content)
@@ -311,33 +313,102 @@ class OpenAIClient:
 
     def _parse_classification(self, content: str) -> Dict[str, Any]:
         """
-        Normalizuje odpowiedź modelu do słownika o polach:
-        - intent: jedna z wartości _VALID_INTENTS (lub 'clarify' w razie błędu),
-        - confidence: float 0..1,
-        - slots: słownik z dodatkowymi informacjami.
+        Normalizuje odpowiedź modelu do słownika:
+        {
+            "intent": str,
+            "confidence": float (0..1),
+            "slots": {{}},
+            "redacted_message": str | None
+            "sensitive_data": {
+                "present": bool,
+                "categories": list[str]
+            },
+        }
         """
+
+        default_response = {
+            "intent": INTENT_CLARIFY,
+            "confidence": 0.3,
+            "slots": {},
+            "redacted_message": FALLBACK_REDACTED_MESSAGE ,
+            "sensitive_data": {
+                "present": True,
+                "categories": ["other"],
+            },
+        }
+
         try:
             data = json.loads(content or "{}")
-        except Exception:
-            return {"intent": INTENT_CLARIFY, "confidence": 0.3, "slots": {}}
 
+            if not isinstance(data, dict):
+                return default_response
+
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                {
+                    "component": "openai_client",
+                    "event": "_parse_classification",
+                    "error": "JSONDecodeError",
+                }
+            )
+            return default_response
+
+        # intent
         intent = str(data.get("intent", INTENT_CLARIFY)).strip()
         if intent not in _VALID_INTENTS:
             intent = INTENT_CLARIFY
 
-        # confidence -> float 0..1
+        # confidence
         try:
-            conf = float(data.get("confidence", 0.5))
-        except Exception:
-            conf = 0.5
-        conf = max(0.0, min(1.0, conf))
+            confidence = float(data.get("confidence", 0.5))
+        except (TypeError, ValueError):
+            confidence = 0.1
+        confidence = max(0.0, min(1.0, confidence))
 
         slots = data.get("slots") or {}
         if not isinstance(slots, dict):
             slots = {}
         
-        return {"intent": intent, "confidence": conf, "slots": slots}
+        # redacted_message
+        redacted_message = data.get("redacted_message")
+        if redacted_message is None:
+            redacted_message = ""
+        if not isinstance(redacted_message, str):
+            redacted_message = FALLBACK_REDACTED_MESSAGE
 
+        # sensitive_data
+        sensitive_data = data.get("sensitive_data", {})
+
+        if not isinstance(sensitive_data, dict):
+            sensitive_data = {}
+
+        present = bool(sensitive_data.get("present", False))
+
+        categories = sensitive_data.get("categories", [])
+        if not isinstance(categories, list):
+            categories = []
+            
+        logger.info(
+            {
+                "component": "openai_client",
+                "event": "_parse_classification",
+                "intent": intent,
+                "confidence": confidence,
+                "redacted_message": redacted_message,
+                "present": present,
+                "categories": categories,
+            }
+        )
+        return {
+            "intent": intent,
+            "confidence": confidence,
+            "slots": slots,
+            "redacted_message": redacted_message,
+            "sensitive_data": {
+                "present": present,
+                "categories": categories,
+            },
+        }
     # ---------------------------------------------------------------------
     # Embeddings (for KB / vector retrieval)
     # ---------------------------------------------------------------------

@@ -1707,6 +1707,34 @@ aws dynamodb put-item `
   --table-name $tableName `
   --region $region `
   --item $item
+# ==== 49. reject_words ====
+
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reject_words#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reject_words"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "nie,nie.,odmowa,odmawiam,anuluj,stop,nie chcę,nie chce,rezygnuję,rezygnuje,nigdy"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
 
 
 # ==== 49. today_words (pl) ====
@@ -1845,6 +1873,61 @@ aws dynamodb put-item `
     },
     "body": {
         "S": "Przykro mi, ale nie udało się wygenerować linka do płatności. Proszę spróbować później lub skontaktować się z recepcją."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_confirm_create#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_confirm_create"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "Czy chcesz utworzyć zgłoszenie do recepcji? Odpowiedz: tak lub nie."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_cancelled#pl"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_cancelled"
+    },
+    "language_code": {
+        "S": "pl"
+    },
+    "body": {
+        "S": "OK, nie utworzyłem zgłoszenia. Jeśli zmienisz zdanie, napisz ponownie."
     },
     "placeholders": {
         "L": []

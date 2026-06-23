@@ -1597,6 +1597,34 @@ aws dynamodb put-item `
   --region $region `
   --item $item
 
+# ==== 49. reject_words (EN) ====
+
+$item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#reject_words#en"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "reject_words"
+    },
+    "language_code": {
+        "S": "en"
+    },
+    "body": {
+        "S": "no,no.,reject,decline,cancel,stop,nope,never,not interested,i don't want,i do not want"
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
 # ==== 49. confirm_words (EN) ====
 
 $item = @'
@@ -1761,6 +1789,61 @@ aws dynamodb put-item `
     },
     "body": {
         "S": "Sorry, but the payment link could not be generated. Please try again later or contact reception."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_confirm_create#en"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_confirm_create"
+    },
+    "language_code": {
+        "S": "en"
+    },
+    "body": {
+        "S": "Would you like me to create a support request for the reception desk? Reply: yes or no."
+    },
+    "placeholders": {
+        "L": []
+    }
+}
+'@
+
+aws dynamodb put-item `
+  --table-name $tableName `
+  --region $region `
+  --item $item
+  
+  $item = @'
+{
+    "pk": {
+        "S": "clubProactiveIT#ticket_cancelled#en"
+    },
+    "tenant_id": {
+        "S": "clubProactiveIT"
+    },
+    "template_code": {
+        "S": "ticket_cancelled"
+    },
+    "language_code": {
+        "S": "en"
+    },
+    "body": {
+        "S": "OK, I have not created the request. If you change your mind, just send another message."
     },
     "placeholders": {
         "L": []
