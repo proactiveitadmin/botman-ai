@@ -2,6 +2,13 @@ from src.services.routing_service import RoutingService
 from src.domain.models import Message, Action
 from tests.conftest import wire_subservices
 import src.services.routing_service as routing_module
+from src.common.constants import (
+    CRM_CONFIRM_WORDS,
+    CRM_REJECT_WORDS,
+    STATE_AWAITING_TICKET_CONFIRMATION,
+    STATE_AWAITING_TICKET_COMMENT,
+    STATE_AWAITING_MESSAGE,
+)
 
 def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     called = {"nlu_called": False}
@@ -78,7 +85,14 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
     monkeypatch.setattr(svc.crm_flow, "ensure_crm_verification", lambda *a, **k: None)
     monkeypatch.setattr(routing_module, "history_fetch_limit", 10, raising=False)
-    
+    def fake_get_words_set(tenant_id, key, lang):
+        if key == CRM_CONFIRM_WORDS:
+            return {"tak", "t", "yes"}
+        if key == CRM_REJECT_WORDS:
+            return {"nie", "n", "no"}
+        return set()
+    monkeypatch.setattr(svc.crm_flow, "_get_words_set", fake_get_words_set)
+        
     # krok 1: intent=handover (precomputed) -> prosba o komentarz, bez ticketa
     msg1 = Message(
         tenant_id="t-1",
@@ -92,13 +106,30 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     )
     actions1 = svc.handle(msg1)
 
-    assert not called["nlu_called"]
+    #i tak wolamy NLU bo teraz mamy redagowanie tresci - ukrywanie danych wrazliwych
+    assert called["nlu_called"]
     assert not svc.ticketing.calls, "Ticket nie powinien powstać w 1. kroku handover (bot prosi o komentarz)."
     assert len(actions1) == 1
     assert actions1[0].type == "reply"
 
-    # krok 2: komentarz -> tworzymy ticket
+    # krok 2: zgoda -> czekamy na komentarz
     msg2 = Message(
+        tenant_id="t-1",
+        from_phone="+48123123123",
+        to_phone="+48xxx",
+        body="tak",
+        channel="whatsapp",
+        channel_user_id="whatsapp:+48123123123",
+    )
+    actions2 = svc.handle(msg2)
+
+    assert not svc.ticketing.calls, "Ticket nie powinien powstać po zgodzie (2. krok handover)."
+    assert len(actions2) == 1
+    assert actions2[0].type == "reply"
+    
+    
+    # krok 3: komentarz -> tworzymy ticket
+    msg3 = Message(
         tenant_id="t-1",
         from_phone="+48123123123",
         to_phone="+48xxx",
@@ -106,8 +137,8 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
         channel="whatsapp",
         channel_user_id="whatsapp:+48123123123",
     )
-    actions2 = svc.handle(msg2)
+    actions3 = svc.handle(msg3)
 
-    assert svc.ticketing.calls, "Ticket powinien powstać po komentarzu (2. krok handover)."
-    assert len(actions2) == 1
-    assert actions2[0].type == "reply"
+    assert svc.ticketing.calls, "Ticket powinien powstać po komentarzu (3. krok handover)."
+    assert len(actions3) == 1
+    assert actions3[0].type == "reply"

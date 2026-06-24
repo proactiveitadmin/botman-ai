@@ -63,6 +63,7 @@ def _get_verify_token(tenant_id: str | None) -> str:
             return token
 
     return (os.getenv("WHATSAPP_VERIFY_TOKEN") or "").strip()
+    
 def _verify_signature(body_bytes: bytes, header_sig: str, app_secret: str) -> bool:
     dev_mode = os.getenv("DEV_MODE", "false").lower() == "true"
     if dev_mode:

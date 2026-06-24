@@ -371,7 +371,8 @@ def test_faq_flow_to_outbound_queue(aws_stack, mock_ai, monkeypatch):
 def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch):
     """
     Nowy flow 'ticket' jest 2-etapowy:
-    1) intent=ticket -> bot prosi o komentarz (ticket_more_info) i ustawia stan
+    1) intent=ticket -> bot pyta czy utworzyc zgloszenie
+    2) zgoda -> bot prosi o komentarz (ticket_more_info) i ustawia stan
     2) kolejna wiadomość -> bot tworzy ticket (create_data_and_ticket) i wysyła ticket_created_ok
     """
     outbound_url = aws_stack["outbound"]
@@ -466,7 +467,7 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
 
     assert confirm, f"Nie znaleziono prośby o potwierdzenie. Outbound: {[p.get('body') for p in payloads_1]}"
 
-    # --- KROK 2: komentarz -> tworzymy ticket + potwierdzenie ---
+    # --- KROK 2: zgoda ->prosba o komentarz
     event2 = {
         "Records": [
             {
@@ -485,14 +486,49 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
 
     router_handler.lambda_handler(event2, None)
 
-    assert dummy_ticketing.calls
-    assert dummy_ticketing.calls[0]["tenant_id"] == "default"
-
+    assert not dummy_ticketing.calls
+    
     msgs_2 = _read_all_messages(outbound_url, max_msgs=10)
     payloads_2 = [json.loads(m["Body"]) for m in msgs_2]
 
-    created = [
+    comment = [
         p for p in payloads_2
+        if p.get("to") == "whatsapp:+48123123123"
+        and (
+            "ticket_more_info" in (p.get("body") or "")
+            or "komentarz" in (p.get("body") or "").lower()
+        )
+    ]
+
+    assert comment, f"Nie znaleziono prośby o komentarz. Outbound: {[p.get('body') for p in payloads_2]}"
+
+    # --- KROK 3: komentarz -> tworzymy ticket + potwierdzenie ---
+    event3 = {
+        "Records": [
+            {
+                "body": json.dumps(
+                    {
+                        "event_id": "evt-ticket-3",
+                        "from": "whatsapp:+48123123123",
+                        "to": "whatsapp:+48000000000",
+                        "body": "ok",
+                        "tenant_id": "default",
+                    }
+                )
+            }
+        ]
+    }
+
+    router_handler.lambda_handler(event3, None)
+
+    assert dummy_ticketing.calls
+    assert dummy_ticketing.calls[0]["tenant_id"] == "default"
+
+    msgs_3 = _read_all_messages(outbound_url, max_msgs=10)
+    payloads_3 = [json.loads(m["Body"]) for m in msgs_3]
+
+    created = [
+        p for p in payloads_3
         if p.get("to") == "whatsapp:+48123123123"
         and (
             "ABC-123" in (p.get("body") or "")
@@ -500,7 +536,7 @@ def test_ticket_flow_sends_confirmation_to_outbound_queue(aws_stack, monkeypatch
         )
     ]
 
-    assert created, f"Nie znaleziono potwierdzenia utworzenia ticketa. Outbound: {[p.get('body') for p in payloads_2]}"
+    assert created, f"Nie znaleziono potwierdzenia utworzenia ticketa. Outbound: {[p.get('body') for p in payloads_3]}"
 
 def test_reservation_flow_with_email_otp(aws_stack, mock_ai, mock_pg, monkeypatch, router):
     outbound_url = aws_stack["outbound"]

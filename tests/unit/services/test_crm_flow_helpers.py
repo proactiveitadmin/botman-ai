@@ -300,6 +300,7 @@ def test_handle_class_selection_invalid_index(msg):
 
     actions = svc.handle_class_selection(msg, "pl")
 
+    assert actions
     assert action_body(actions[0]) == "Wybierz numer 1-1"
 
 

@@ -3,6 +3,11 @@ import pytest
 from src.domain.models import Message
 from src.services.crm_flow_service import CRMFlowService
 from tests.helpers.fakes_routing import InMemoryConversations
+from src.common.constants import (
+    CRM_CONFIRM_WORDS,
+    CRM_REJECT_WORDS,
+)
+
 
 
 class FakeTemplateService:
@@ -147,7 +152,7 @@ def test_marketing_optin_confirm_yes_calls_crm_and_clears_pending(crm_flow, conv
     assert conv.get(pk, "pending") is None
 
 
-def test_marketing_confirm_anything_else_cancels_and_clears_pending(crm_flow, conv, crm):
+def test_marketing_confirm_anything_else_clears_pending(crm_flow, conv, crm):
     tenant_id = "t1"
     phone = "+48123123123"
     member_id = 789
@@ -162,6 +167,35 @@ def test_marketing_confirm_anything_else_cancels_and_clears_pending(crm_flow, co
         from_phone=phone,
         to_phone="bot",
         body="hmm nie jestem pewien",
+        channel="whatsapp",
+        channel_user_id=phone,
+    )
+
+    actions = crm_flow.handle_pending_confirmation(msg, lang="pl")
+    assert actions is None
+    # no CRM calls
+    assert crm.revoke_calls == []
+    assert crm.grant_calls == []
+
+    # pending cleared
+    assert conv.get(pk, "pending") is None
+
+
+def test_marketing_confirm_no_cancels_and_clears_pending(crm_flow, conv, crm):
+    tenant_id = "t1"
+    phone = "+48123123123"
+    member_id = 789
+
+    _setup_conv_with_member(conv, tenant_id, phone, member_id)
+
+    pk = f"pending#{phone}"
+    _put_pending(conv, pk, kind="marketing_optout")
+
+    msg = Message(
+        tenant_id=tenant_id,
+        from_phone=phone,
+        to_phone="bot",
+        body="nie",
         channel="whatsapp",
         channel_user_id=phone,
     )

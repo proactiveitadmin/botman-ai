@@ -128,7 +128,7 @@ class CRMFlowService:
             channel_user_id=channel_user_id,
         )
 
-    def extract_date_time(text: str) -> Tuple[Optional[str], Optional[str]]:
+    def _extract_date_time(self, text: str) -> Tuple[Optional[str], Optional[str]]:
         """
         Obsługuje formaty:
         - yyyy-mm-dd
@@ -942,13 +942,10 @@ class CRMFlowService:
         if not items:
             return None
 
-        if actions := self._handle_class_selection_by_index(msg, lang, text, items):
+        if actions := self._handle_class_selection_by_index_or_date(msg, lang, text, items):
             return actions
 
         if actions := self._handle_class_selection_today(msg, lang, text, items):
-            return actions
-
-        if actions := self._handle_class_selection_by_date(msg, lang, text, items):
             return actions
 
         return None
@@ -966,8 +963,19 @@ class CRMFlowService:
             selected = next((item for item in items if item.get("index") == index), None)
             if selected:
                 return self._start_reservation_from_selection(msg, lang, selected)
- 
-        date_str, time_str = extract_date_time(text)
+        
+        max_index = max(
+            int(item.get("index") or 0)
+            for item in items
+        )
+
+        return self._reply_template(
+            msg,
+            lang,
+            "crm_available_classes_invalid_index",
+            {"max_index": max_index},
+        )
+        date_str, time_str = self._extract_date_time(text)
 
         if date_str:
             same_day = [item for item in items if item.get("date") == date_str]
@@ -1114,6 +1122,7 @@ class CRMFlowService:
         decision = self._confirmation_decision(msg, lang)
 
         if decision is None:
+            self._delete_pending(msg)
             return None
 
         is_confirmed = decision == CRM_CONFIRMED

@@ -2,6 +2,13 @@ from src.services.routing_service import RoutingService
 from src.domain.models import Message
 from tests.conftest import wire_subservices
 import src.services.routing_service as routing_module
+from src.common.constants import (
+    CRM_CONFIRM_WORDS,
+    CRM_REJECT_WORDS,
+    STATE_AWAITING_TICKET_CONFIRMATION,
+    STATE_AWAITING_TICKET_COMMENT,
+    STATE_AWAITING_MESSAGE,
+)
 
 def test_ticket_payload_contains_history_and_meta(monkeypatch):
     class DummyNLU:
@@ -89,7 +96,15 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     monkeypatch.setattr(svc.language, "_detect_language", lambda text: "pl")
     monkeypatch.setattr(svc.crm_flow, "ensure_crm_verification", lambda *a, **k: None)
     monkeypatch.setattr(routing_module, "history_fetch_limit", 10, raising=False)
-
+    
+    def fake_get_words_set(tenant_id, key, lang):
+        if key == CRM_CONFIRM_WORDS:
+            return {"tak", "t", "yes"}
+        if key == CRM_REJECT_WORDS:
+            return {"nie", "n", "no"}
+        return set()
+    monkeypatch.setattr(svc.crm_flow, "_get_words_set", fake_get_words_set)
+        
     # --- krok 1: intent=ticket -> bot prosi o komentarz, NIE tworzy ticketa ---
     msg1 = Message(
         tenant_id="t-1",
@@ -101,6 +116,7 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
         intent="ticket",
         slots={"summary": "Problem z karnetem", "description": "Użytkownik zgłasza problem z karnetem."},
     )
+
     actions1 = svc.handle(msg1)
 
     assert actions1
@@ -117,10 +133,7 @@ def test_ticket_payload_contains_history_and_meta(monkeypatch):
     )
     actions2 = svc.handle(msg2)
 
-
-    actions1 = svc.handle(msg1)
-
-    assert actions1
+    assert actions2
     assert len(svc.ticketing.calls) == 0, "Ticket nie powinien być tworzony w 2. kroku (bot prosi o komentarz)."
     
     # --- krok 3: komentarz -> dopiero teraz tworzy się ticket ---

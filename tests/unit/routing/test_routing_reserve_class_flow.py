@@ -283,8 +283,9 @@ def test_reserve_class_selection_does_not_hit_nlu_and_starts_email_otp_challenge
     msg2 = _make_msg("1")
     actions2 = routing.handle(msg2)
 
-    # KLUCZOWE: druga wiadomość nie powinna trafić do NLU
-    assert len(routing.nlu.calls) == 1, "NLU nie powinno być wywołane dla '1'"
+    # dawniej: KLUCZOWE: druga wiadomość nie powinna trafić do NLU
+    # teraz zmiany: nlu jest wywolywane do redakcji wiadomosci i ukrywanie danych wrazliwych
+    assert len(routing.nlu.calls) == 2, "NLU powinno być wywołane dla '1'"
 
     # Bot powinien zainicjować challenge (email OTP) i poprosić o kod
     assert len(actions2) == 1

@@ -21,8 +21,8 @@ def test_verify_signature_real(monkeypatch):
     secret = "s"
     import hmac, hashlib
     good = hmac.new(secret.encode("utf-8"), raw.encode("utf-8"), hashlib.sha256).hexdigest()
-    assert wh._verify_signature(raw, f"sha256={good}", secret) is True
-    assert wh._verify_signature(raw, f"sha256={'0'*64}", secret) is False
+    assert wh._verify_signature(raw.encode("utf-8"), f"sha256={good}", secret) is True
+    assert wh._verify_signature(raw.encode("utf-8"), f"sha256={'0'*64}", secret) is False
 
 
 def test_handle_get_success(monkeypatch):
