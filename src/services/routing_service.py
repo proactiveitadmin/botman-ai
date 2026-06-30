@@ -226,6 +226,9 @@ class RoutingService:
 
     def _member_not_linked_reply(self, ctx: RoutingContext) -> list[Action]:
         return self._template_reply(ctx.msg, ctx.lang, "crm_member_not_linked")
+        
+    def _reserve_class_declined_reply(self, ctx: RoutingContext) -> list[Action]:
+        return self._template_reply(ctx.msg, ctx.lang, "reserve_class_declined")
 
     # ---------------------------------------------------------------------
     # Logowanie i historia
@@ -486,12 +489,6 @@ class RoutingService:
             ctx.lang,
         )
 
-        logger.info({
-            "event": "ticket_confirmation_words_debug",
-            "text": text,
-            "reject_words": list(reject_words),
-            "confirm_words": list(confirm_words),
-        })
         if text in reject_words:
             self._upsert_conv(
                 ctx.msg,
@@ -586,8 +583,19 @@ class RoutingService:
         return [self._reply(ctx.msg, ctx.lang, body)]
 
     def _handle_reserve_class(self, ctx: RoutingContext) -> list[Action]:
-        class_id = (ctx.slots.get("class_id") or "").strip()
+        text = (ctx.msg.body or "").strip().lower()
+        
+        reject_words = self.crm_flow._get_words_set(
+            ctx.msg.tenant_id,
+            CRM_REJECT_WORDS,
+            ctx.lang,
+        )
 
+        if text in reject_words:
+            return self._reserve_class_declined_reply(ctx)
+        
+        class_id = (ctx.slots.get("class_id") or "").strip()
+            
         if not class_id:
             return self._available_classes_response(
                 ctx,

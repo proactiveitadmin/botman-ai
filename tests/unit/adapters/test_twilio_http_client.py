@@ -42,7 +42,7 @@ def test_messages_create_validates_required_params(monkeypatch):
 def test_messages_create_success(monkeypatch):
     resp = DummyResp(ok=True, status_code=201, json_payload={"sid": "SM123"})
     sess = DummySession(resp)
-    monkeypatch.setattr(tw, "get_session", lambda: sess)
+    monkeypatch.setattr(tw, "get_pooled_session", lambda pool_key: sess)
 
     c = tw.Client("AC123", "token")
     m = c.messages.create(to="whatsapp:+1", body="hello", from_="whatsapp:+2")
@@ -56,7 +56,7 @@ def test_messages_create_success(monkeypatch):
 def test_messages_create_non_ok_raises(monkeypatch):
     resp = DummyResp(ok=False, status_code=400, json_payload={"message": "bad"}, text="BAD")
     sess = DummySession(resp)
-    monkeypatch.setattr(tw, "get_session", lambda: sess)
+    monkeypatch.setattr(tw, "get_pooled_session", lambda pool_key: sess)
 
     c = tw.Client("AC123", "token")
     with pytest.raises(RuntimeError) as e:
@@ -67,7 +67,7 @@ def test_messages_create_non_ok_raises(monkeypatch):
 def test_messages_create_json_decode_fallback(monkeypatch):
     resp = DummyResp(ok=False, status_code=500, json_payload=ValueError("no json"), text="OK")
     sess = DummySession(resp)
-    monkeypatch.setattr(tw, "get_session", lambda: sess)
+    monkeypatch.setattr(tw, "get_pooled_session", lambda pool_key: sess)
 
     c = tw.Client("AC123", "token")
     with pytest.raises(RuntimeError) as e:

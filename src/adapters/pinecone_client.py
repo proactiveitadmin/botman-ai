@@ -16,8 +16,8 @@ from typing import Any, Dict, List, Optional
 import time
 import random
 import requests
-import traceback
 
+from .http_session import get_pooled_session, session_key_for_url
 from ..common.logging_utils import logger
 from ..common.config import settings
 from ..common.timing import timed
@@ -43,6 +43,7 @@ class PineconeClient:
         self.index_host = (index_host or "").replace("https://", "").replace("http://", "").strip("/")
         self.timeout_s = timeout_s
         self.enabled = bool(self.api_key and self.index_host)
+        self._session_key = session_key_for_url(self.index_host or "pinecone", prefix="pinecone")
     
     @classmethod
     def from_tenant_config(cls, tenant_cfg: dict) -> "PineconeClient":
@@ -58,6 +59,9 @@ class PineconeClient:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #        
+    def _session(self) -> requests.Session:
+        return get_pooled_session(self._session_key)
+
     def _headers(self) -> Dict[str, str]:
         return {
             "Api-Key": self.api_key,
@@ -95,7 +99,7 @@ class PineconeClient:
                         component="pinecone_client",
                         extra={"attempt": attempt + 1, "timeout_s": self.timeout_s},
                     ):
-                        r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
+                        r = self._session().post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
 
                     if 200 <= r.status_code < 300:
                         logger.warning({
@@ -177,7 +181,7 @@ class PineconeClient:
                         component="pinecone_client",
                         extra={"attempt": attempt + 1, "timeout_s": self.timeout_s},
                     ):
-                        r = requests.post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
+                        r = self._session().post(url, headers=self._headers(), json=payload, timeout=self.timeout_s)
 
                     if 200 <= r.status_code < 300:
                         data = r.json() or {}

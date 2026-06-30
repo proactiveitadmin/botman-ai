@@ -25,6 +25,23 @@ class DummyResp:
         return self._payload
 
 
+class DummySession:
+    def __init__(self, request):
+        self.request = request
+
+
+def _patch_session(monkeypatch, client, request):
+    session = DummySession(request)
+    monkeypatch.setattr(client, "_session", lambda: session)
+    return session
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep(monkeypatch):
+    monkeypatch.setattr(pg_mod.time, "sleep", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pg_mod.random, "uniform", lambda *_args, **_kwargs: 1.0)
+
+
 def test_get_member_without_base_url_returns_fallback(monkeypatch):
     
     client = PerfectGymClient()
@@ -60,7 +77,7 @@ def test_get_member_ok(monkeypatch):
         called["timeout"] = timeout
         return DummyResp(payload={"Id": 123, "name": "John"})
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_member("123")
     assert resp["Id"] == 123
@@ -81,7 +98,7 @@ def test_get_member_by_phone_error_logs_and_returns_empty(monkeypatch, capsys):
         assert method == "GET"
         raise pg_mod.requests.RequestException("boom")
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_member_by_phone("+48123123123")
     assert resp == {"value": []}
@@ -118,7 +135,7 @@ def test_reserve_class_post_error(monkeypatch):
         assert method == "POST"
         raise pg_mod.requests.RequestException("boom")
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.reserve_class(member_id="10", class_id="20", idempotency_key="KEY")
     assert resp["ok"] is False
@@ -139,7 +156,7 @@ def test_reserve_class_http_error(monkeypatch):
         assert method == "POST"
         return DummyResp(status_code=400, text="Bad Request", raise_http=True)
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.reserve_class(member_id="10", class_id="20")
     assert resp["ok"] is False
@@ -174,7 +191,7 @@ def test_reserve_class_http_error_classes_already_booked_is_mapped(monkeypatch):
         # PG zwraca 4xx + JSON z errors
         return DummyResp(status_code=400, payload=payload, text=jsonlib.dumps(payload), raise_http=True)
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.reserve_class(member_id="10", class_id="20")
 
@@ -202,7 +219,7 @@ def test_reserve_class_success(monkeypatch):
         captured["timeout"] = timeout
         return DummyResp(status_code=201, payload={"ok": True})
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.reserve_class(member_id="10", class_id="30", idempotency_key="IDEMP", allow_overlap=True)
     assert resp["ok"] is True
@@ -212,7 +229,27 @@ def test_reserve_class_success(monkeypatch):
     assert captured["json"]["memberId"] == 10
     assert captured["json"]["classId"] == 30
     assert captured["json"]["bookDespiteOtherBookingsAtTheSameTime"] is True
+    assert "comments" not in captured["json"]
     assert captured["headers"]["Idempotency-Key"] == "IDEMP"
+
+
+def test_reserve_class_passes_comments_only_when_provided(monkeypatch):
+    client = PerfectGymClient()
+    monkeypatch.setattr(client, "base_url", "https://pg.example/api/v2.2/odata", raising=False)
+    monkeypatch.setattr(client, "client_id", "id", raising=False)
+    monkeypatch.setattr(client, "client_secret", "secret", raising=False)
+
+    captured = {}
+
+    def fake_request(method, url, json=None, headers=None, timeout=None, **kwargs):
+        captured["json"] = json
+        return DummyResp(status_code=201, payload={"ok": True})
+
+    _patch_session(monkeypatch, client, fake_request)
+
+    resp = client.reserve_class(member_id="10", class_id="30", comments="user provided note")
+    assert resp["ok"] is True
+    assert captured["json"]["comments"] == "user provided note"
 
 
 def test_get_available_classes_success(monkeypatch):
@@ -233,7 +270,7 @@ def test_get_available_classes_success(monkeypatch):
         captured["timeout"] = timeout
         return DummyResp(payload={"value": [{"id": 1}]})
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_available_classes(top=5)
     assert resp["value"][0]["id"] == 1
@@ -258,7 +295,7 @@ def test_get_available_classes_error(monkeypatch):
         assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_available_classes()
     assert resp == {"value": []}
@@ -281,7 +318,7 @@ def test_get_contract_by_member_id_success(monkeypatch):
         })
 
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_contract_by_member_id("123")
     assert resp["id"] == "1"
@@ -299,7 +336,7 @@ def test_get_contract_by_member_id_error(monkeypatch):
         assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_contract_by_member_id("123")
     assert resp == {}
@@ -309,7 +346,7 @@ def test_get_member_balance_dev_mode(monkeypatch):
     
     client = PerfectGymClient()
     
-    monkeypatch.setattr(client, "base_url", "https://pg.example/api/v2.2/odata", raising=False)
+    monkeypatch.setattr(client, "base_url", "", raising=False)
     monkeypatch.setattr(client, "client_id", "id", raising=False)
     monkeypatch.setattr(client, "client_secret", "secret", raising=False)
 
@@ -339,7 +376,7 @@ def test_get_member_balance_success(monkeypatch):
             }
         )
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_member_balance(123)
     assert resp["prepaidBalance"] == 10
@@ -360,7 +397,7 @@ def test_get_member_balance_error(monkeypatch):
         assert method == "GET"
         raise pg_mod.requests.RequestException("err")
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_member_balance(123)
     assert resp["currentBalance"] == 0
@@ -371,7 +408,7 @@ def test_get_class_no_base_url_returns_empty(monkeypatch):
     
     client = PerfectGymClient()
     
-    monkeypatch.setattr(client, "base_url", "https://pg.example/api/v2.2/odata", raising=False)
+    monkeypatch.setattr(client, "base_url", "", raising=False)
     monkeypatch.setattr(client, "client_id", "id", raising=False)
     monkeypatch.setattr(client, "client_secret", "secret", raising=False)
 
@@ -393,7 +430,7 @@ def test_get_class_success_with_collection(monkeypatch):
         captured["url"] = url
         return DummyResp(payload={"value": [{"id": 1, "name": "Yoga"}]})
 
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    _patch_session(monkeypatch, client, fake_request)
 
     resp = client.get_class("1")  # string ID
     assert resp["id"] == 1

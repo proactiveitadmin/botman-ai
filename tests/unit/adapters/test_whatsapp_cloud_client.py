@@ -51,7 +51,7 @@ def test_send_text_missing_destination():
 
 def test_send_text_network_exception(monkeypatch):
     sess = DummySession(exc=RuntimeError('net'))
-    monkeypatch.setattr('src.adapters.whatsapp_cloud_client.get_session', lambda: sess)
+    monkeypatch.setattr('src.adapters.whatsapp_cloud_client.get_session', lambda *_args, **_kwargs: sess)
 
     c = WhatsAppCloudClient(access_token='t', phone_number_id='pid')
     out = c.send_text('+48123', 'hi')
@@ -68,7 +68,7 @@ def test_send_text_http_error_parses_text(monkeypatch):
     resp.json = boom_json  # type: ignore
 
     sess = DummySession(resp=resp)
-    monkeypatch.setattr('src.adapters.whatsapp_cloud_client.get_session', lambda: sess)
+    monkeypatch.setattr('src.adapters.whatsapp_cloud_client.get_session', lambda *_args, **_kwargs: sess)
 
     c = WhatsAppCloudClient(access_token='t', phone_number_id='pid')
     out = c.send_text('whatsapp:+48123', 'hi')
@@ -80,7 +80,7 @@ def test_send_text_http_error_parses_text(monkeypatch):
 def test_send_text_success_extracts_message_id(monkeypatch):
     resp = DummyResp(ok=True, status_code=200, json_data={"messages": [{"id": "mid"}]}, text='{}')
     sess = DummySession(resp=resp)
-    monkeypatch.setattr('src.adapters.whatsapp_cloud_client.get_session', lambda: sess)
+    monkeypatch.setattr('src.adapters.whatsapp_cloud_client.get_session', lambda *_args, **_kwargs: sess)
 
     c = WhatsAppCloudClient(access_token='t', phone_number_id='pid', api_version='v20.0')
     out = c.send_text('whatsapp:+48123', 'hello')

@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from ..common.http_client import get_session
+from .http_session import get_pooled_session
 
 
 @dataclass
@@ -62,7 +62,7 @@ class _MessagesResource:
         if from_:
             data["From"] = from_
 
-        s = get_session()
+        s = get_pooled_session("twilio_api")
         try:
             resp = s.post(url, data=data, auth=(self._account_sid, self._auth_token), timeout=12)
         except Exception as e:

@@ -26,6 +26,24 @@ class DummyResponseError(DummyResponseOK):
         super().__init__(payload={"key": "JIRA-ERR"}, status_code=500, ok=False)
 
 
+class DummySession:
+    def __init__(self, response=None, exc=None):
+        self.response = response
+        self.exc = exc
+        self.calls = []
+
+    def post(self, url, headers=None, data=None, timeout=None):
+        self.calls.append({"url": url, "headers": headers, "data": data, "timeout": timeout})
+        if self.exc:
+            raise self.exc
+        return self.response
+
+
+def _patch_session(monkeypatch, client, session):
+    monkeypatch.setattr(client, "_session", lambda: session)
+    return session
+
+
 def test_auth_header_with_basic_token(monkeypatch):
     client = JiraClient()
     monkeypatch.setattr(client, "token", "user:pass", raising=False)
@@ -74,12 +92,11 @@ def test_create_ticket_dev_mode(monkeypatch):
     monkeypatch.setattr(client, "issue_type_name", "Task", raising=False)
 
     # gdyby jednak create_ticket próbował zrobić POST, to chcemy od razu faila
-    import src.adapters.jira_client as jira_mod
+    class UnexpectedSession:
+        def post(self, *args, **kwargs):
+            raise AssertionError("HTTP session nie powinna być wołana w trybie dev")
 
-    def _unexpected_post(*args, **kwargs):
-        raise AssertionError("requests.post nie powinien być wołany w trybie dev")
-
-    monkeypatch.setattr(jira_mod, "requests", type("R", (), {"post": _unexpected_post}))
+    _patch_session(monkeypatch, client, UnexpectedSession())
 
     res = client.create_ticket(
         summary="Test ticket",
@@ -95,7 +112,6 @@ def test_create_ticket_success(monkeypatch):
     """
     Normalny przypadek z prawdziwym URL – symulujemy udane utworzenie ticketa.
     """
-    import src.adapters.jira_client as jira_mod
     client = JiraClient()
 
     monkeypatch.setattr(client, "url", "https://example.atlassian.net", raising=False)
@@ -103,11 +119,7 @@ def test_create_ticket_success(monkeypatch):
     monkeypatch.setattr(client, "issue_type_name", "Task", raising=False)
     monkeypatch.setattr(client, "token", "user:pass", raising=False)
 
-    monkeypatch.setattr(
-        jira_mod,
-        "requests",
-        type("R", (), {"post": staticmethod(lambda *a, **k: DummyResponseOK())}),
-    )
+    session = _patch_session(monkeypatch, client, DummySession(DummyResponseOK()))
 
     res = client.create_ticket(
         summary="Test",
@@ -117,6 +129,7 @@ def test_create_ticket_success(monkeypatch):
     )
     assert res["ok"] is True
     assert res["ticket"] == "JIRA-123"
+    assert session.calls[0]["url"].endswith("/rest/api/3/issue")
 
 
 def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
@@ -124,7 +137,6 @@ def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
     Ścieżka: r.ok == False -> wypisywane są logi błędu, ale funkcja nie rzuca wyjątku
     (bo raise_for_status w stubie nic nie robi).
     """
-    import src.adapters.jira_client as jira_mod
     client = JiraClient()
 
     monkeypatch.setattr(client, "url", "https://example.atlassian.net", raising=False)
@@ -132,11 +144,7 @@ def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
     monkeypatch.setattr(client, "issue_type_name", "Task", raising=False)
     monkeypatch.setattr(client, "token", "user:pass", raising=False)
 
-    monkeypatch.setattr(
-        jira_mod,
-        "requests",
-        type("R", (), {"post": staticmethod(lambda *a, **k: DummyResponseError())}),
-    )
+    session = _patch_session(monkeypatch, client, DummySession(DummyResponseError()))
 
     res = client.create_ticket(
         summary="Test err",
@@ -150,3 +158,4 @@ def test_create_ticket_logs_non_ok_but_returns_key(monkeypatch, capsys):
     assert "Jira error status" in combined
     assert res["ok"] is True
     assert res["ticket"] == "JIRA-ERR"
+    assert session.calls[0]["timeout"] == 10

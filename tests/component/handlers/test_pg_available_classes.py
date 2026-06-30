@@ -7,13 +7,34 @@ from src.services.routing_service import RoutingService
 from tests.helpers.fakes_routing import InMemoryConversations, FakeTenantsRepo, FakeTemplateServicePG
 
 
-def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
-    # 1) Ustaw bazowy URL PerfectGym 
-    client = PerfectGymClient()
-    monkeypatch.setattr(client, "base_url", "https://example.perfectgym.com")
+class DummyResp:
+    def __init__(self, status_code=200, payload=None, text="OK", headers=None):
+        self.status_code = status_code
+        self._payload = payload or {}
+        self.text = text
+        self.headers = headers or {}
 
-    # 2) Mock dokładnie tego URL, który wywołuje PerfectGymClient
-    url = client.base_url.rstrip("/") + "/Classes"
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class DummySession:
+    def __init__(self, response):
+        self.response = response
+        self.calls = []
+
+    def request(self, method, url, **kwargs):
+        self.calls.append({"method": method, "url": url, **kwargs})
+        return self.response
+
+
+def test_crm_available_classes_happy_path(mock_ai, monkeypatch):
+    client = PerfectGymClient()
+    monkeypatch.setattr(client, "base_url", "https://example.perfectgym.com", raising=False)
+
     mock_payload = {
         "value": [
             {
@@ -25,30 +46,19 @@ def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
             }
         ]
     }
+    session = DummySession(DummyResp(payload=mock_payload))
+    monkeypatch.setattr(client, "_session", lambda: session)
 
-
-    requests_mock.get(url, json=mock_payload, status_code=200)
-
-    # 3) In-memory ConversationsRepo – bez DynamoDB
     conv = InMemoryConversations()
-
-    # 4) Fake TenantsRepo – żeby LanguageService miało fallback bez DynamoDB
     tenants = FakeTenantsRepo(lang="en")
-
-    # 5) Fake TemplateService – renderuje listę zajęć
     tpl = FakeTemplateServicePG()
-
-    # 6) CRMService używa PerfectGymClient -> requests_mock przechwyci requests.get
     crm = CRMService(client=client)
-
-    # 7) LanguageService z tenants (żeby nie iść do prawdziwego TenantsRepo)
     language = LanguageService(conv=conv, tenants=tenants)
-
     router = RoutingService(conv=conv, tenants=tenants, tpl=tpl, crm=crm, language=language)
 
     # stub detekcji języka (unikamy AWS Comprehend)
     monkeypatch.setattr(router.language, "_detect_language", lambda text: "pl")
-    monkeypatch.setattr(router.crm_flow,"is_crm_member",lambda tenant_id, phone: True,)
+    monkeypatch.setattr(router.crm_flow, "is_crm_member", lambda tenant_id, phone: True)
 
     msg = Message(
         tenant_id="tenantA",
@@ -63,6 +73,10 @@ def test_crm_available_classes_happy_path(requests_mock, mock_ai, monkeypatch):
     assert len(actions) == 1
     assert actions[0].type == "reply"
     assert "Zumba" in actions[0].payload["body"]
+
+    assert session.calls
+    assert session.calls[0]["method"] == "GET"
+    assert session.calls[0]["url"] == client.base_url.rstrip("/") + "/Classes"
 
     # sprawdzamy, że stan i pending są ustawione
     pk = "pending#" + msg.from_phone

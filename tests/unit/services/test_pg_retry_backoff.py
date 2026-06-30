@@ -1,4 +1,3 @@
-import pytest
 from src.adapters.perfectgym_client import PerfectGymClient
 from src.common.config import settings
 import src.adapters.perfectgym_client as pg_mod
@@ -19,8 +18,12 @@ class DummyResp:
         return self._payload
 
 
+class DummySession:
+    def __init__(self, request):
+        self.request = request
+
+
 def test_pg_retries_on_429_then_succeeds(monkeypatch):
-    
     client = PerfectGymClient()
     monkeypatch.setattr(client, "base_url", "https://pg.example/api/v2.2/odata", raising=False)
     monkeypatch.setattr(client, "client_id", "id", raising=False)
@@ -49,7 +52,7 @@ def test_pg_retries_on_429_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(pg_mod.time, "sleep", fake_sleep)
     monkeypatch.setattr(pg_mod.random, "uniform", fake_uniform)
-    monkeypatch.setattr(pg_mod.requests, "request", fake_request)
+    monkeypatch.setattr(client, "_session", lambda: DummySession(fake_request))
 
     resp = client.get_member("1")
     assert resp["Id"] == 1

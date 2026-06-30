@@ -16,6 +16,17 @@ class DummyResp:
         return self._json_data
 
 
+class DummySession:
+    def __init__(self, post):
+        self.post = post
+
+
+def _patch_session(monkeypatch, client, post):
+    session = DummySession(post)
+    monkeypatch.setattr(client, "_session", lambda: session)
+    return session
+
+
 def test_from_tenant_config_handles_non_dict():
     c = PineconeClient.from_tenant_config({"pinecone": "nope"})
     assert isinstance(c, PineconeClient)
@@ -36,7 +47,7 @@ def test_upsert_success(monkeypatch):
         assert json['namespace'] == 'ns'
         return DummyResp(status_code=201, json_data={"upsertedCount": 1}, text='{}')
 
-    monkeypatch.setattr('src.adapters.pinecone_client.requests.post', fake_post)
+    _patch_session(monkeypatch, c, fake_post)
     assert c.upsert(vectors=[{"id": "1", "values": [0.1]}], namespace='ns', max_attempts=1) is True
 
 
@@ -69,7 +80,7 @@ def test_query_success_parses_matches(monkeypatch):
             text='{"matches":[]}',
         )
 
-    monkeypatch.setattr('src.adapters.pinecone_client.requests.post', fake_post)
+    _patch_session(monkeypatch, c, fake_post)
 
     out = c.query(vector=[0.0, 0.0, 0.0], namespace='ns', max_attempts=1)
     assert [m.id for m in out] == ['a', 'b']
@@ -89,7 +100,7 @@ def test_query_retries_and_fails(monkeypatch):
         calls["n"] += 1
         return DummyResp(status_code=500, json_data=None, text='err')
 
-    monkeypatch.setattr('src.adapters.pinecone_client.requests.post', fake_post)
+    _patch_session(monkeypatch, c, fake_post)
     monkeypatch.setattr('src.adapters.pinecone_client.time.sleep', lambda s: None)
     monkeypatch.setattr('src.adapters.pinecone_client.random.random', lambda: 0.0)
 

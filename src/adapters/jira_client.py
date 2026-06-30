@@ -1,4 +1,5 @@
 import base64, requests, json
+from .http_session import get_pooled_session, session_key_for_url
 from ..common.logging import logger
 from ..common.config import settings
 
@@ -15,6 +16,7 @@ class JiraClient:
         self.url = (url or "").rstrip("/")
         self.project = (project_key or "").strip()
         self.token = (token or "").strip()
+        self._session_key = session_key_for_url(self.url or "jira", prefix="jira")
 
     @classmethod
     def from_tenant_config(cls, tenant_cfg: dict) -> "JiraClient":
@@ -29,6 +31,9 @@ class JiraClient:
             issue_type_name=j.get("issue_type_name") or j.get("issue_type"),
         )
 
+
+    def _session(self) -> requests.Session:
+        return get_pooled_session(self._session_key)
 
     def _auth_header(self):
         # Jira Cloud commonly uses Basic auth: email:api_token
@@ -101,7 +106,7 @@ class JiraClient:
             "Accept": "application/json",
             **self._auth_header(),
         }
-        r = requests.post(endpoint, headers=headers, data=json.dumps(payload), timeout=10)
+        r = self._session().post(endpoint, headers=headers, data=json.dumps(payload), timeout=10)
         
         if not r.ok:
             try:

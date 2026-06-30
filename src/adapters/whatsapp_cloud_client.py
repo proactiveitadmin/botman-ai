@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-import json
 import requests
-import urllib.request
-import urllib.error
 from dataclasses import dataclass
 
+from .http_session import get_pooled_session, session_key_for_url
 from ..common.logging import logger
 from ..common.logging_utils import mask_phone, shorten_body
 
-_SESSION = None
 
 
 def _strip_whatsapp_prefix(v: str) -> str:
@@ -33,11 +30,12 @@ def _normalize_to_msisdn(to: str) -> str:
         s = s[1:]
     return s
 
-def get_session():
-    global _SESSION
-    if _SESSION is None:
-        _SESSION = requests.Session()
-    return _SESSION
+def get_session(phone_number_id: str | None = None) -> requests.Session:
+    pool_key = session_key_for_url("graph.facebook.com", prefix="whatsapp_cloud")
+    if phone_number_id:
+        # Keep the key independent from credentials but explicit for diagnostics/tests.
+        pool_key = f"{pool_key}:{phone_number_id}"
+    return get_pooled_session(pool_key)
 
 
 @dataclass
@@ -70,8 +68,6 @@ class WhatsAppCloudClient:
         wa = (tenant_cfg or {}).get("whatsapp_cloud") or (tenant_cfg or {}).get("whatsapp") or {}
         if not isinstance(wa, dict):
             wa = {}
-        local_access_token=(wa.get("access_token") or "").strip() or None
-
         return cls(
             access_token=(wa.get("access_token") or "").strip() or None,
             phone_number_id=(tenant_cfg or {}).get("wa_phone_number_id"),
@@ -104,7 +100,7 @@ class WhatsAppCloudClient:
         }
 
         try:
-            sess = get_session()
+            sess = get_session(self.phone_number_id)
             resp = sess.post(
                 url,
                 json=payload,

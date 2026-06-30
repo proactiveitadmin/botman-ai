@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+from .http_session import get_pooled_session, session_key_for_url
 from ..common.config import settings
 from ..common.constants import CRM_MARKETING_AGREEMENT_ID
 from ..common.logging import logger
@@ -36,6 +37,7 @@ class PerfectGymClient:
         self.client_id = client_id or ""
         self.client_secret = client_secret or ""
         self.logger = logger
+        self._session_key = session_key_for_url(self.base_url or "perfectgym", prefix="perfectgym")
 
     @classmethod
     def from_tenant_config(cls, tenant_cfg: dict | None) -> "PerfectGymClient":
@@ -64,6 +66,9 @@ class PerfectGymClient:
     @property
     def is_odata_url(self) -> bool:
         return self.base_url.lower().endswith("/odata")
+
+    def _session(self) -> requests.Session:
+        return get_pooled_session(self._session_key)
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -149,7 +154,7 @@ class PerfectGymClient:
         for attempt in range(1, max_attempts + 1):
             response: requests.Response | None = None
             try:
-                response = requests.request(method, url, **kwargs)
+                response = self._session().request(method, url, **kwargs)
                 if (
                     response.status_code in self.TRANSIENT_STATUS_CODES
                     and attempt < max_attempts
@@ -372,8 +377,9 @@ class PerfectGymClient:
                 "memberId": self._coerce_int(member_id, "member_id"),
                 "classId": self._coerce_int(class_id, "class_id"),
                 "bookDespiteOtherBookingsAtTheSameTime": bool(allow_overlap),
-                "comments": comments or "booked by Dialo WhatsApp",
             }
+            if comments is not None:
+                payload["comments"] = comments
         except ValueError as exc:
             return {
                 "ok": False,
