@@ -316,20 +316,19 @@ class RoutingService:
         """
         Opakowanie NLU.
 
-        Gdy `msg.intent` jest już ustawiony, używamy go jako źródła prawdy,
-        ale nadal próbujemy wywołać NLU, żeby uzyskać redacted_message do logów.
+        Nie wywolujemy juz NLU do redakcji wiadomości - przetrzymujemy 
+        wiadomości przez jakis czas w historii (30 dni) po czym ją czyścimy. 
         """
         fallback_sensitive_data = {"present": False, "categories": []}
         fallback_body = msg.body or ""
 
         if msg.intent:
-            redacted_message = self._try_redact_message(msg, lang, fallback_body)
             return (
                 msg.intent,
                 msg.slots or {},
                 DEFAULT_NLU_CONFIDENCE,
                 fallback_sensitive_data,
-                redacted_message,
+                msg,
             )
 
         try:

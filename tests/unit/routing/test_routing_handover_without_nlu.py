@@ -106,8 +106,8 @@ def test_handover_without_nlu_uses_precomputed_intent(monkeypatch):
     )
     actions1 = svc.handle(msg1)
 
-    #i tak wolamy NLU bo teraz mamy redagowanie tresci - ukrywanie danych wrazliwych
-    assert called["nlu_called"]
+    #nie wołamy NLU
+    assert not called["nlu_called"]
     assert not svc.ticketing.calls, "Ticket nie powinien powstać w 1. kroku handover (bot prosi o komentarz)."
     assert len(actions1) == 1
     assert actions1[0].type == "reply"
